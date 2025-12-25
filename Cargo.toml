@@ -12,6 +12,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
 hex = "0.4"
+libc = "0.2"
 md5 = "0.7"
 memchr = "2"
 num_cpus = "1"
@@ -28,3 +29,4 @@ tempfile = "3"
 
 [features]
 default = []
+ewf = []

@@ -31,11 +31,20 @@ pub struct CarvedFile {
     pub pattern_id: Option<String>,
 }
 
-#[derive(Debug)]
 pub struct ExtractionContext<'a> {
     pub run_id: &'a str,
     pub output_root: &'a Path,
     pub evidence: &'a dyn EvidenceSource,
+}
+
+impl<'a> std::fmt::Debug for ExtractionContext<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExtractionContext")
+            .field("run_id", &self.run_id)
+            .field("output_root", &self.output_root)
+            .field("evidence", &"<dyn EvidenceSource>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Error)]

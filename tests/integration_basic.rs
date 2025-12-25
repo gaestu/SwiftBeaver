@@ -18,7 +18,7 @@ fn insert_bytes(target: &mut Vec<u8>, offset: usize, data: &[u8]) {
 fn sample_jpeg() -> Vec<u8> {
     let mut data = vec![0u8; 32];
     data[0..4].copy_from_slice(&[0xFF, 0xD8, 0xFF, 0xE0]);
-    data[4..10].copy_from_slice(b"JFIF\0");
+    data[4..9].copy_from_slice(b"JFIF\0");
     data[30..32].copy_from_slice(&[0xFF, 0xD9]);
     data
 }

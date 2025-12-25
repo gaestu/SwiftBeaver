@@ -8,6 +8,12 @@ High-speed, forensic-grade file and artefact carver (Phase 1: CPU-only core).
 cargo run -- --input /path/to/image.dd --output ./output
 ```
 
+E01 input (requires `libewf`):
+
+```bash
+cargo run --features ewf -- --input /path/to/image.E01 --output ./output
+```
+
 This creates a run directory under `./output/<run_id>/` with:
 
 - `carved/` - carved files per type
@@ -52,7 +58,7 @@ See `docs/architecture.md` for details.
 
 ## Notes
 
-- Only raw files are supported in Phase 1.
+- E01 support is available when built with `--features ewf` and requires `libewf` installed.
 - GPU and string scanning are not implemented yet.
 
 ## License

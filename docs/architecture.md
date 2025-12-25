@@ -4,7 +4,7 @@ Phase 1 focuses on CPU-only carving of JPEG/PNG/GIF from raw disk images.
 
 ## Pipeline
 
-1. **EvidenceSource** reads a raw file into a linear byte space.
+1. **EvidenceSource** reads a raw file (or E01 when built with `--features ewf`) into a linear byte space.
 2. **Chunk scheduler** splits the image into overlapping chunks.
 3. **CPU signature scanner** searches for file headers within each chunk.
 4. **Carve workers** validate and extract files from the evidence source.
