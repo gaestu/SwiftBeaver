@@ -158,6 +158,7 @@ fn integration_carves_basic_formats() {
 
     let meta_sink = metadata::build_sink(
         MetadataBackendKind::Jsonl,
+        &cfg,
         &cfg.run_id,
         "0.1.0",
         &loaded.config_hash,

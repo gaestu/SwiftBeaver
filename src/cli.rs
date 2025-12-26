@@ -6,6 +6,7 @@ use clap::{Parser, ValueEnum};
 pub enum MetadataBackend {
     Jsonl,
     Csv,
+    Parquet,
 }
 
 #[derive(Parser, Debug)]
@@ -50,8 +51,25 @@ pub struct CliOptions {
     /// Override minimum string length when scanning
     #[arg(long)]
     pub string_min_len: Option<usize>,
+
+    /// Disable ZIP carving (skips zip/docx/xlsx/pptx)
+    #[arg(long)]
+    pub disable_zip: bool,
 }
 
 pub fn parse() -> CliOptions {
     CliOptions::parse()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CliOptions;
+    use clap::Parser;
+
+    #[test]
+    fn parses_disable_zip_flag() {
+        let opts = CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--disable-zip"])
+            .expect("parse");
+        assert!(opts.disable_zip);
+    }
 }

@@ -3,6 +3,10 @@ overlap_bytes: 65536
 enable_string_scan: false
 string_min_len: 6
 string_max_len: 1024
+gpu_max_hits_per_chunk: 1000000
+parquet_row_group_size: 10000
+opencl_platform_index:
+opencl_device_index:
 file_types:
   - id: "jpeg"
     extensions: ["jpg", "jpeg"]
@@ -60,6 +64,7 @@ file_types:
     max_size: 104857600
     min_size: 32
     validator: "zip"
+    require_eocd: true
   - id: "webp"
     extensions: ["webp"]
     header_patterns:

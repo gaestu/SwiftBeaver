@@ -237,6 +237,7 @@ pub struct Hit {
     pub chunk_id: u64,
     pub local_offset: u64,
     pub pattern_id: String,
+    pub file_type_id: String,
 }
 
 pub trait SignatureScanner: Send + Sync {
@@ -250,9 +251,9 @@ pub trait SignatureScanner: Send + Sync {
 * Optionally uses Rayon internally for intra-chunk parallelism.
 * Configurable patterns loaded from configuration.
 
-#### GPU implementation (`scanner::gpu`, feature `gpu`)
+#### GPU implementation (`scanner::opencl`/`scanner::cuda`, features `gpu-opencl`/`gpu-cuda`)
 
-* Available when compiled with `--features gpu`.
+* Available when compiled with `--features gpu-opencl` (alias `gpu`) or `--features gpu-cuda`.
 * Uses CUDA or OpenCL to:
 
   * Copy chunk data to device (or use mapped memory).
@@ -467,8 +468,8 @@ Start with `JsonlSink` + `CsvSink` (simplest for v1).
 
 ## 5. GPU Integration Strategy
 
-* Build with feature flag: `--features gpu`.
-* Under `scanner::gpu` and `strings::gpu`:
+* Build with feature flag: `--features gpu-opencl` (alias `gpu`) or `--features gpu-cuda`.
+* Under `scanner::opencl`/`scanner::cuda` and `strings::opencl`/`strings::cuda`:
 
   * use CUDA/OpenCL wrappers.
 * If GPU is unavailable or fails:
@@ -819,8 +820,10 @@ pub fn open_source(opts: &CliOptions) -> Result<Box<dyn EvidenceSource>, Evidenc
 
 ```rust
 pub mod cpu;
-#[cfg(feature = "gpu")]
-pub mod gpu;
+#[cfg(feature = "gpu-opencl")]
+pub mod opencl;
+#[cfg(feature = "gpu-cuda")]
+pub mod cuda;
 
 use crate::chunk::ScanChunk;
 

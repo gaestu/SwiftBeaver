@@ -1,6 +1,8 @@
 pub mod cpu;
-#[cfg(feature = "gpu")]
-pub mod gpu;
+#[cfg(feature = "gpu-opencl")]
+pub mod opencl;
+#[cfg(feature = "gpu-cuda")]
+pub mod cuda;
 
 use crate::chunk::ScanChunk;
 
@@ -22,14 +24,21 @@ use tracing::warn;
 
 pub fn build_string_scanner(cfg: &Config, use_gpu: bool) -> Result<Box<dyn StringScanner>> {
     if use_gpu {
-        #[cfg(feature = "gpu")]
+        #[cfg(feature = "gpu-opencl")]
         {
-            return Ok(Box::new(gpu::GpuStringScanner::new(
-                cfg.string_min_len,
-                cfg.string_max_len,
-            )));
+            match opencl::OpenClStringScanner::new(cfg) {
+                Ok(scanner) => return Ok(Box::new(scanner)),
+                Err(err) => warn!("opencl string scanner init failed: {err}; falling back to cpu"),
+            }
         }
-        #[cfg(not(feature = "gpu"))]
+        #[cfg(feature = "gpu-cuda")]
+        {
+            match cuda::CudaStringScanner::new(cfg) {
+                Ok(scanner) => return Ok(Box::new(scanner)),
+                Err(err) => warn!("cuda string scanner init failed: {err}; falling back to cpu"),
+            }
+        }
+        #[cfg(not(any(feature = "gpu-opencl", feature = "gpu-cuda")))]
         {
             warn!("gpu flag set but binary built without gpu feature, falling back to cpu");
         }

@@ -1,5 +1,6 @@
 pub mod jsonl;
 pub mod csv;
+pub mod parquet;
 
 use std::path::Path;
 
@@ -12,6 +13,7 @@ use crate::strings::artifacts::StringArtefact;
 pub enum MetadataBackendKind {
     Jsonl,
     Csv,
+    Parquet,
 }
 
 #[derive(Debug, Error)]
@@ -35,6 +37,7 @@ pub trait MetadataSink: Send + Sync {
 
 pub fn build_sink(
     backend: MetadataBackendKind,
+    cfg: &crate::config::Config,
     run_id: &str,
     tool_version: &str,
     config_hash: &str,
@@ -59,5 +62,14 @@ pub fn build_sink(
             evidence_sha256,
             run_output_dir,
         )?)),
+        MetadataBackendKind::Parquet => parquet::build_parquet_sink(
+            cfg,
+            run_id,
+            tool_version,
+            config_hash,
+            evidence_path,
+            evidence_sha256,
+            run_output_dir,
+        ),
     }
 }

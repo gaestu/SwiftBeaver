@@ -1,24 +1,27 @@
 # GPU Signature Scanner
 
+Status: Implemented  
+Implemented in version: 0.1.0
+
 ## Problem statement
 
 Signature scanning on multi-terabyte images is CPU-bound in Phase 2. We need a GPU-accelerated scanner that can search header patterns faster when data is resident in RAM or on fast storage.
 
 ## Scope
 
-- Provide a GPU-backed `SignatureScanner` behind feature flag `gpu`.
+- Provide a GPU-backed `SignatureScanner` behind feature flag `gpu-opencl` (alias `gpu`).
 - Select GPU scanner when `--gpu` is set.
 - Fall back to CPU when GPU is unavailable or the backend is not implemented.
 
 ## Non-goals
 
 - GPU string scanning (tracked separately).
-- Implementing CUDA/OpenCL kernels in this iteration.
+- CUDA backend (future work).
 
 ## Design notes
 
-- `scanner::gpu::GpuScanner` wraps a CPU fallback for now.
-- `scanner::build_signature_scanner(cfg, use_gpu)` selects GPU when available.
+- `scanner::opencl::OpenClScanner` implements OpenCL scanning with CPU fallback.
+- `scanner::build_signature_scanner(cfg, use_gpu)` selects OpenCL when available.
 - Logging warns when GPU is requested but unavailable.
 
 ## Expected tests
@@ -28,4 +31,4 @@ Signature scanning on multi-terabyte images is CPU-bound in Phase 2. We need a G
 ## Impact on docs and README
 
 - Document the `--gpu` flag and `--features gpu` build.
-- Note the CPU fallback until a real GPU backend is implemented.
+- Note the OpenCL backend and CPU fallback behavior.

@@ -335,6 +335,7 @@ mod tests {
             metadata_backend: MetadataBackend::Jsonl,
             scan_strings: false,
             string_min_len: None,
+            disable_zip: false,
         };
 
         let result = super::open_source(&opts);

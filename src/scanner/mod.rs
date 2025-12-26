@@ -1,6 +1,8 @@
 pub mod cpu;
-#[cfg(feature = "gpu")]
-pub mod gpu;
+#[cfg(feature = "gpu-opencl")]
+pub mod opencl;
+#[cfg(feature = "gpu-cuda")]
+pub mod cuda;
 
 use crate::chunk::ScanChunk;
 
@@ -29,13 +31,23 @@ use tracing::warn;
 
 pub fn build_signature_scanner(cfg: &Config, use_gpu: bool) -> Result<Box<dyn SignatureScanner>> {
     if use_gpu {
-        #[cfg(feature = "gpu")]
+        #[cfg(feature = "gpu-opencl")]
         {
-            return Ok(Box::new(gpu::GpuScanner::new(cfg)?));
+            match opencl::OpenClScanner::new(cfg) {
+                Ok(scanner) => return Ok(Box::new(scanner)),
+                Err(err) => warn!("opencl scanner init failed: {err}; falling back to cpu"),
+            }
         }
-        #[cfg(not(feature = "gpu"))]
+        #[cfg(feature = "gpu-cuda")]
         {
-            warn!("gpu flag set but binary built without gpu feature, falling back to cpu");
+            match cuda::CudaScanner::new(cfg) {
+                Ok(scanner) => return Ok(Box::new(scanner)),
+                Err(err) => warn!("cuda scanner init failed: {err}; falling back to cpu"),
+            }
+        }
+        #[cfg(not(any(feature = "gpu-opencl", feature = "gpu-cuda")))]
+        {
+            warn!("gpu flag set but binary built without gpu backend, falling back to cpu");
         }
     }
     Ok(Box::new(cpu::CpuScanner::new(cfg)?))

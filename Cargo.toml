@@ -8,6 +8,8 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1"
+arrow-array = "51"
+arrow-schema = "51"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
@@ -18,6 +20,8 @@ md5 = "0.7"
 memchr = "2"
 num_cpus = "1"
 once_cell = "1"
+opencl3 = { version = "0.9", optional = true }
+parquet = "51"
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -34,4 +38,6 @@ tempfile = "3"
 [features]
 default = []
 ewf = []
-gpu = []
+gpu-opencl = ["opencl3"]
+gpu-cuda = []
+gpu = ["gpu-opencl"]

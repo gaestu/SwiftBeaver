@@ -26,6 +26,10 @@ fn main() -> Result<()> {
     if let Some(min_len) = cli_opts.string_min_len {
         cfg.string_min_len = min_len;
     }
+    if cli_opts.disable_zip {
+        cfg.file_types.retain(|ft| ft.id != "zip");
+        info!("zip carving disabled by CLI");
+    }
 
     let run_output_dir = cli_opts.output.join(&cfg.run_id);
     std::fs::create_dir_all(&run_output_dir)?;
@@ -49,6 +53,7 @@ fn main() -> Result<()> {
     let meta_backend = util::backend_from_cli(cli_opts.metadata_backend);
     let meta_sink = metadata::build_sink(
         meta_backend,
+        &cfg,
         &cfg.run_id,
         tool_version,
         &loaded.config_hash,

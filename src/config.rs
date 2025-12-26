@@ -13,6 +13,8 @@ pub struct FileTypeConfig {
     pub max_size: u64,
     pub min_size: u64,
     pub validator: String,
+    #[serde(default)]
+    pub require_eocd: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -30,6 +32,12 @@ pub struct Config {
     pub string_min_len: usize,
     #[serde(default = "default_string_max_len")]
     pub string_max_len: usize,
+    #[serde(default = "default_gpu_max_hits")]
+    pub gpu_max_hits_per_chunk: usize,
+    #[serde(default = "default_parquet_row_group_size")]
+    pub parquet_row_group_size: usize,
+    pub opencl_platform_index: Option<usize>,
+    pub opencl_device_index: Option<usize>,
     pub file_types: Vec<FileTypeConfig>,
 }
 
@@ -83,4 +91,12 @@ fn default_string_min_len() -> usize {
 
 fn default_string_max_len() -> usize {
     1024
+}
+
+fn default_gpu_max_hits() -> usize {
+    1_000_000
+}
+
+fn default_parquet_row_group_size() -> usize {
+    10_000
 }

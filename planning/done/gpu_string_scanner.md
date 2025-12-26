@@ -1,24 +1,27 @@
 # GPU String Scanner
 
+Status: Implemented  
+Implemented in version: 0.1.0
+
 ## Problem statement
 
 Printable string scanning across large images is CPU-heavy. We need a GPU-accelerated string scanner to quickly identify candidate spans for URL/email/phone extraction.
 
 ## Scope
 
-- Provide a GPU-backed `StringScanner` behind feature flag `gpu`.
+- Provide a GPU-backed `StringScanner` behind feature flag `gpu-opencl` (alias `gpu`).
 - Select GPU scanner when `--gpu` is set and string scanning is enabled.
 - Fall back to CPU when GPU is unavailable or the backend is not implemented.
 
 ## Non-goals
 
-- Implementing CUDA/OpenCL kernels in this iteration.
+- CUDA backend (future work).
 - UTF-16 string scanning (future work).
 
 ## Design notes
 
-- `strings::gpu::GpuStringScanner` wraps a CPU fallback for now.
-- `strings::build_string_scanner(cfg, use_gpu)` selects GPU when available.
+- `strings::opencl::OpenClStringScanner` uses OpenCL to build a printable mask and derives spans on CPU.
+- `strings::build_string_scanner(cfg, use_gpu)` selects OpenCL when available.
 - Logging warns when GPU is requested but unavailable.
 
 ## Expected tests
@@ -28,4 +31,4 @@ Printable string scanning across large images is CPU-heavy. We need a GPU-accele
 ## Impact on docs and README
 
 - Document the `--gpu` flag and `--features gpu` build for string scanning.
-- Note the CPU fallback until a real GPU backend is implemented.
+- Note the OpenCL backend and CPU fallback behavior.

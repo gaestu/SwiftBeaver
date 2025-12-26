@@ -426,6 +426,7 @@ fn build_carve_registry(cfg: &Config) -> CarveRegistry {
                         ext,
                         file_type.min_size,
                         file_type.max_size,
+                        file_type.require_eocd,
                     )),
                 );
             }
@@ -452,5 +453,6 @@ pub fn backend_from_cli(backend: crate::cli::MetadataBackend) -> MetadataBackend
     match backend {
         crate::cli::MetadataBackend::Jsonl => MetadataBackendKind::Jsonl,
         crate::cli::MetadataBackend::Csv => MetadataBackendKind::Csv,
+        crate::cli::MetadataBackend::Parquet => MetadataBackendKind::Parquet,
     }
 }

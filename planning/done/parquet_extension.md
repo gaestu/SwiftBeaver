@@ -1,5 +1,8 @@
 # Parquet Extension – Design & Module Specification
 
+Status: Implemented  
+Implemented in version: 0.1.0
+
 ## 1. Objective
 
 Add a **Parquet-based metadata backend** to the carver so that, for each run, the tool writes:
@@ -66,7 +69,7 @@ Define **logical Parquet output categories**:
 
 * **Strings**
 
-  * `strings_spans`
+  * `strings_spans` (not implemented; only artefacts are persisted)
 
 * **Artefacts**
 

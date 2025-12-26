@@ -1,7 +1,7 @@
 # Architecture (Phase 1)
 
 Phase 2 adds SQLite carving, string scanning, browser history extraction, and PDF/ZIP/WEBP carving.
-Phase 3 adds optional GPU-accelerated signature and string scanning (feature `gpu`), currently implemented as CPU fallback stubs.
+Phase 3 adds optional GPU-accelerated signature and string scanning (feature `gpu-opencl` or alias `gpu`), with CPU fallback when OpenCL is unavailable. A CUDA backend is planned.
 
 ## Pipeline
 
@@ -11,14 +11,14 @@ Phase 3 adds optional GPU-accelerated signature and string scanning (feature `gp
 4. **CPU string scanner** (optional) extracts printable spans and artefacts.
 5. **Carve workers** validate and extract files from the evidence source.
 6. **SQLite parser** extracts browser history from carved SQLite databases.
-7. **Metadata sink** writes JSONL or CSV records.
+7. **Metadata sink** writes JSONL, CSV, or Parquet records.
 
 ## Concurrency model
 
 - Reader thread: reads chunks and feeds scan jobs.
 - Scan workers: perform signature scanning and emit normalized hits.
 - Carve workers: validate/extract files and emit metadata.
-- Metadata writer: serializes JSONL records.
+- Metadata writer: serializes JSONL/CSV/Parquet records.
 
 ## Modules
 
@@ -28,4 +28,4 @@ Phase 3 adds optional GPU-accelerated signature and string scanning (feature `gp
 - `src/carve/` - file-type handlers
 - `src/strings/` - printable string scanning and artefact extraction
 - `src/parsers/sqlite_db.rs` - browser history parsing
-- `src/metadata/` - JSONL and CSV sinks
+- `src/metadata/` - JSONL, CSV, and Parquet sinks

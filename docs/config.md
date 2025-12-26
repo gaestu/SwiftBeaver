@@ -9,6 +9,10 @@ The default config is `config/default.yml`.
 - `enable_string_scan` (bool): enable printable string scanning.
 - `string_min_len` (usize): minimum printable string length.
 - `string_max_len` (usize): maximum string length per span.
+- `gpu_max_hits_per_chunk` (usize): maximum GPU hits per chunk (overflow truncates).
+- `parquet_row_group_size` (usize): max rows per Parquet row group.
+- `opencl_platform_index` (usize, optional): select OpenCL platform by index.
+- `opencl_device_index` (usize, optional): select OpenCL device by index.
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx based on central directory entries when present.
@@ -24,6 +28,7 @@ Each entry in `file_types` contains:
 - `max_size`: maximum carve size in bytes
 - `min_size`: minimum carve size in bytes
 - `validator`: logical handler name
+- `require_eocd`: optional; for ZIP, require an EOCD before carving (prevents large false positives)
 
 ## Example
 

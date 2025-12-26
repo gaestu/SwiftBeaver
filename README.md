@@ -17,13 +17,13 @@ cargo run --features ewf -- --input /path/to/image.E01 --output ./output
 GPU signature scanning (fallbacks to CPU if GPU is unavailable):
 
 ```bash
-cargo run --features gpu -- --input /path/to/image.dd --output ./output --gpu
+cargo run --features gpu-opencl -- --input /path/to/image.dd --output ./output --gpu
 ```
 
 GPU string scanning (fallbacks to CPU if GPU is unavailable and requires `--scan-strings`):
 
 ```bash
-cargo run --features gpu -- --input /path/to/image.dd --output ./output --gpu --scan-strings
+cargo run --features gpu-opencl -- --input /path/to/image.dd --output ./output --gpu --scan-strings
 ```
 
 String scanning (URLs/emails/phones):
@@ -59,6 +59,8 @@ CLI overrides:
 - `--scan-strings`: enables string scanning
 - `--string-min-len`: overrides `string_min_len` when set
 - `--metadata-backend csv`: write CSV instead of JSONL
+- `--metadata-backend parquet`: write Parquet instead of JSONL
+- `--disable-zip`: disable ZIP carving (skips zip/docx/xlsx/pptx)
 
 See `docs/config.md` for the full schema.
 
@@ -70,6 +72,7 @@ Browser history records (from carved SQLite) are recorded to `metadata/browser_h
 
 See `docs/metadata_jsonl.md` for the schema.
 CSV output is also available with `--metadata-backend csv` (see `docs/metadata_csv.md`).
+Parquet output is available with `--metadata-backend parquet` (see `docs/metadata_parquet.md`).
 
 ## Architecture
 
@@ -88,7 +91,8 @@ See `docs/architecture.md` for details.
 ## Notes
 
 - E01 support is available when built with `--features ewf` and requires `libewf` installed.
-- GPU signature and string scanning are stubbed and currently use CPU fallbacks until a real backend is added.
+- GPU signature and string scanning are implemented via OpenCL when built with `--features gpu-opencl` (or `--features gpu` as alias). CUDA backend is planned.
+- OpenCL builds require an ICD loader with `libOpenCL.so` available; install the dev package or provide a symlink if the linker cannot find `-lOpenCL`.
 
 ## License
 
