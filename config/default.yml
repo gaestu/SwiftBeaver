@@ -1,11 +1,17 @@
 run_id: ""
 overlap_bytes: 65536
 enable_string_scan: false
+enable_url_scan: true
+enable_email_scan: true
+enable_phone_scan: true
 string_scan_utf16: false
 string_min_len: 6
 string_max_len: 1024
 gpu_max_hits_per_chunk: 1000000
 parquet_row_group_size: 10000
+enable_entropy_detection: false
+entropy_window_size: 4096
+entropy_threshold: 7.5
 opencl_platform_index:
 opencl_device_index:
 file_types:

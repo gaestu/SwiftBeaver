@@ -20,6 +20,15 @@ pub struct RunSummary {
     pub artefacts_extracted: u64,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EntropyRegion {
+    pub run_id: String,
+    pub global_start: u64,
+    pub global_end: u64,
+    pub entropy: f64,
+    pub window_size: u64,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum MetadataBackendKind {
     Jsonl,
@@ -44,6 +53,7 @@ pub trait MetadataSink: Send + Sync {
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError>;
     fn record_history(&self, _record: &crate::parsers::browser::BrowserHistoryRecord) -> Result<(), MetadataError>;
     fn record_run_summary(&self, summary: &RunSummary) -> Result<(), MetadataError>;
+    fn record_entropy(&self, region: &EntropyRegion) -> Result<(), MetadataError>;
     fn flush(&self) -> Result<(), MetadataError>;
 }
 

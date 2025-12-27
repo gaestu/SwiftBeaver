@@ -7,11 +7,17 @@ The default config is `config/default.yml`.
 - `run_id` (string): optional; if empty, a timestamp-based ID is generated.
 - `overlap_bytes` (u64): overlap between chunks.
 - `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.
+- `enable_url_scan` (bool): enable URL extraction from string spans.
+- `enable_email_scan` (bool): enable email extraction from string spans.
+- `enable_phone_scan` (bool): enable phone extraction from string spans.
 - `string_scan_utf16` (bool): enable UTF-16LE/BE printable string scanning.
 - `string_min_len` (usize): minimum printable string length.
 - `string_max_len` (usize): maximum string length per span.
 - `gpu_max_hits_per_chunk` (usize): maximum GPU hits per chunk (overflow truncates).
 - `parquet_row_group_size` (usize): max rows per Parquet row group.
+- `enable_entropy_detection` (bool): enable entropy region detection.
+- `entropy_window_size` (usize): window size (bytes) used for entropy calculation.
+- `entropy_threshold` (float): entropy threshold for marking high-entropy regions.
 - `opencl_platform_index` (usize, optional): select OpenCL platform by index.
 - `opencl_device_index` (usize, optional): select OpenCL device by index.
 - `file_types` (list): enabled file types and patterns.

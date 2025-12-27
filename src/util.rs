@@ -14,7 +14,9 @@ use crate::evidence::EvidenceSource;
 use crate::metadata::{MetadataBackendKind, MetadataSink, RunSummary};
 use crate::scanner::{NormalizedHit, SignatureScanner};
 use crate::strings::{self, StringScanner, StringSpan};
+use crate::strings::artifacts::ArtefactScanConfig;
 use crate::carve;
+use crate::entropy;
 
 struct ScanJob {
     chunk: ScanChunk,
@@ -32,6 +34,13 @@ enum MetadataEvent {
     String(crate::strings::artifacts::StringArtefact),
     History(crate::parsers::browser::BrowserHistoryRecord),
     RunSummary(RunSummary),
+    Entropy(crate::metadata::EntropyRegion),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EntropyConfig {
+    window_size: usize,
+    threshold: f64,
 }
 
 pub fn run_pipeline(
@@ -70,6 +79,15 @@ pub fn run_pipeline(
 
     let meta_handle = spawn_metadata_thread(meta_sink, meta_rx);
 
+    let entropy_cfg = if cfg.enable_entropy_detection && cfg.entropy_window_size > 0 {
+        Some(EntropyConfig {
+            window_size: cfg.entropy_window_size,
+            threshold: cfg.entropy_threshold,
+        })
+    } else {
+        None
+    };
+
     let scan_handles = spawn_scan_workers(
         workers,
         sig_scanner.clone(),
@@ -77,6 +95,9 @@ pub fn run_pipeline(
         scan_rx,
         hit_tx.clone(),
         string_tx.clone(),
+        meta_tx.clone(),
+        cfg.run_id.clone(),
+        entropy_cfg,
         hits_found.clone(),
         string_spans.clone(),
     );
@@ -93,12 +114,18 @@ pub fn run_pipeline(
     );
 
     let string_handles = if let Some(rx) = string_rx {
+        let scan_cfg = ArtefactScanConfig {
+            urls: cfg.enable_url_scan,
+            emails: cfg.enable_email_scan,
+            phones: cfg.enable_phone_scan,
+        };
         spawn_string_workers(
             workers,
             cfg.run_id.clone(),
             rx,
             meta_tx.clone(),
             artefacts_found.clone(),
+            scan_cfg,
         )
     } else {
         Vec::new()
@@ -184,6 +211,11 @@ fn spawn_metadata_thread(
                         warn!("metadata record error: {err}");
                     }
                 }
+                MetadataEvent::Entropy(region) => {
+                    if let Err(err) = sink.record_entropy(&region) {
+                        warn!("metadata record error: {err}");
+                    }
+                }
             }
         }
         if let Err(err) = sink.flush() {
@@ -199,6 +231,9 @@ fn spawn_scan_workers(
     rx: Receiver<ScanJob>,
     hit_tx: Sender<NormalizedHit>,
     string_tx: Option<Sender<StringJob>>,
+    meta_tx: Sender<MetadataEvent>,
+    run_id: String,
+    entropy_cfg: Option<EntropyConfig>,
     hits_found: Arc<AtomicU64>,
     string_spans: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
@@ -213,9 +248,13 @@ fn spawn_scan_workers(
         let string_tx = string_tx.clone();
         let hits_found = hits_found.clone();
         let string_spans = string_spans.clone();
+        let meta_tx = meta_tx.clone();
+        let run_id = run_id.clone();
+        let entropy_cfg = entropy_cfg;
         handles.push(thread::spawn(move || {
             for job in rx {
                 let effective_valid = job.chunk.valid_length.min(job.data.len() as u64);
+                let valid_len = effective_valid as usize;
                 for hit in scanner.scan_chunk(&job.chunk, &job.data) {
                     if hit.local_offset >= effective_valid {
                         continue;
@@ -249,6 +288,21 @@ fn spawn_scan_workers(
                             if tx.send(job).is_err() {
                                 break;
                             }
+                        }
+                    }
+                }
+
+                if let Some(cfg) = entropy_cfg {
+                    if valid_len >= cfg.window_size {
+                        let regions = entropy::detect_entropy_regions(
+                            &run_id,
+                            job.chunk.start,
+                            &job.data[..valid_len],
+                            cfg.window_size,
+                            cfg.threshold,
+                        );
+                        for region in regions {
+                            let _ = meta_tx.send(MetadataEvent::Entropy(region));
                         }
                     }
                 }
@@ -336,6 +390,7 @@ fn spawn_string_workers(
     rx: Receiver<StringJob>,
     meta_tx: Sender<MetadataEvent>,
     artefacts_found: Arc<AtomicU64>,
+    scan_cfg: ArtefactScanConfig,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -345,6 +400,7 @@ fn spawn_string_workers(
         let meta_tx = meta_tx.clone();
         let run_id = run_id.clone();
         let artefacts_found = artefacts_found.clone();
+        let scan_cfg = scan_cfg;
         handles.push(thread::spawn(move || {
             for job in rx {
                 for span in job.spans {
@@ -360,6 +416,7 @@ fn spawn_string_workers(
                         span.local_start,
                         span.flags,
                         slice,
+                        scan_cfg,
                     );
                     artefacts_found.fetch_add(artefacts.len() as u64, Ordering::Relaxed);
                     for artefact in artefacts {

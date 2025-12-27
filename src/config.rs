@@ -28,6 +28,12 @@ pub struct Config {
     pub run_id: String,
     pub overlap_bytes: u64,
     pub enable_string_scan: bool,
+    #[serde(default = "default_true")]
+    pub enable_url_scan: bool,
+    #[serde(default = "default_true")]
+    pub enable_email_scan: bool,
+    #[serde(default = "default_true")]
+    pub enable_phone_scan: bool,
     #[serde(default)]
     pub string_scan_utf16: bool,
     #[serde(default = "default_string_min_len")]
@@ -38,6 +44,12 @@ pub struct Config {
     pub gpu_max_hits_per_chunk: usize,
     #[serde(default = "default_parquet_row_group_size")]
     pub parquet_row_group_size: usize,
+    #[serde(default)]
+    pub enable_entropy_detection: bool,
+    #[serde(default = "default_entropy_window_size")]
+    pub entropy_window_size: usize,
+    #[serde(default = "default_entropy_threshold")]
+    pub entropy_threshold: f64,
     pub opencl_platform_index: Option<usize>,
     pub opencl_device_index: Option<usize>,
     pub file_types: Vec<FileTypeConfig>,
@@ -101,4 +113,16 @@ fn default_gpu_max_hits() -> usize {
 
 fn default_parquet_row_group_size() -> usize {
     10_000
+}
+
+fn default_entropy_window_size() -> usize {
+    4096
+}
+
+fn default_entropy_threshold() -> f64 {
+    7.5
+}
+
+fn default_true() -> bool {
+    true
 }

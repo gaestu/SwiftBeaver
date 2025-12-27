@@ -44,6 +44,7 @@ enum ParquetCategory {
     ArtefactsEmails,
     ArtefactsPhones,
     BrowserHistory,
+    EntropyRegions,
     RunSummary,
 }
 
@@ -62,6 +63,7 @@ impl ParquetCategory {
             ParquetCategory::ArtefactsEmails => "artefacts_emails.parquet",
             ParquetCategory::ArtefactsPhones => "artefacts_phones.parquet",
             ParquetCategory::BrowserHistory => "browser_history.parquet",
+            ParquetCategory::EntropyRegions => "entropy_regions.parquet",
             ParquetCategory::RunSummary => "run_summary.parquet",
         }
     }
@@ -152,6 +154,14 @@ struct BrowserHistoryRow {
 }
 
 #[derive(Debug, Clone)]
+struct EntropyRegionRow {
+    global_start: i64,
+    global_end: i64,
+    entropy: f64,
+    window_size: i64,
+}
+
+#[derive(Debug, Clone)]
 struct RunSummaryRow {
     bytes_scanned: i64,
     chunks_processed: i64,
@@ -167,6 +177,7 @@ enum CategoryBuffer {
     Emails(Vec<EmailArtefactRow>),
     Phones(Vec<PhoneArtefactRow>),
     History(Vec<BrowserHistoryRow>),
+    Entropy(Vec<EntropyRegionRow>),
     Summary(Vec<RunSummaryRow>),
 }
 
@@ -198,6 +209,7 @@ impl CategoryWriter {
             ParquetCategory::ArtefactsEmails => CategoryBuffer::Emails(Vec::new()),
             ParquetCategory::ArtefactsPhones => CategoryBuffer::Phones(Vec::new()),
             ParquetCategory::BrowserHistory => CategoryBuffer::History(Vec::new()),
+            ParquetCategory::EntropyRegions => CategoryBuffer::Entropy(Vec::new()),
             ParquetCategory::RunSummary => CategoryBuffer::Summary(Vec::new()),
             _ => CategoryBuffer::Files(Vec::new()),
         };
@@ -278,6 +290,21 @@ impl CategoryWriter {
         }
     }
 
+    fn append_entropy(&mut self, row: EntropyRegionRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::Entropy(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "entropy row on non-entropy category".to_string(),
+            )),
+        }
+    }
+
     fn append_summary(&mut self, row: RunSummaryRow) -> Result<(), MetadataError> {
         match &mut self.buffer {
             CategoryBuffer::Summary(rows) => {
@@ -323,6 +350,11 @@ impl CategoryWriter {
                 rows.clear();
                 batch
             }
+            CategoryBuffer::Entropy(rows) => {
+                let batch = build_entropy_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
             CategoryBuffer::Summary(rows) => {
                 let batch = build_summary_batch(&self.context, rows, &self.schema)?;
                 rows.clear();
@@ -354,6 +386,7 @@ impl CategoryWriter {
             CategoryBuffer::Emails(rows) => rows.len(),
             CategoryBuffer::Phones(rows) => rows.len(),
             CategoryBuffer::History(rows) => rows.len(),
+            CategoryBuffer::Entropy(rows) => rows.len(),
             CategoryBuffer::Summary(rows) => rows.len(),
         }
     }
@@ -375,6 +408,7 @@ struct ParquetSinkInner {
     artefacts_emails: Option<CategoryWriter>,
     artefacts_phones: Option<CategoryWriter>,
     browser_history: Option<CategoryWriter>,
+    entropy_regions: Option<CategoryWriter>,
     run_summary: Option<CategoryWriter>,
 }
 
@@ -396,6 +430,7 @@ impl ParquetSinkInner {
             ParquetCategory::ArtefactsEmails => &mut self.artefacts_emails,
             ParquetCategory::ArtefactsPhones => &mut self.artefacts_phones,
             ParquetCategory::BrowserHistory => &mut self.browser_history,
+            ParquetCategory::EntropyRegions => &mut self.entropy_regions,
             ParquetCategory::RunSummary => &mut self.run_summary,
         };
 
@@ -450,6 +485,9 @@ impl ParquetSinkInner {
         if let Some(writer) = &mut self.browser_history {
             writer.finish()?;
         }
+        if let Some(writer) = &mut self.entropy_regions {
+            writer.finish()?;
+        }
         if let Some(writer) = &mut self.run_summary {
             writer.finish()?;
         }
@@ -498,6 +536,7 @@ impl ParquetSink {
                 artefacts_emails: None,
                 artefacts_phones: None,
                 browser_history: None,
+                entropy_regions: None,
                 run_summary: None,
             }),
         })
@@ -580,6 +619,18 @@ impl MetadataSink for ParquetSink {
         let mut inner = self.inner.lock().unwrap();
         let writer = inner.get_or_create_writer(ParquetCategory::RunSummary)?;
         writer.append_summary(row)
+    }
+
+    fn record_entropy(&self, region: &crate::metadata::EntropyRegion) -> Result<(), MetadataError> {
+        let row = EntropyRegionRow {
+            global_start: to_i64(region.global_start)?,
+            global_end: to_i64(region.global_end)?,
+            entropy: region.entropy,
+            window_size: to_i64(region.window_size)?,
+        };
+        let mut inner = self.inner.lock().unwrap();
+        let writer = inner.get_or_create_writer(ParquetCategory::EntropyRegions)?;
+        writer.append_entropy(row)
     }
 
     fn flush(&self) -> Result<(), MetadataError> {
@@ -721,6 +772,17 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("visit_source", DataType::Utf8, true),
             Field::new("row_id", DataType::Int64, true),
             Field::new("table_name", DataType::Utf8, true),
+        ])),
+        ParquetCategory::EntropyRegions => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("global_start", DataType::Int64, false),
+            Field::new("global_end", DataType::Int64, false),
+            Field::new("entropy", DataType::Float64, false),
+            Field::new("window_size", DataType::Int64, false),
         ])),
         ParquetCategory::RunSummary => Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
@@ -1038,6 +1100,49 @@ fn build_history_batch(
         Arc::new(visit_source.finish()),
         Arc::new(row_id.finish()),
         Arc::new(table_name.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_entropy_batch(
+    ctx: &ParquetContext,
+    rows: &[EntropyRegionRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut global_start = Int64Builder::new();
+    let mut global_end = Int64Builder::new();
+    let mut entropy = arrow_array::builder::Float64Builder::new();
+    let mut window_size = Int64Builder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        global_start.append_value(row.global_start);
+        global_end.append_value(row.global_end);
+        entropy.append_value(row.entropy);
+        window_size.append_value(row.window_size);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(global_start.finish()),
+        Arc::new(global_end.finish()),
+        Arc::new(entropy.finish()),
+        Arc::new(window_size.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)

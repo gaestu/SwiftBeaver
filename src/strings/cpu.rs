@@ -398,7 +398,7 @@ mod tests {
             length: 16,
             valid_length: 16,
         };
-        let data = "café".as_bytes();
+        let data = b"caf\xC3\xA9";
         let spans = scan_utf8_runs(data, &chunk, 4, 1024);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].length, 5);

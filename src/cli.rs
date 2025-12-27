@@ -52,9 +52,45 @@ pub struct CliOptions {
     #[arg(long)]
     pub scan_utf16: bool,
 
+    /// Enable URL extraction from string spans
+    #[arg(long, conflicts_with = "no_scan_urls")]
+    pub scan_urls: bool,
+
+    /// Disable URL extraction from string spans
+    #[arg(long, conflicts_with = "scan_urls")]
+    pub no_scan_urls: bool,
+
+    /// Enable email extraction from string spans
+    #[arg(long, conflicts_with = "no_scan_emails")]
+    pub scan_emails: bool,
+
+    /// Disable email extraction from string spans
+    #[arg(long, conflicts_with = "scan_emails")]
+    pub no_scan_emails: bool,
+
+    /// Enable phone extraction from string spans
+    #[arg(long, conflicts_with = "no_scan_phones")]
+    pub scan_phones: bool,
+
+    /// Disable phone extraction from string spans
+    #[arg(long, conflicts_with = "scan_phones")]
+    pub no_scan_phones: bool,
+
     /// Override minimum string length when scanning
     #[arg(long)]
     pub string_min_len: Option<usize>,
+
+    /// Enable entropy-based region detection
+    #[arg(long)]
+    pub scan_entropy: bool,
+
+    /// Entropy window size in bytes
+    #[arg(long)]
+    pub entropy_window_bytes: Option<usize>,
+
+    /// Entropy threshold for high-entropy regions
+    #[arg(long)]
+    pub entropy_threshold: Option<f64>,
 
     /// Provide evidence SHA-256 (hex) for metadata output
     #[arg(long)]
@@ -108,5 +144,34 @@ mod tests {
         .expect("parse");
         let types = opts.types.expect("types");
         assert_eq!(types, vec!["jpeg", "png", "sqlite"]);
+    }
+
+    #[test]
+    fn parses_scan_url_flags() {
+        let opts = CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--scan-urls"])
+            .expect("parse");
+        assert!(opts.scan_urls);
+        let opts =
+            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--no-scan-urls"])
+                .expect("parse");
+        assert!(opts.no_scan_urls);
+    }
+
+    #[test]
+    fn parses_entropy_flags() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--scan-entropy",
+            "--entropy-window-bytes",
+            "2048",
+            "--entropy-threshold",
+            "7.2",
+        ])
+        .expect("parse");
+        assert!(opts.scan_entropy);
+        assert_eq!(opts.entropy_window_bytes, Some(2048));
+        assert_eq!(opts.entropy_threshold, Some(7.2));
     }
 }

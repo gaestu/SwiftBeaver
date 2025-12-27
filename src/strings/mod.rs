@@ -79,6 +79,23 @@ pub mod artifacts {
     use regex::Regex;
     use serde::Serialize;
 
+    #[derive(Debug, Clone, Copy)]
+    pub struct ArtefactScanConfig {
+        pub urls: bool,
+        pub emails: bool,
+        pub phones: bool,
+    }
+
+    impl ArtefactScanConfig {
+        pub fn all() -> Self {
+            Self {
+                urls: true,
+                emails: true,
+                phones: true,
+            }
+        }
+    }
+
     #[derive(Debug, Clone, Serialize)]
     pub enum ArtefactKind {
         Url,
@@ -113,13 +130,14 @@ pub mod artifacts {
         local_start: u64,
         flags: u32,
         data: &[u8],
+        scan_cfg: ArtefactScanConfig,
     ) -> Vec<StringArtefact> {
         let mut out = Vec::new();
         let (text, encoding) = decode_span(flags, data);
         let hint_mask = flags::URL_LIKE | flags::EMAIL_LIKE | flags::PHONE_LIKE;
         let use_hints = (flags & hint_mask) != 0;
 
-        if !use_hints || (flags & flags::URL_LIKE) != 0 {
+        if scan_cfg.urls && (!use_hints || (flags & flags::URL_LIKE) != 0) {
             for mat in URL_RE.find_iter(&text) {
                 if let Some(value) = normalize_url(mat.as_str()) {
                     out.push(build_artefact(
@@ -133,7 +151,7 @@ pub mod artifacts {
             }
         }
 
-        if !use_hints || (flags & flags::EMAIL_LIKE) != 0 {
+        if scan_cfg.emails && (!use_hints || (flags & flags::EMAIL_LIKE) != 0) {
             for mat in EMAIL_RE.find_iter(&text) {
                 if let Some(value) = normalize_email(mat.as_str()) {
                     out.push(build_artefact(
@@ -147,7 +165,7 @@ pub mod artifacts {
             }
         }
 
-        if !use_hints || (flags & flags::PHONE_LIKE) != 0 {
+        if scan_cfg.phones && (!use_hints || (flags & flags::PHONE_LIKE) != 0) {
             for mat in PHONE_RE.find_iter(&text) {
                 let value = mat.as_str();
                 if is_plausible_phone(value) {
@@ -291,13 +309,13 @@ pub mod artifacts {
 
     #[cfg(test)]
     mod tests {
-        use super::{extract_artefacts, ArtefactKind};
+        use super::{extract_artefacts, ArtefactKind, ArtefactScanConfig};
         use crate::strings::flags;
 
         #[test]
         fn extracts_basic_artefacts() {
             let data = b"visit https://example.com and mail test@example.com";
-            let out = extract_artefacts("run1", 100, 0, 0, data);
+            let out = extract_artefacts("run1", 100, 0, 0, data, ArtefactScanConfig::all());
             assert!(out.iter().any(|a| matches!(a.artefact_kind, ArtefactKind::Url)));
             assert!(out.iter().any(|a| matches!(a.artefact_kind, ArtefactKind::Email)));
         }
@@ -316,6 +334,7 @@ pub mod artifacts {
                 0,
                 flags::UTF16_LE | flags::URL_LIKE,
                 &data,
+                ArtefactScanConfig::all(),
             );
             assert!(out.iter().any(|a| {
                 matches!(a.artefact_kind, ArtefactKind::Url) && a.encoding == "utf-16le"
@@ -325,7 +344,7 @@ pub mod artifacts {
         #[test]
         fn filters_noisy_phone_matches() {
             let data = b"0000000000 bad +1 (415) 555-1234 good";
-            let out = extract_artefacts("run1", 0, 0, 0, data);
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
             let phones: Vec<&str> = out
                 .iter()
                 .filter(|a| matches!(a.artefact_kind, ArtefactKind::Phone))
@@ -338,7 +357,7 @@ pub mod artifacts {
         #[test]
         fn trims_url_trailing_punct() {
             let data = b"(https://example.com/login),";
-            let out = extract_artefacts("run1", 0, 0, 0, data);
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
             let urls: Vec<&str> = out
                 .iter()
                 .filter(|a| matches!(a.artefact_kind, ArtefactKind::Url))
@@ -350,7 +369,7 @@ pub mod artifacts {
         #[test]
         fn trims_email_trailing_punct() {
             let data = b"user@example.com.";
-            let out = extract_artefacts("run1", 0, 0, 0, data);
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
             let emails: Vec<&str> = out
                 .iter()
                 .filter(|a| matches!(a.artefact_kind, ArtefactKind::Email))
@@ -368,8 +387,27 @@ pub mod artifacts {
                 0,
                 flags::UTF8 | flags::URL_LIKE,
                 data,
+                ArtefactScanConfig::all(),
             );
             assert!(out.iter().any(|a| a.encoding == "utf-8"));
+        }
+
+        #[test]
+        fn respects_scan_config() {
+            let data = b"https://example.com test@example.com";
+            let out = extract_artefacts(
+                "run1",
+                0,
+                0,
+                0,
+                data,
+                ArtefactScanConfig {
+                    urls: false,
+                    emails: true,
+                    phones: false,
+                },
+            );
+            assert!(out.iter().all(|a| matches!(a.artefact_kind, ArtefactKind::Email)));
         }
     }
 }

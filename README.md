@@ -72,7 +72,13 @@ CLI overrides:
 - `--overlap-kib`: overrides `overlap_bytes` when set
 - `--scan-strings`: enables ASCII/UTF-8 string scanning
 - `--scan-utf16`: enables UTF-16LE/BE string scanning
+- `--scan-urls` / `--no-scan-urls`: enable or disable URL extraction
+- `--scan-emails` / `--no-scan-emails`: enable or disable email extraction
+- `--scan-phones` / `--no-scan-phones`: enable or disable phone extraction
 - `--string-min-len`: overrides `string_min_len` when set
+- `--scan-entropy`: enable entropy region detection
+- `--entropy-window-bytes`: overrides `entropy_window_size` when set
+- `--entropy-threshold`: overrides `entropy_threshold` when set
 - `--evidence-sha256`: record a known evidence SHA-256
 - `--compute-evidence-sha256`: compute evidence SHA-256 before scanning (extra full pass)
 - `--metadata-backend csv`: write CSV instead of JSONL
@@ -88,6 +94,7 @@ Carved files are recorded to `metadata/carved_files.jsonl` with run-level proven
 String artefacts (URLs/emails/phones) are recorded to `metadata/string_artefacts.jsonl`.
 Browser history records (from carved SQLite) are recorded to `metadata/browser_history.jsonl`.
 Run summaries are recorded to `metadata/run_summary.jsonl`.
+Entropy regions are recorded to `metadata/entropy_regions.jsonl`.
 
 See `docs/metadata_jsonl.md` for the schema.
 CSV output is also available with `--metadata-backend csv` (see `docs/metadata_csv.md`).

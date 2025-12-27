@@ -129,3 +129,17 @@ Phone schema:
 - `files_carved` (int64)
 - `string_spans` (int64)
 - `artefacts_extracted` (int64)
+
+## Entropy regions
+
+`entropy_regions.parquet` schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `global_start` (int64)
+- `global_end` (int64)
+- `entropy` (float64)
+- `window_size` (int64)

@@ -71,3 +71,17 @@ Columns:
 - `config_hash`
 - `evidence_path`
 - `evidence_sha256`
+
+## entropy_regions.csv
+
+Columns:
+
+- `run_id`
+- `global_start`
+- `global_end`
+- `entropy`
+- `window_size`
+- `tool_version`
+- `config_hash`
+- `evidence_path`
+- `evidence_sha256`

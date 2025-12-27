@@ -5,7 +5,7 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 
 use fastcarve::carve::CarvedFile;
 use fastcarve::config;
-use fastcarve::metadata::{self, MetadataBackendKind, RunSummary};
+use fastcarve::metadata::{self, EntropyRegion, MetadataBackendKind, RunSummary};
 use fastcarve::parsers::browser::BrowserHistoryRecord;
 use fastcarve::strings::artifacts::{ArtefactKind, StringArtefact};
 
@@ -79,6 +79,14 @@ fn parquet_writes_expected_files() {
         artefacts_extracted: 4,
     };
     sink.record_run_summary(&summary).expect("record summary");
+    let entropy = EntropyRegion {
+        run_id: "run_001".to_string(),
+        global_start: 0,
+        global_end: 4095,
+        entropy: 7.8,
+        window_size: 4096,
+    };
+    sink.record_entropy(&entropy).expect("record entropy");
 
     sink.flush().expect("flush");
 
@@ -87,21 +95,26 @@ fn parquet_writes_expected_files() {
     let urls_path = parquet_dir.join("artefacts_urls.parquet");
     let history_path = parquet_dir.join("browser_history.parquet");
     let summary_path = parquet_dir.join("run_summary.parquet");
+    let entropy_path = parquet_dir.join("entropy_regions.parquet");
 
     assert!(files_path.exists());
     assert!(urls_path.exists());
     assert!(history_path.exists());
     assert!(summary_path.exists());
+    assert!(entropy_path.exists());
 
     assert_eq!(count_rows(&files_path), 1);
     assert_eq!(count_rows(&urls_path), 1);
     assert_eq!(count_rows(&history_path), 1);
     assert_eq!(count_rows(&summary_path), 1);
+    assert_eq!(count_rows(&entropy_path), 1);
 
     assert_has_column(&files_path, "evidence_sha256");
     assert_has_column(&urls_path, "evidence_sha256");
     assert_has_column(&history_path, "evidence_sha256");
     assert_has_column(&summary_path, "evidence_sha256");
+    assert_has_column(&entropy_path, "evidence_sha256");
+    assert_has_column(&entropy_path, "entropy");
 }
 
 fn count_rows(path: &PathBuf) -> usize {

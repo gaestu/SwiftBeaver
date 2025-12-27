@@ -9,3 +9,4 @@ pub mod metadata;
 pub mod parsers;
 pub mod logging;
 pub mod util;
+pub mod entropy;

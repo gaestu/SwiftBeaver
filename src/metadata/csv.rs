@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 
 use crate::carve::CarvedFile;
-use crate::metadata::{MetadataError, MetadataSink, RunSummary};
+use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
 
 pub struct CsvSink {
@@ -17,6 +17,7 @@ pub struct CsvSink {
     strings_writer: Mutex<csv::Writer<File>>,
     history_writer: Mutex<csv::Writer<File>>,
     run_writer: Mutex<csv::Writer<File>>,
+    entropy_writer: Mutex<csv::Writer<File>>,
 }
 
 #[derive(Serialize)]
@@ -85,6 +86,19 @@ struct RunSummaryCsv<'a> {
     evidence_sha256: &'a str,
 }
 
+#[derive(Serialize)]
+struct EntropyRegionCsv<'a> {
+    run_id: &'a str,
+    global_start: u64,
+    global_end: u64,
+    entropy: f64,
+    window_size: u64,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
 impl CsvSink {
     pub fn new(
         _run_id: &str,
@@ -101,11 +115,13 @@ impl CsvSink {
         let strings_file = File::create(meta_dir.join("string_artefacts.csv"))?;
         let history_file = File::create(meta_dir.join("browser_history.csv"))?;
         let run_file = File::create(meta_dir.join("run_summary.csv"))?;
+        let entropy_file = File::create(meta_dir.join("entropy_regions.csv"))?;
 
         let mut files_writer = csv::WriterBuilder::new().has_headers(false).from_writer(files_file);
         let mut strings_writer = csv::WriterBuilder::new().has_headers(false).from_writer(strings_file);
         let mut history_writer = csv::WriterBuilder::new().has_headers(false).from_writer(history_file);
         let mut run_writer = csv::WriterBuilder::new().has_headers(false).from_writer(run_file);
+        let mut entropy_writer = csv::WriterBuilder::new().has_headers(false).from_writer(entropy_file);
 
         files_writer.write_record(&[
             "run_id",
@@ -169,6 +185,18 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
+        entropy_writer.write_record(&[
+            "run_id",
+            "global_start",
+            "global_end",
+            "entropy",
+            "window_size",
+            "tool_version",
+            "config_hash",
+            "evidence_path",
+            "evidence_sha256",
+        ])?;
+
         Ok(Self {
             tool_version: tool_version.to_string(),
             config_hash: config_hash.to_string(),
@@ -178,6 +206,7 @@ impl CsvSink {
             strings_writer: Mutex::new(strings_writer),
             history_writer: Mutex::new(history_writer),
             run_writer: Mutex::new(run_writer),
+            entropy_writer: Mutex::new(entropy_writer),
         })
     }
 }
@@ -265,15 +294,34 @@ impl MetadataSink for CsvSink {
         Ok(())
     }
 
+    fn record_entropy(&self, region: &EntropyRegion) -> Result<(), MetadataError> {
+        let record = EntropyRegionCsv {
+            run_id: &region.run_id,
+            global_start: region.global_start,
+            global_end: region.global_end,
+            entropy: region.entropy,
+            window_size: region.window_size,
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self.entropy_writer.lock().unwrap();
+        guard.serialize(record)?;
+        Ok(())
+    }
+
     fn flush(&self) -> Result<(), MetadataError> {
         let mut files = self.files_writer.lock().unwrap();
         let mut strings = self.strings_writer.lock().unwrap();
         let mut history = self.history_writer.lock().unwrap();
         let mut run = self.run_writer.lock().unwrap();
+        let mut entropy = self.entropy_writer.lock().unwrap();
         files.flush()?;
         strings.flush()?;
         history.flush()?;
         run.flush()?;
+        entropy.flush()?;
         Ok(())
     }
 }
@@ -354,6 +402,14 @@ mod tests {
             artefacts_extracted: 4,
         };
         sink.record_run_summary(&summary).expect("record summary");
+        let region = EntropyRegion {
+            run_id: "run1".to_string(),
+            global_start: 0,
+            global_end: 15,
+            entropy: 7.9,
+            window_size: 16,
+        };
+        sink.record_entropy(&region).expect("record entropy");
 
         sink.flush().expect("flush");
 
@@ -361,5 +417,6 @@ mod tests {
         assert!(dir.path().join("metadata").join("string_artefacts.csv").exists());
         assert!(dir.path().join("metadata").join("browser_history.csv").exists());
         assert!(dir.path().join("metadata").join("run_summary.csv").exists());
+        assert!(dir.path().join("metadata").join("entropy_regions.csv").exists());
     }
 }
