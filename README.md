@@ -70,7 +70,7 @@ Key settings:
 CLI overrides:
 
 - `--overlap-kib`: overrides `overlap_bytes` when set
-- `--scan-strings`: enables string scanning
+- `--scan-strings`: enables ASCII/UTF-8 string scanning
 - `--scan-utf16`: enables UTF-16LE/BE string scanning
 - `--string-min-len`: overrides `string_min_len` when set
 - `--evidence-sha256`: record a known evidence SHA-256

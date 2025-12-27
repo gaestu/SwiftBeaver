@@ -156,6 +156,13 @@ impl StringScanner for CudaStringScanner {
 
         // Convert mask to spans on CPU
         let mut spans = mask_to_spans(chunk, data, &mask, self.min_len, self.max_len);
+        let mut utf8 = crate::strings::cpu::scan_utf8_runs(
+            data,
+            chunk,
+            self.min_len,
+            self.max_len,
+        );
+        spans.append(&mut utf8);
         if self.scan_utf16 {
             let mut utf16 = crate::strings::cpu::scan_utf16_runs(
                 data,

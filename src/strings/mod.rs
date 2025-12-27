@@ -17,6 +17,7 @@ pub struct StringSpan {
 pub mod flags {
     pub const UTF16_LE: u32 = 1 << 0;
     pub const UTF16_BE: u32 = 1 << 1;
+    pub const UTF8: u32 = 1 << 2;
     pub const URL_LIKE: u32 = 1 << 4;
     pub const EMAIL_LIKE: u32 = 1 << 5;
     pub const PHONE_LIKE: u32 = 1 << 6;
@@ -208,6 +209,9 @@ pub mod artifacts {
             let decoded = decode_utf16_bytes(data, false);
             return (std::borrow::Cow::Owned(decoded), "utf-16be");
         }
+        if (flags & flags::UTF8) != 0 {
+            return (String::from_utf8_lossy(data), "utf-8");
+        }
         (String::from_utf8_lossy(data), "ascii")
     }
 
@@ -353,6 +357,19 @@ pub mod artifacts {
                 .map(|a| a.content.as_str())
                 .collect();
             assert!(emails.contains(&"user@example.com"));
+        }
+
+        #[test]
+        fn reports_utf8_encoding() {
+            let data = b"https://example.com";
+            let out = extract_artefacts(
+                "run1",
+                0,
+                0,
+                flags::UTF8 | flags::URL_LIKE,
+                data,
+            );
+            assert!(out.iter().any(|a| a.encoding == "utf-8"));
         }
     }
 }

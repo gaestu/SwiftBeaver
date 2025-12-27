@@ -21,6 +21,8 @@ impl CpuStringScanner {
 impl StringScanner for CpuStringScanner {
     fn scan_chunk(&self, chunk: &ScanChunk, data: &[u8]) -> Vec<StringSpan> {
         let mut spans = scan_ascii_runs(data, chunk, self.min_len, self.max_len);
+        let mut utf8_spans = scan_utf8_runs(data, chunk, self.min_len, self.max_len);
+        spans.append(&mut utf8_spans);
 
         if self.scan_utf16 {
             let mut utf16_spans = scan_utf16_runs(
@@ -83,6 +85,67 @@ fn scan_ascii_runs(
                 length: len as u32,
                 flags: span_flags,
             });
+        }
+    }
+
+    spans
+}
+
+pub(crate) fn scan_utf8_runs(
+    data: &[u8],
+    chunk: &ScanChunk,
+    min_len: usize,
+    max_len: usize,
+) -> Vec<StringSpan> {
+    let mut spans = Vec::new();
+    let mut i = 0usize;
+
+    while i < data.len() {
+        let Some((ch, size)) = decode_utf8_at(data, i) else {
+            i += 1;
+            continue;
+        };
+        if !is_printable_unicode(ch) {
+            i += size.max(1);
+            continue;
+        }
+
+        let start = i;
+        let mut chars = 0usize;
+        let mut end = i;
+        let mut has_multibyte = false;
+        let mut j = i;
+
+        while j < data.len() && chars < max_len {
+            match decode_utf8_at(data, j) {
+                Some((ch, size)) if is_printable_unicode(ch) => {
+                    if size > 1 {
+                        has_multibyte = true;
+                    }
+                    j += size;
+                    chars += 1;
+                    end = j;
+                }
+                _ => break,
+            }
+        }
+
+        if chars >= min_len && has_multibyte {
+            let slice = &data[start..end];
+            let mut span_flags = span_flags_ascii(slice);
+            span_flags |= flags::UTF8;
+            spans.push(StringSpan {
+                chunk_id: chunk.id,
+                local_start: start as u64,
+                length: (end - start) as u32,
+                flags: span_flags,
+            });
+        }
+
+        if j > i {
+            i = j;
+        } else {
+            i += 1;
         }
     }
 
@@ -194,6 +257,77 @@ fn contains_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
     false
 }
 
+fn decode_utf8_at(data: &[u8], idx: usize) -> Option<(char, usize)> {
+    let b0 = *data.get(idx)?;
+    if b0 < 0x80 {
+        return Some((b0 as char, 1));
+    }
+
+    let len = data.len();
+    if b0 < 0xC2 {
+        return None;
+    }
+    if b0 <= 0xDF {
+        if idx + 1 >= len {
+            return None;
+        }
+        let b1 = data[idx + 1];
+        if (b1 & 0xC0) != 0x80 {
+            return None;
+        }
+        let code = ((b0 & 0x1F) as u32) << 6 | ((b1 & 0x3F) as u32);
+        return std::char::from_u32(code).map(|ch| (ch, 2));
+    }
+    if b0 <= 0xEF {
+        if idx + 2 >= len {
+            return None;
+        }
+        let b1 = data[idx + 1];
+        let b2 = data[idx + 2];
+        if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 {
+            return None;
+        }
+        if b0 == 0xE0 && b1 < 0xA0 {
+            return None;
+        }
+        if b0 == 0xED && b1 >= 0xA0 {
+            return None;
+        }
+        let code = ((b0 & 0x0F) as u32) << 12
+            | ((b1 & 0x3F) as u32) << 6
+            | ((b2 & 0x3F) as u32);
+        return std::char::from_u32(code).map(|ch| (ch, 3));
+    }
+    if b0 <= 0xF4 {
+        if idx + 3 >= len {
+            return None;
+        }
+        let b1 = data[idx + 1];
+        let b2 = data[idx + 2];
+        let b3 = data[idx + 3];
+        if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80 {
+            return None;
+        }
+        if b0 == 0xF0 && b1 < 0x90 {
+            return None;
+        }
+        if b0 == 0xF4 && b1 >= 0x90 {
+            return None;
+        }
+        let code = ((b0 & 0x07) as u32) << 18
+            | ((b1 & 0x3F) as u32) << 12
+            | ((b2 & 0x3F) as u32) << 6
+            | ((b3 & 0x3F) as u32);
+        return std::char::from_u32(code).map(|ch| (ch, 4));
+    }
+
+    None
+}
+
+fn is_printable_unicode(ch: char) -> bool {
+    ch == '\t' || !ch.is_control()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,5 +388,20 @@ mod tests {
         assert!((flags & flags::URL_LIKE) != 0);
         assert!((flags & flags::EMAIL_LIKE) != 0);
         assert!((flags & flags::PHONE_LIKE) != 0);
+    }
+
+    #[test]
+    fn scans_utf8_runs() {
+        let chunk = ScanChunk {
+            id: 1,
+            start: 0,
+            length: 16,
+            valid_length: 16,
+        };
+        let data = "café".as_bytes();
+        let spans = scan_utf8_runs(data, &chunk, 4, 1024);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].length, 5);
+        assert!((spans[0].flags & flags::UTF8) != 0);
     }
 }

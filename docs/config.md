@@ -6,7 +6,7 @@ The default config is `config/default.yml`.
 
 - `run_id` (string): optional; if empty, a timestamp-based ID is generated.
 - `overlap_bytes` (u64): overlap between chunks.
-- `enable_string_scan` (bool): enable printable string scanning.
+- `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.
 - `string_scan_utf16` (bool): enable UTF-16LE/BE printable string scanning.
 - `string_min_len` (usize): minimum printable string length.
 - `string_max_len` (usize): maximum string length per span.
