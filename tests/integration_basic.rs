@@ -4,6 +4,7 @@ use std::sync::Arc;
 use fastcarve::config;
 use fastcarve::evidence::RawFileSource;
 use fastcarve::metadata::{self, MetadataBackendKind};
+use fastcarve::pipeline;
 use fastcarve::scanner;
 use fastcarve::util;
 
@@ -257,7 +258,9 @@ fn integration_carves_basic_formats() {
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
     let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
 
-    util::run_pipeline(
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
+
+    pipeline::run_pipeline(
         &cfg,
         evidence,
         sig_scanner,
@@ -269,6 +272,7 @@ fn integration_carves_basic_formats() {
         64,
         None,
         None,
+        carve_registry,
     )
     .expect("pipeline");
 

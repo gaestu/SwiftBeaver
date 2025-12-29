@@ -6,9 +6,11 @@ use tracing::{info, warn};
 use fastcarve::{
     cli,
     config,
+    constants::MIB,
     evidence,
     logging,
     metadata,
+    pipeline,
     scanner,
     strings,
     util,
@@ -20,53 +22,11 @@ fn main() -> Result<()> {
     let cli_opts = cli::parse();
     let loaded = config::load_config(cli_opts.config_path.as_deref())?;
     let mut cfg = loaded.config;
-    if cli_opts.scan_strings
-        || cli_opts.scan_utf16
-        || cli_opts.scan_urls
-        || cli_opts.scan_emails
-        || cli_opts.scan_phones
-    {
-        cfg.enable_string_scan = true;
-    }
-    if cli_opts.scan_utf16 {
-        cfg.string_scan_utf16 = true;
-    }
-    if cli_opts.scan_urls {
-        cfg.enable_url_scan = true;
-    }
-    if cli_opts.no_scan_urls {
-        cfg.enable_url_scan = false;
-    }
-    if cli_opts.scan_emails {
-        cfg.enable_email_scan = true;
-    }
-    if cli_opts.no_scan_emails {
-        cfg.enable_email_scan = false;
-    }
-    if cli_opts.scan_phones {
-        cfg.enable_phone_scan = true;
-    }
-    if cli_opts.no_scan_phones {
-        cfg.enable_phone_scan = false;
-    }
-    if let Some(min_len) = cli_opts.string_min_len {
-        cfg.string_min_len = min_len;
-    }
-    if cli_opts.scan_entropy
-        || cli_opts.entropy_window_bytes.is_some()
-        || cli_opts.entropy_threshold.is_some()
-    {
-        cfg.enable_entropy_detection = true;
-    }
-    if let Some(window) = cli_opts.entropy_window_bytes {
-        cfg.entropy_window_size = window;
-    }
-    if let Some(threshold) = cli_opts.entropy_threshold {
-        cfg.entropy_threshold = threshold;
-    }
-    if cli_opts.scan_sqlite_pages {
-        cfg.enable_sqlite_page_recovery = true;
-    }
+    
+    // Apply CLI overrides to config
+    cfg.merge_cli(&cli_opts);
+    
+    // Apply file type filters
     let unknown_types =
         util::filter_file_types(&mut cfg, cli_opts.types.as_deref(), cli_opts.disable_zip);
     for unknown in unknown_types {
@@ -112,7 +72,7 @@ fn main() -> Result<()> {
         hash.trim().to_string()
     } else if cli_opts.compute_evidence_sha256 {
         info!("computing evidence sha256 (full pass)");
-        let hash = evidence::compute_sha256(evidence_source.as_ref(), 8 * 1024 * 1024)?;
+        let hash = evidence::compute_sha256(evidence_source.as_ref(), 8 * MIB as usize)?;
         info!("evidence sha256={hash}");
         hash
     } else {
@@ -140,13 +100,15 @@ fn main() -> Result<()> {
         None
     };
 
-    let chunk_size = cli_opts.chunk_size_mib.saturating_mul(1024 * 1024);
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg)?);
+
+    let chunk_size = cli_opts.chunk_size_mib.saturating_mul(MIB);
     let overlap = cli_opts
         .overlap_kib
         .map(|kib| kib.saturating_mul(1024))
         .unwrap_or(cfg.overlap_bytes);
 
-    util::run_pipeline(
+    pipeline::run_pipeline(
         &cfg,
         evidence_source,
         sig_scanner,
@@ -158,6 +120,7 @@ fn main() -> Result<()> {
         overlap,
         cli_opts.max_bytes,
         cli_opts.max_chunks,
+        carve_registry,
     )?;
 
     info!("fastcarve run finished");

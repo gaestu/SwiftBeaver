@@ -136,3 +136,66 @@ fn default_entropy_threshold() -> f64 {
 fn default_true() -> bool {
     true
 }
+
+impl Config {
+    /// Merge CLI options into the config.
+    /// CLI flags override config file values.
+    pub fn merge_cli(&mut self, cli: &crate::cli::CliOptions) {
+        // String scanning
+        if cli.scan_strings || cli.scan_utf16 || cli.scan_urls || cli.scan_emails || cli.scan_phones
+        {
+            self.enable_string_scan = true;
+        }
+        if cli.scan_utf16 {
+            self.string_scan_utf16 = true;
+        }
+
+        // URL scanning
+        if cli.scan_urls {
+            self.enable_url_scan = true;
+        }
+        if cli.no_scan_urls {
+            self.enable_url_scan = false;
+        }
+
+        // Email scanning
+        if cli.scan_emails {
+            self.enable_email_scan = true;
+        }
+        if cli.no_scan_emails {
+            self.enable_email_scan = false;
+        }
+
+        // Phone scanning
+        if cli.scan_phones {
+            self.enable_phone_scan = true;
+        }
+        if cli.no_scan_phones {
+            self.enable_phone_scan = false;
+        }
+
+        // String length
+        if let Some(min_len) = cli.string_min_len {
+            self.string_min_len = min_len;
+        }
+
+        // Entropy detection
+        if cli.scan_entropy
+            || cli.entropy_window_bytes.is_some()
+            || cli.entropy_threshold.is_some()
+        {
+            self.enable_entropy_detection = true;
+        }
+        if let Some(window) = cli.entropy_window_bytes {
+            self.entropy_window_size = window;
+        }
+        if let Some(threshold) = cli.entropy_threshold {
+            self.entropy_threshold = threshold;
+        }
+
+        // SQLite page recovery
+        if cli.scan_sqlite_pages {
+            self.enable_sqlite_page_recovery = true;
+        }
+    }
+}

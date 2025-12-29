@@ -113,6 +113,54 @@ pub fn sanitize_extension(ext: &str) -> String {
     ext.trim_start_matches('.').to_ascii_lowercase()
 }
 
+/// Helper to build a CarvedFile result, reducing boilerplate in handlers
+pub fn build_carved_file(
+    run_id: &str,
+    file_type: &str,
+    extension: &str,
+    rel_path: String,
+    global_start: u64,
+    size: u64,
+    md5_hex: String,
+    sha256_hex: String,
+    validated: bool,
+    truncated: bool,
+    errors: Vec<String>,
+    pattern_id: &str,
+) -> CarvedFile {
+    let global_end = if size == 0 {
+        global_start
+    } else {
+        global_start + size - 1
+    };
+
+    CarvedFile {
+        run_id: run_id.to_string(),
+        file_type: file_type.to_string(),
+        path: rel_path,
+        extension: extension.to_string(),
+        global_start,
+        global_end,
+        size,
+        md5: Some(md5_hex),
+        sha256: Some(sha256_hex),
+        validated,
+        truncated,
+        errors,
+        pattern_id: Some(pattern_id.to_string()),
+    }
+}
+
+/// Check if carved size meets minimum requirement, delete file if not
+pub fn check_min_size(full_path: &Path, size: u64, min_size: u64) -> bool {
+    if size < min_size {
+        let _ = std::fs::remove_file(full_path);
+        false
+    } else {
+        true
+    }
+}
+
 pub(crate) struct CarveStream<'a> {
     evidence: &'a dyn EvidenceSource,
     offset: u64,
