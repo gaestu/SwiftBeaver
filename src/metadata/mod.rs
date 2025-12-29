@@ -7,6 +7,7 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::carve::CarvedFile;
+use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::StringArtefact;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -51,7 +52,9 @@ pub enum MetadataError {
 pub trait MetadataSink: Send + Sync {
     fn record_file(&self, file: &CarvedFile) -> Result<(), MetadataError>;
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError>;
-    fn record_history(&self, _record: &crate::parsers::browser::BrowserHistoryRecord) -> Result<(), MetadataError>;
+    fn record_history(&self, record: &BrowserHistoryRecord) -> Result<(), MetadataError>;
+    fn record_cookie(&self, record: &BrowserCookieRecord) -> Result<(), MetadataError>;
+    fn record_download(&self, record: &BrowserDownloadRecord) -> Result<(), MetadataError>;
     fn record_run_summary(&self, summary: &RunSummary) -> Result<(), MetadataError>;
     fn record_entropy(&self, region: &EntropyRegion) -> Result<(), MetadataError>;
     fn flush(&self) -> Result<(), MetadataError>;

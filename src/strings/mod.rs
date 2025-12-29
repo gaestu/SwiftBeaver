@@ -183,6 +183,16 @@ pub mod artifacts {
         out
     }
 
+    pub(crate) fn extract_urls_from_text(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for mat in URL_RE.find_iter(text) {
+            if let Some(value) = normalize_url(mat.as_str()) {
+                out.push(value);
+            }
+        }
+        out
+    }
+
     fn is_plausible_phone(value: &str) -> bool {
         let digits: Vec<char> = value.chars().filter(|c| c.is_ascii_digit()).collect();
         let len = digits.len();

@@ -6,6 +6,11 @@ pub mod sqlite;
 pub mod pdf;
 pub mod webp;
 pub mod zip;
+pub mod bmp;
+pub mod tiff;
+pub mod mp4;
+pub mod rar;
+pub mod sevenz;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -176,4 +181,42 @@ impl<'a> CarveStream<'a> {
         let sha256 = hex::encode(self.sha256.finalize());
         Ok((self.written, md5, sha256))
     }
+}
+
+pub(crate) fn write_range(
+    ctx: &ExtractionContext,
+    start: u64,
+    end: u64,
+    file: &mut File,
+    md5: &mut md5::Context,
+    sha256: &mut Sha256,
+) -> Result<(u64, bool), CarveError> {
+    let mut offset = start;
+    let mut remaining = end.saturating_sub(start);
+    let mut bytes_written = 0u64;
+    let buf_size = 64 * 1024;
+
+    while remaining > 0 {
+        let read_len = remaining.min(buf_size as u64) as usize;
+        let mut buf = vec![0u8; read_len];
+        let n = ctx
+            .evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n == 0 {
+            return Ok((bytes_written, true));
+        }
+        buf.truncate(n);
+        file.write_all(&buf)?;
+        md5.consume(&buf);
+        sha256.update(&buf);
+        bytes_written = bytes_written.saturating_add(buf.len() as u64);
+        offset = offset.saturating_add(buf.len() as u64);
+        remaining = remaining.saturating_sub(buf.len() as u64);
+        if n < read_len {
+            return Ok((bytes_written, true));
+        }
+    }
+
+    Ok((bytes_written, false))
 }

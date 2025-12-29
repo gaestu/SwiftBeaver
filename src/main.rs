@@ -64,6 +64,9 @@ fn main() -> Result<()> {
     if let Some(threshold) = cli_opts.entropy_threshold {
         cfg.entropy_threshold = threshold;
     }
+    if cli_opts.scan_sqlite_pages {
+        cfg.enable_sqlite_page_recovery = true;
+    }
     let unknown_types =
         util::filter_file_types(&mut cfg, cli_opts.types.as_deref(), cli_opts.disable_zip);
     for unknown in unknown_types {
@@ -153,6 +156,8 @@ fn main() -> Result<()> {
         cli_opts.workers,
         chunk_size,
         overlap,
+        cli_opts.max_bytes,
+        cli_opts.max_chunks,
     )?;
 
     info!("fastcarve run finished");

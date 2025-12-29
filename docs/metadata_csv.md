@@ -56,6 +56,52 @@ Columns:
 - `evidence_path`
 - `evidence_sha256`
 
+Page-level recovery emits `browser=sqlite_page` and `visit_source=page_scan` with best-effort `title` and `visit_time`.
+Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
+## browser_cookies.csv
+
+Columns:
+
+- `run_id`
+- `browser`
+- `profile`
+- `host`
+- `name`
+- `value`
+- `path`
+- `expires_utc`
+- `last_access_utc`
+- `creation_utc`
+- `is_secure`
+- `is_http_only`
+- `source_file`
+- `tool_version`
+- `config_hash`
+- `evidence_path`
+- `evidence_sha256`
+
+## browser_downloads.csv
+
+Columns:
+
+- `run_id`
+- `browser`
+- `profile`
+- `url`
+- `target_path`
+- `start_time`
+- `end_time`
+- `total_bytes`
+- `state`
+- `source_file`
+- `tool_version`
+- `config_hash`
+- `evidence_path`
+- `evidence_sha256`
+
+Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
 ## run_summary.csv
 
 Columns:

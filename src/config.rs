@@ -42,6 +42,8 @@ pub struct Config {
     pub string_max_len: usize,
     #[serde(default = "default_gpu_max_hits")]
     pub gpu_max_hits_per_chunk: usize,
+    #[serde(default = "default_gpu_max_string_spans")]
+    pub gpu_max_string_spans_per_chunk: usize,
     #[serde(default = "default_parquet_row_group_size")]
     pub parquet_row_group_size: usize,
     #[serde(default)]
@@ -50,8 +52,12 @@ pub struct Config {
     pub entropy_window_size: usize,
     #[serde(default = "default_entropy_threshold")]
     pub entropy_threshold: f64,
+    #[serde(default)]
+    pub enable_sqlite_page_recovery: bool,
     pub opencl_platform_index: Option<usize>,
     pub opencl_device_index: Option<usize>,
+    #[serde(default)]
+    pub zip_allowed_kinds: Option<Vec<String>>,
     pub file_types: Vec<FileTypeConfig>,
 }
 
@@ -109,6 +115,10 @@ fn default_string_max_len() -> usize {
 
 fn default_gpu_max_hits() -> usize {
     1_000_000
+}
+
+fn default_gpu_max_string_spans() -> usize {
+    250_000
 }
 
 fn default_parquet_row_group_size() -> usize {

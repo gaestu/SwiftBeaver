@@ -8,10 +8,10 @@ High-speed, forensic-grade file and artefact carver (Phase 2: CPU-only core with
 cargo run -- --input /path/to/image.dd --output ./output
 ```
 
-E01 input (requires `libewf`):
+E01 input (requires `libewf`, enabled by default):
 
 ```bash
-cargo run --features ewf -- --input /path/to/image.E01 --output ./output
+cargo run -- --input /path/to/image.E01 --output ./output
 ```
 
 GPU signature scanning (fallbacks to CPU if GPU is unavailable):
@@ -48,7 +48,7 @@ cargo run -- --input /path/to/image.dd --output ./output --scan-strings --scan-u
 
 This creates a run directory under `./output/<run_id>/` with:
 
-- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite). ZIPs are classified into docx/xlsx/pptx when entries match.
+- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/bmp/tiff/mp4/rar/7z). ZIPs are classified into docx/xlsx/pptx when entries match.
 - `metadata/` - JSONL records for carved files, string artefacts, and browser history
 
 ## Configuration
@@ -79,11 +79,14 @@ CLI overrides:
 - `--scan-entropy`: enable entropy region detection
 - `--entropy-window-bytes`: overrides `entropy_window_size` when set
 - `--entropy-threshold`: overrides `entropy_threshold` when set
+- `--scan-sqlite-pages`: enable SQLite page-level URL recovery for damaged DBs
+- `--max-bytes`: stop after scanning this many bytes
+- `--max-chunks`: stop after scanning this many chunks
 - `--evidence-sha256`: record a known evidence SHA-256
 - `--compute-evidence-sha256`: compute evidence SHA-256 before scanning (extra full pass)
 - `--metadata-backend csv`: write CSV instead of JSONL
 - `--metadata-backend parquet`: write Parquet instead of JSONL
-- `--types jpeg,png,sqlite`: limit carving to listed file types
+- `--types jpeg,png,sqlite,docx`: limit carving to listed file types (docx/xlsx/pptx are classified from ZIP content)
 - `--disable-zip`: disable ZIP carving (skips zip/docx/xlsx/pptx)
 
 See `docs/config.md` for the full schema.
@@ -93,6 +96,9 @@ See `docs/config.md` for the full schema.
 Carved files are recorded to `metadata/carved_files.jsonl` with run-level provenance.
 String artefacts (URLs/emails/phones) are recorded to `metadata/string_artefacts.jsonl`.
 Browser history records (from carved SQLite) are recorded to `metadata/browser_history.jsonl`.
+Browser cookie records are recorded to `metadata/browser_cookies.jsonl`.
+Browser download records are recorded to `metadata/browser_downloads.jsonl`.
+Chromium-based browsers (Chrome/Edge/Brave) share a schema and may be labeled `chrome` in browser outputs.
 Run summaries are recorded to `metadata/run_summary.jsonl`.
 Entropy regions are recorded to `metadata/entropy_regions.jsonl`.
 
@@ -108,7 +114,7 @@ The Phase 2 pipeline:
 2. Chunk scheduler + reader
 3. CPU signature scanner
 4. Optional CPU string scanner + artefact extraction
-5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite)
+5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite/BMP/TIFF/MP4/RAR/7z)
 6. SQLite parser for browser history
 7. JSONL/CSV metadata sink
 
@@ -116,7 +122,7 @@ See `docs/architecture.md` for details.
 
 ## Notes
 
-- E01 support is available when built with `--features ewf` and requires `libewf` installed.
+- E01 support is enabled by default and requires `libewf` installed. Build without EWF via `--no-default-features` (add GPU features explicitly if needed).
 - Block device inputs are supported on Linux via read-only access (e.g. `/dev/sdX`).
 - GPU signature and string scanning are implemented via OpenCL (`--features gpu-opencl` or `--features gpu` as alias) or CUDA (`--features gpu-cuda`).
 - **OpenCL** builds require an ICD loader with `libOpenCL.so` available; install the dev package (`ocl-icd-devel` on Fedora) or provide a symlink if the linker cannot find `-lOpenCL`.
@@ -131,7 +137,8 @@ See `docs/architecture.md` for details.
 Run the test suite:
 
 ```bash
-cargo test                       # default (CPU-only)
+cargo test                       # default (includes EWF support)
+cargo test --no-default-features # without libewf
 cargo test --features gpu-opencl # with OpenCL backend
 cargo test --features gpu-cuda   # with CUDA backend
 ```

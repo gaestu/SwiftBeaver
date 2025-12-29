@@ -8,10 +8,12 @@ string_scan_utf16: false
 string_min_len: 6
 string_max_len: 1024
 gpu_max_hits_per_chunk: 1000000
+gpu_max_string_spans_per_chunk: 250000
 parquet_row_group_size: 10000
 enable_entropy_detection: false
 entropy_window_size: 4096
 entropy_threshold: 7.5
+enable_sqlite_page_recovery: false
 opencl_platform_index:
 opencl_device_index:
 file_types:
@@ -81,3 +83,56 @@ file_types:
     max_size: 104857600
     min_size: 20
     validator: "webp"
+  - id: "bmp"
+    extensions: ["bmp"]
+    header_patterns:
+      - id: "bmp_header"
+        hex: "424D"
+    footer_patterns: []
+    max_size: 104857600
+    min_size: 54
+    validator: "bmp"
+  - id: "tiff"
+    extensions: ["tiff", "tif"]
+    header_patterns:
+      - id: "tiff_le_header"
+        hex: "49492A00"
+      - id: "tiff_be_header"
+        hex: "4D4D002A"
+    footer_patterns: []
+    max_size: 104857600
+    min_size: 8
+    validator: "tiff"
+  - id: "mp4"
+    extensions: ["mp4"]
+    header_patterns:
+      - id: "mp4_ftyp_18"
+        hex: "0000001866747970"
+      - id: "mp4_ftyp_1c"
+        hex: "0000001C66747970"
+      - id: "mp4_ftyp_20"
+        hex: "0000002066747970"
+    footer_patterns: []
+    max_size: 1073741824
+    min_size: 16
+    validator: "mp4"
+  - id: "rar"
+    extensions: ["rar"]
+    header_patterns:
+      - id: "rar4_header"
+        hex: "526172211A0700"
+      - id: "rar5_header"
+        hex: "526172211A070100"
+    footer_patterns: []
+    max_size: 1073741824
+    min_size: 32
+    validator: "rar"
+  - id: "7z"
+    extensions: ["7z"]
+    header_patterns:
+      - id: "7z_header"
+        hex: "377ABCAF271C"
+    footer_patterns: []
+    max_size: 1073741824
+    min_size: 32
+    validator: "sevenz"

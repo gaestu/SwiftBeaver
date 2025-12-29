@@ -114,6 +114,52 @@ Phone schema:
 - `row_id` (int64, nullable)
 - `table_name` (string, nullable)
 
+Page-level recovery emits `browser="sqlite_page"` and `visit_source="page_scan"` with best-effort `title` and `visit_time_utc`.
+Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
+## Browser cookies
+
+`browser_cookies.parquet` schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `source_file` (string)
+- `browser` (string)
+- `profile` (string)
+- `host` (string)
+- `name` (string)
+- `value` (string, nullable)
+- `path` (string, nullable)
+- `expires_utc` (timestamp micros, nullable)
+- `last_access_utc` (timestamp micros, nullable)
+- `creation_utc` (timestamp micros, nullable)
+- `is_secure` (bool, nullable)
+- `is_http_only` (bool, nullable)
+
+## Browser downloads
+
+`browser_downloads.parquet` schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `source_file` (string)
+- `browser` (string)
+- `profile` (string)
+- `url` (string, nullable)
+- `target_path` (string, nullable)
+- `start_time_utc` (timestamp micros, nullable)
+- `end_time_utc` (timestamp micros, nullable)
+- `total_bytes` (int64, nullable)
+- `state` (string, nullable)
+
+Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
 ## Run summary
 
 `run_summary.parquet` schema:

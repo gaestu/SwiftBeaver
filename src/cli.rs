@@ -92,6 +92,18 @@ pub struct CliOptions {
     #[arg(long)]
     pub entropy_threshold: Option<f64>,
 
+    /// Enable SQLite page-level URL recovery when DB parsing fails
+    #[arg(long)]
+    pub scan_sqlite_pages: bool,
+
+    /// Stop after scanning this many bytes (approximate limit)
+    #[arg(long)]
+    pub max_bytes: Option<u64>,
+
+    /// Stop after scanning this many chunks
+    #[arg(long)]
+    pub max_chunks: Option<u64>,
+
     /// Provide evidence SHA-256 (hex) for metadata output
     #[arg(long)]
     pub evidence_sha256: Option<String>,
@@ -173,5 +185,33 @@ mod tests {
         assert!(opts.scan_entropy);
         assert_eq!(opts.entropy_window_bytes, Some(2048));
         assert_eq!(opts.entropy_threshold, Some(7.2));
+    }
+
+    #[test]
+    fn parses_sqlite_page_flag() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--scan-sqlite-pages",
+        ])
+        .expect("parse");
+        assert!(opts.scan_sqlite_pages);
+    }
+
+    #[test]
+    fn parses_limits() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--max-bytes",
+            "1048576",
+            "--max-chunks",
+            "4",
+        ])
+        .expect("parse");
+        assert_eq!(opts.max_bytes, Some(1_048_576));
+        assert_eq!(opts.max_chunks, Some(4));
     }
 }

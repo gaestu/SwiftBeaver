@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::carve::CarvedFile;
 use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
+use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
 
 pub struct CsvSink {
@@ -16,6 +17,8 @@ pub struct CsvSink {
     files_writer: Mutex<csv::Writer<File>>,
     strings_writer: Mutex<csv::Writer<File>>,
     history_writer: Mutex<csv::Writer<File>>,
+    cookies_writer: Mutex<csv::Writer<File>>,
+    downloads_writer: Mutex<csv::Writer<File>>,
     run_writer: Mutex<csv::Writer<File>>,
     entropy_writer: Mutex<csv::Writer<File>>,
 }
@@ -72,6 +75,45 @@ struct BrowserHistoryCsv<'a> {
 }
 
 #[derive(Serialize)]
+struct BrowserCookieCsv<'a> {
+    run_id: &'a str,
+    browser: &'a str,
+    profile: &'a str,
+    host: &'a str,
+    name: &'a str,
+    value: Option<&'a str>,
+    path: Option<&'a str>,
+    expires_utc: Option<String>,
+    last_access_utc: Option<String>,
+    creation_utc: Option<String>,
+    is_secure: Option<bool>,
+    is_http_only: Option<bool>,
+    source_file: String,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
+#[derive(Serialize)]
+struct BrowserDownloadCsv<'a> {
+    run_id: &'a str,
+    browser: &'a str,
+    profile: &'a str,
+    url: Option<&'a str>,
+    target_path: Option<&'a str>,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    total_bytes: Option<i64>,
+    state: Option<&'a str>,
+    source_file: String,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
+#[derive(Serialize)]
 struct RunSummaryCsv<'a> {
     run_id: &'a str,
     bytes_scanned: u64,
@@ -114,12 +156,16 @@ impl CsvSink {
         let files_file = File::create(meta_dir.join("carved_files.csv"))?;
         let strings_file = File::create(meta_dir.join("string_artefacts.csv"))?;
         let history_file = File::create(meta_dir.join("browser_history.csv"))?;
+        let cookies_file = File::create(meta_dir.join("browser_cookies.csv"))?;
+        let downloads_file = File::create(meta_dir.join("browser_downloads.csv"))?;
         let run_file = File::create(meta_dir.join("run_summary.csv"))?;
         let entropy_file = File::create(meta_dir.join("entropy_regions.csv"))?;
 
         let mut files_writer = csv::WriterBuilder::new().has_headers(false).from_writer(files_file);
         let mut strings_writer = csv::WriterBuilder::new().has_headers(false).from_writer(strings_file);
         let mut history_writer = csv::WriterBuilder::new().has_headers(false).from_writer(history_file);
+        let mut cookies_writer = csv::WriterBuilder::new().has_headers(false).from_writer(cookies_file);
+        let mut downloads_writer = csv::WriterBuilder::new().has_headers(false).from_writer(downloads_file);
         let mut run_writer = csv::WriterBuilder::new().has_headers(false).from_writer(run_file);
         let mut entropy_writer = csv::WriterBuilder::new().has_headers(false).from_writer(entropy_file);
 
@@ -171,6 +217,43 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
+        cookies_writer.write_record(&[
+            "run_id",
+            "browser",
+            "profile",
+            "host",
+            "name",
+            "value",
+            "path",
+            "expires_utc",
+            "last_access_utc",
+            "creation_utc",
+            "is_secure",
+            "is_http_only",
+            "source_file",
+            "tool_version",
+            "config_hash",
+            "evidence_path",
+            "evidence_sha256",
+        ])?;
+
+        downloads_writer.write_record(&[
+            "run_id",
+            "browser",
+            "profile",
+            "url",
+            "target_path",
+            "start_time",
+            "end_time",
+            "total_bytes",
+            "state",
+            "source_file",
+            "tool_version",
+            "config_hash",
+            "evidence_path",
+            "evidence_sha256",
+        ])?;
+
         run_writer.write_record(&[
             "run_id",
             "bytes_scanned",
@@ -205,6 +288,8 @@ impl CsvSink {
             files_writer: Mutex::new(files_writer),
             strings_writer: Mutex::new(strings_writer),
             history_writer: Mutex::new(history_writer),
+            cookies_writer: Mutex::new(cookies_writer),
+            downloads_writer: Mutex::new(downloads_writer),
             run_writer: Mutex::new(run_writer),
             entropy_writer: Mutex::new(entropy_writer),
         })
@@ -275,6 +360,53 @@ impl MetadataSink for CsvSink {
         Ok(())
     }
 
+    fn record_cookie(&self, record: &BrowserCookieRecord) -> Result<(), MetadataError> {
+        let record = BrowserCookieCsv {
+            run_id: &record.run_id,
+            browser: &record.browser,
+            profile: &record.profile,
+            host: &record.host,
+            name: &record.name,
+            value: record.value.as_deref(),
+            path: record.path.as_deref(),
+            expires_utc: record.expires_utc.map(|dt| dt.to_string()),
+            last_access_utc: record.last_access_utc.map(|dt| dt.to_string()),
+            creation_utc: record.creation_utc.map(|dt| dt.to_string()),
+            is_secure: record.is_secure,
+            is_http_only: record.is_http_only,
+            source_file: record.source_file.to_string_lossy().to_string(),
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self.cookies_writer.lock().unwrap();
+        guard.serialize(record)?;
+        Ok(())
+    }
+
+    fn record_download(&self, record: &BrowserDownloadRecord) -> Result<(), MetadataError> {
+        let record = BrowserDownloadCsv {
+            run_id: &record.run_id,
+            browser: &record.browser,
+            profile: &record.profile,
+            url: record.url.as_deref(),
+            target_path: record.target_path.as_deref(),
+            start_time: record.start_time.map(|dt| dt.to_string()),
+            end_time: record.end_time.map(|dt| dt.to_string()),
+            total_bytes: record.total_bytes,
+            state: record.state.as_deref(),
+            source_file: record.source_file.to_string_lossy().to_string(),
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self.downloads_writer.lock().unwrap();
+        guard.serialize(record)?;
+        Ok(())
+    }
+
     fn record_run_summary(&self, summary: &RunSummary) -> Result<(), MetadataError> {
         let record = RunSummaryCsv {
             run_id: &summary.run_id,
@@ -315,11 +447,15 @@ impl MetadataSink for CsvSink {
         let mut files = self.files_writer.lock().unwrap();
         let mut strings = self.strings_writer.lock().unwrap();
         let mut history = self.history_writer.lock().unwrap();
+        let mut cookies = self.cookies_writer.lock().unwrap();
+        let mut downloads = self.downloads_writer.lock().unwrap();
         let mut run = self.run_writer.lock().unwrap();
         let mut entropy = self.entropy_writer.lock().unwrap();
         files.flush()?;
         strings.flush()?;
         history.flush()?;
+        cookies.flush()?;
+        downloads.flush()?;
         run.flush()?;
         entropy.flush()?;
         Ok(())
@@ -392,6 +528,37 @@ mod tests {
             source_file: "sqlite/history.sqlite".into(),
         };
         sink.record_history(&history).expect("record history");
+
+        let cookie = crate::parsers::browser::BrowserCookieRecord {
+            run_id: "run1".to_string(),
+            browser: "chrome".to_string(),
+            profile: "Default".to_string(),
+            host: "example.com".to_string(),
+            name: "sid".to_string(),
+            value: Some("abc123".to_string()),
+            path: Some("/".to_string()),
+            expires_utc: None,
+            last_access_utc: None,
+            creation_utc: None,
+            is_secure: Some(true),
+            is_http_only: Some(true),
+            source_file: "sqlite/Cookies".into(),
+        };
+        sink.record_cookie(&cookie).expect("record cookie");
+
+        let download = crate::parsers::browser::BrowserDownloadRecord {
+            run_id: "run1".to_string(),
+            browser: "chrome".to_string(),
+            profile: "Default".to_string(),
+            url: Some("https://example.com/file.zip".to_string()),
+            target_path: Some("/tmp/file.zip".to_string()),
+            start_time: None,
+            end_time: None,
+            total_bytes: Some(123),
+            state: Some("1".to_string()),
+            source_file: "sqlite/History".into(),
+        };
+        sink.record_download(&download).expect("record download");
         let summary = RunSummary {
             run_id: "run1".to_string(),
             bytes_scanned: 10,
@@ -416,6 +583,8 @@ mod tests {
         assert!(dir.path().join("metadata").join("carved_files.csv").exists());
         assert!(dir.path().join("metadata").join("string_artefacts.csv").exists());
         assert!(dir.path().join("metadata").join("browser_history.csv").exists());
+        assert!(dir.path().join("metadata").join("browser_cookies.csv").exists());
+        assert!(dir.path().join("metadata").join("browser_downloads.csv").exists());
         assert!(dir.path().join("metadata").join("run_summary.csv").exists());
         assert!(dir.path().join("metadata").join("entropy_regions.csv").exists());
     }

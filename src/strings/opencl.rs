@@ -6,10 +6,17 @@ use opencl3::command_queue::{CommandQueue, CL_BLOCKING};
 use opencl3::context::Context;
 use opencl3::device::{Device, CL_DEVICE_TYPE_GPU};
 use opencl3::kernel::Kernel;
-use opencl3::memory::{Buffer, ClMem, CL_MEM_COPY_HOST_PTR, CL_MEM_READ_ONLY, CL_MEM_WRITE_ONLY};
+use opencl3::memory::{
+    Buffer,
+    ClMem,
+    CL_MEM_COPY_HOST_PTR,
+    CL_MEM_READ_ONLY,
+    CL_MEM_READ_WRITE,
+    CL_MEM_WRITE_ONLY,
+};
 use opencl3::platform::get_platforms;
 use opencl3::program::Program;
-use opencl3::types::cl_ulong;
+use opencl3::types::{cl_uint, cl_ulong};
 use tracing::warn;
 
 use crate::chunk::ScanChunk;
@@ -18,19 +25,74 @@ use crate::strings::cpu::CpuStringScanner;
 use crate::strings::{StringScanner, StringSpan};
 
 const KERNEL_SRC: &str = r#"
-__kernel void mark_printable(
+#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
+__kernel void scan_ascii_spans(
     __global const uchar* data,
     ulong data_len,
-    __global uchar* mask) {
+    uint min_len,
+    uint max_len,
+    __global uint* span_starts,
+    __global uint* span_lens,
+    __global uint* span_flags,
+    __global uint* span_count,
+    uint max_spans) {
     size_t gid = get_global_id(0);
     if (gid >= data_len) {
         return;
     }
     uchar b = data[gid];
-    if (b == 9 || (b >= 32 && b <= 126)) {
-        mask[gid] = 1;
-    } else {
-        mask[gid] = 0;
+    if (!(b == 9 || (b >= 32 && b <= 126))) {
+        return;
+    }
+    if (gid > 0) {
+        uchar prev = data[gid - 1];
+        if (prev == 9 || (prev >= 32 && prev <= 126)) {
+            return;
+        }
+    }
+
+    uint len = 0;
+    uint digits = 0;
+    uint flags = 0;
+    uint window = 0;
+    const uint HTTP = 0x68747470;
+    const uint WWW = 0x7777772e;
+
+    while ((ulong)(gid + len) < data_len) {
+        uchar c = data[gid + len];
+        if (!(c == 9 || (c >= 32 && c <= 126))) {
+            break;
+        }
+        uchar lower = c;
+        if (lower >= 'A' && lower <= 'Z') {
+            lower = (uchar)(lower + 32);
+        }
+        window = (window << 8) | (uint)lower;
+        if (window == HTTP || window == WWW) {
+            flags |= 16;
+        }
+        if (c == '@') {
+            flags |= 32;
+        }
+        if (c >= '0' && c <= '9') {
+            digits += 1;
+        }
+        len += 1;
+        if (len >= max_len) {
+            break;
+        }
+    }
+
+    if (digits >= 10) {
+        flags |= 64;
+    }
+    if (len >= min_len) {
+        uint idx = atomic_inc(span_count);
+        if (idx < max_spans) {
+            span_starts[idx] = (uint)gid;
+            span_lens[idx] = len;
+            span_flags[idx] = flags;
+        }
     }
 }
 "#;
@@ -41,6 +103,9 @@ pub struct OpenClStringScanner {
     kernel: Mutex<Kernel>,
     min_len: usize,
     max_len: usize,
+    min_len_u32: u32,
+    max_len_u32: u32,
+    max_spans_per_chunk: u32,
     scan_utf16: bool,
     cpu_fallback: CpuStringScanner,
 }
@@ -52,12 +117,22 @@ impl OpenClStringScanner {
         let queue = CommandQueue::create_default(&context, 0)?;
         let program = Program::create_and_build_from_source(&context, KERNEL_SRC, "")
             .map_err(|err| anyhow!(err))?;
-        let kernel = Kernel::create(&program, "mark_printable")?;
+        let kernel = Kernel::create(&program, "scan_ascii_spans")?;
         let max_len = if cfg.string_max_len == 0 {
             usize::MAX
         } else {
             cfg.string_max_len
         };
+        let min_len_u32 = cfg.string_min_len.min(u32::MAX as usize) as u32;
+        let max_len_u32 = if max_len > u32::MAX as usize {
+            u32::MAX
+        } else {
+            max_len as u32
+        };
+        let max_spans_per_chunk = cfg
+            .gpu_max_string_spans_per_chunk
+            .min(u32::MAX as usize)
+            .max(1) as u32;
 
         Ok(Self {
             context,
@@ -65,6 +140,9 @@ impl OpenClStringScanner {
             kernel: Mutex::new(kernel),
             min_len: cfg.string_min_len,
             max_len,
+            min_len_u32,
+            max_len_u32,
+            max_spans_per_chunk,
             scan_utf16: cfg.string_scan_utf16,
             cpu_fallback: CpuStringScanner::new(
                 cfg.string_min_len,
@@ -102,17 +180,62 @@ impl StringScanner for OpenClStringScanner {
             }
         };
 
-        let mask_buffer = match unsafe {
-            Buffer::<u8>::create(
+        let span_capacity = self.max_spans_per_chunk as usize;
+        let starts_buffer = match unsafe {
+            Buffer::<cl_uint>::create(
                 &self.context,
                 CL_MEM_WRITE_ONLY,
-                data.len(),
+                span_capacity,
                 ptr::null_mut(),
             )
         } {
             Ok(buf) => buf,
             Err(err) => {
-                warn!("opencl mask buffer create failed: {err}; using cpu fallback");
+                warn!("opencl span starts buffer create failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let lens_buffer = match unsafe {
+            Buffer::<cl_uint>::create(
+                &self.context,
+                CL_MEM_WRITE_ONLY,
+                span_capacity,
+                ptr::null_mut(),
+            )
+        } {
+            Ok(buf) => buf,
+            Err(err) => {
+                warn!("opencl span lengths buffer create failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let flags_buffer = match unsafe {
+            Buffer::<cl_uint>::create(
+                &self.context,
+                CL_MEM_WRITE_ONLY,
+                span_capacity,
+                ptr::null_mut(),
+            )
+        } {
+            Ok(buf) => buf,
+            Err(err) => {
+                warn!("opencl span flags buffer create failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+
+        let mut zero = [0u32];
+        let count_buffer = match unsafe {
+            Buffer::<cl_uint>::create(
+                &self.context,
+                CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+                1,
+                zero.as_mut_ptr() as *mut _,
+            )
+        } {
+            Ok(buf) => buf,
+            Err(err) => {
+                warn!("opencl span count buffer create failed: {err}; using cpu fallback");
                 return self.cpu_fallback.scan_chunk(chunk, data);
             }
         };
@@ -123,14 +246,23 @@ impl StringScanner for OpenClStringScanner {
         };
 
         let data_mem = data_buffer.get();
-        let mask_mem = mask_buffer.get();
+        let starts_mem = starts_buffer.get();
+        let lens_mem = lens_buffer.get();
+        let flags_mem = flags_buffer.get();
+        let count_mem = count_buffer.get();
 
         if let Err(err) = unsafe { kernel.set_arg(0, &data_mem) } {
             warn!("opencl kernel arg error: {err}; using cpu fallback");
             return self.cpu_fallback.scan_chunk(chunk, data);
         }
         let _ = unsafe { kernel.set_arg(1, &data_len) };
-        let _ = unsafe { kernel.set_arg(2, &mask_mem) };
+        let _ = unsafe { kernel.set_arg(2, &self.min_len_u32) };
+        let _ = unsafe { kernel.set_arg(3, &self.max_len_u32) };
+        let _ = unsafe { kernel.set_arg(4, &starts_mem) };
+        let _ = unsafe { kernel.set_arg(5, &lens_mem) };
+        let _ = unsafe { kernel.set_arg(6, &flags_mem) };
+        let _ = unsafe { kernel.set_arg(7, &count_mem) };
+        let _ = unsafe { kernel.set_arg(8, &self.max_spans_per_chunk) };
 
         let global_work_size = [data.len() as usize];
         if let Err(err) = unsafe {
@@ -152,16 +284,58 @@ impl StringScanner for OpenClStringScanner {
             return self.cpu_fallback.scan_chunk(chunk, data);
         }
 
-        let mut mask = vec![0u8; data.len()];
+        let mut count = [0u32];
         if let Err(err) = unsafe {
             self.queue
-                .enqueue_read_buffer(&mask_buffer, CL_BLOCKING, 0, &mut mask, &[])
+                .enqueue_read_buffer(&count_buffer, CL_BLOCKING, 0, &mut count, &[])
         } {
-            warn!("opencl read mask failed: {err}; using cpu fallback");
+            warn!("opencl read span count failed: {err}; using cpu fallback");
+            return self.cpu_fallback.scan_chunk(chunk, data);
+        }
+        let mut count = count[0] as usize;
+        if count > span_capacity {
+            warn!(
+                "opencl span overflow: count={} max={}",
+                count, span_capacity
+            );
+            count = span_capacity;
+        }
+
+        let mut starts = vec![0u32; span_capacity];
+        let mut lens = vec![0u32; span_capacity];
+        let mut flags = vec![0u32; span_capacity];
+        if let Err(err) = unsafe {
+            self.queue
+                .enqueue_read_buffer(&starts_buffer, CL_BLOCKING, 0, &mut starts, &[])
+        } {
+            warn!("opencl read span starts failed: {err}; using cpu fallback");
+            return self.cpu_fallback.scan_chunk(chunk, data);
+        }
+        if let Err(err) = unsafe {
+            self.queue
+                .enqueue_read_buffer(&lens_buffer, CL_BLOCKING, 0, &mut lens, &[])
+        } {
+            warn!("opencl read span lengths failed: {err}; using cpu fallback");
+            return self.cpu_fallback.scan_chunk(chunk, data);
+        }
+        if let Err(err) = unsafe {
+            self.queue
+                .enqueue_read_buffer(&flags_buffer, CL_BLOCKING, 0, &mut flags, &[])
+        } {
+            warn!("opencl read span flags failed: {err}; using cpu fallback");
             return self.cpu_fallback.scan_chunk(chunk, data);
         }
 
-        let mut spans = spans_from_mask(chunk, data, &mask, self.min_len, self.max_len);
+        let mut spans = Vec::with_capacity(count);
+        for idx in 0..count {
+            spans.push(StringSpan {
+                chunk_id: chunk.id,
+                local_start: starts[idx] as u64,
+                length: lens[idx],
+                flags: flags[idx],
+            });
+        }
+        spans = extend_long_ascii_spans(chunk, data, spans, self.min_len, self.max_len);
         let mut utf8 = crate::strings::cpu::scan_utf8_runs(
             data,
             chunk,
@@ -191,49 +365,55 @@ impl StringScanner for OpenClStringScanner {
     }
 }
 
-fn spans_from_mask(
+fn extend_long_ascii_spans(
     chunk: &ScanChunk,
     data: &[u8],
-    mask: &[u8],
+    spans: Vec<StringSpan>,
     min_len: usize,
     max_len: usize,
 ) -> Vec<StringSpan> {
-    let mut spans = Vec::new();
-    let mut i = 0usize;
-
-    while i < mask.len() {
-        if mask[i] == 0 {
-            i += 1;
+    if max_len == usize::MAX {
+        return spans;
+    }
+    let mut out = Vec::with_capacity(spans.len());
+    for span in spans {
+        let start = span.local_start as usize;
+        let len = span.length as usize;
+        out.push(span);
+        if len < max_len {
             continue;
         }
-
-        let start = i;
-        let mut len = 0usize;
-        while i < mask.len() && mask[i] != 0 {
-            i += 1;
-            len += 1;
-            if len >= max_len {
-                break;
+        let mut idx = start + len;
+        if idx >= data.len() || !is_printable(data[idx]) {
+            continue;
+        }
+        while idx < data.len() && is_printable(data[idx]) {
+            let run_start = idx;
+            let mut run_len = 0usize;
+            while idx < data.len() && is_printable(data[idx]) {
+                idx += 1;
+                run_len += 1;
+                if run_len >= max_len {
+                    break;
+                }
+            }
+            if run_len >= min_len {
+                let slice = &data[run_start..run_start + run_len];
+                let flags = crate::strings::cpu::span_flags_ascii(slice);
+                out.push(StringSpan {
+                    chunk_id: chunk.id,
+                    local_start: run_start as u64,
+                    length: run_len as u32,
+                    flags,
+                });
             }
         }
-
-        if len >= min_len {
-            let slice = &data[start..start + len];
-            let flags = crate::strings::cpu::span_flags_ascii(slice);
-            spans.push(StringSpan {
-                chunk_id: chunk.id,
-                local_start: start as u64,
-                length: len as u32,
-                flags,
-            });
-        }
-
-        if len >= max_len {
-            continue;
-        }
     }
+    out
+}
 
-    spans
+fn is_printable(byte: u8) -> bool {
+    matches!(byte, b'\t' | 0x20..=0x7E)
 }
 
 fn select_device(cfg: &Config) -> Result<(Device, Context)> {

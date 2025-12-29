@@ -18,7 +18,7 @@ use parquet::file::properties::WriterProperties;
 use crate::carve::CarvedFile;
 use crate::config::Config;
 use crate::metadata::{MetadataError, MetadataSink, RunSummary};
-use crate::parsers::browser::BrowserHistoryRecord;
+use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
 
 #[derive(Clone)]
@@ -44,6 +44,8 @@ enum ParquetCategory {
     ArtefactsEmails,
     ArtefactsPhones,
     BrowserHistory,
+    BrowserCookies,
+    BrowserDownloads,
     EntropyRegions,
     RunSummary,
 }
@@ -63,6 +65,8 @@ impl ParquetCategory {
             ParquetCategory::ArtefactsEmails => "artefacts_emails.parquet",
             ParquetCategory::ArtefactsPhones => "artefacts_phones.parquet",
             ParquetCategory::BrowserHistory => "browser_history.parquet",
+            ParquetCategory::BrowserCookies => "browser_cookies.parquet",
+            ParquetCategory::BrowserDownloads => "browser_downloads.parquet",
             ParquetCategory::EntropyRegions => "entropy_regions.parquet",
             ParquetCategory::RunSummary => "run_summary.parquet",
         }
@@ -154,6 +158,35 @@ struct BrowserHistoryRow {
 }
 
 #[derive(Debug, Clone)]
+struct BrowserCookieRow {
+    source_file: String,
+    browser: String,
+    profile: String,
+    host: String,
+    name: String,
+    value: Option<String>,
+    path: Option<String>,
+    expires_utc: Option<i64>,
+    last_access_utc: Option<i64>,
+    creation_utc: Option<i64>,
+    is_secure: Option<bool>,
+    is_http_only: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+struct BrowserDownloadRow {
+    source_file: String,
+    browser: String,
+    profile: String,
+    url: Option<String>,
+    target_path: Option<String>,
+    start_time_utc: Option<i64>,
+    end_time_utc: Option<i64>,
+    total_bytes: Option<i64>,
+    state: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 struct EntropyRegionRow {
     global_start: i64,
     global_end: i64,
@@ -177,6 +210,8 @@ enum CategoryBuffer {
     Emails(Vec<EmailArtefactRow>),
     Phones(Vec<PhoneArtefactRow>),
     History(Vec<BrowserHistoryRow>),
+    Cookies(Vec<BrowserCookieRow>),
+    Downloads(Vec<BrowserDownloadRow>),
     Entropy(Vec<EntropyRegionRow>),
     Summary(Vec<RunSummaryRow>),
 }
@@ -209,6 +244,8 @@ impl CategoryWriter {
             ParquetCategory::ArtefactsEmails => CategoryBuffer::Emails(Vec::new()),
             ParquetCategory::ArtefactsPhones => CategoryBuffer::Phones(Vec::new()),
             ParquetCategory::BrowserHistory => CategoryBuffer::History(Vec::new()),
+            ParquetCategory::BrowserCookies => CategoryBuffer::Cookies(Vec::new()),
+            ParquetCategory::BrowserDownloads => CategoryBuffer::Downloads(Vec::new()),
             ParquetCategory::EntropyRegions => CategoryBuffer::Entropy(Vec::new()),
             ParquetCategory::RunSummary => CategoryBuffer::Summary(Vec::new()),
             _ => CategoryBuffer::Files(Vec::new()),
@@ -290,6 +327,36 @@ impl CategoryWriter {
         }
     }
 
+    fn append_cookie(&mut self, row: BrowserCookieRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::Cookies(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "browser cookie row on non-cookie category".to_string(),
+            )),
+        }
+    }
+
+    fn append_download(&mut self, row: BrowserDownloadRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::Downloads(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "browser download row on non-download category".to_string(),
+            )),
+        }
+    }
+
     fn append_entropy(&mut self, row: EntropyRegionRow) -> Result<(), MetadataError> {
         match &mut self.buffer {
             CategoryBuffer::Entropy(rows) => {
@@ -350,6 +417,16 @@ impl CategoryWriter {
                 rows.clear();
                 batch
             }
+            CategoryBuffer::Cookies(rows) => {
+                let batch = build_cookies_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
+            CategoryBuffer::Downloads(rows) => {
+                let batch = build_downloads_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
             CategoryBuffer::Entropy(rows) => {
                 let batch = build_entropy_batch(&self.context, rows, &self.schema)?;
                 rows.clear();
@@ -386,6 +463,8 @@ impl CategoryWriter {
             CategoryBuffer::Emails(rows) => rows.len(),
             CategoryBuffer::Phones(rows) => rows.len(),
             CategoryBuffer::History(rows) => rows.len(),
+            CategoryBuffer::Cookies(rows) => rows.len(),
+            CategoryBuffer::Downloads(rows) => rows.len(),
             CategoryBuffer::Entropy(rows) => rows.len(),
             CategoryBuffer::Summary(rows) => rows.len(),
         }
@@ -408,6 +487,8 @@ struct ParquetSinkInner {
     artefacts_emails: Option<CategoryWriter>,
     artefacts_phones: Option<CategoryWriter>,
     browser_history: Option<CategoryWriter>,
+    browser_cookies: Option<CategoryWriter>,
+    browser_downloads: Option<CategoryWriter>,
     entropy_regions: Option<CategoryWriter>,
     run_summary: Option<CategoryWriter>,
 }
@@ -430,6 +511,8 @@ impl ParquetSinkInner {
             ParquetCategory::ArtefactsEmails => &mut self.artefacts_emails,
             ParquetCategory::ArtefactsPhones => &mut self.artefacts_phones,
             ParquetCategory::BrowserHistory => &mut self.browser_history,
+            ParquetCategory::BrowserCookies => &mut self.browser_cookies,
+            ParquetCategory::BrowserDownloads => &mut self.browser_downloads,
             ParquetCategory::EntropyRegions => &mut self.entropy_regions,
             ParquetCategory::RunSummary => &mut self.run_summary,
         };
@@ -485,6 +568,12 @@ impl ParquetSinkInner {
         if let Some(writer) = &mut self.browser_history {
             writer.finish()?;
         }
+        if let Some(writer) = &mut self.browser_cookies {
+            writer.finish()?;
+        }
+        if let Some(writer) = &mut self.browser_downloads {
+            writer.finish()?;
+        }
         if let Some(writer) = &mut self.entropy_regions {
             writer.finish()?;
         }
@@ -536,6 +625,8 @@ impl ParquetSink {
                 artefacts_emails: None,
                 artefacts_phones: None,
                 browser_history: None,
+                browser_cookies: None,
+                browser_downloads: None,
                 entropy_regions: None,
                 run_summary: None,
             }),
@@ -605,6 +696,45 @@ impl MetadataSink for ParquetSink {
         let mut inner = self.inner.lock().unwrap();
         let writer = inner.get_or_create_writer(ParquetCategory::BrowserHistory)?;
         writer.append_history(row)
+    }
+
+    fn record_cookie(&self, record: &BrowserCookieRecord) -> Result<(), MetadataError> {
+        let row = BrowserCookieRow {
+            source_file: record.source_file.to_string_lossy().to_string(),
+            browser: record.browser.clone(),
+            profile: record.profile.clone(),
+            host: record.host.clone(),
+            name: record.name.clone(),
+            value: record.value.clone(),
+            path: record.path.clone(),
+            expires_utc: record.expires_utc.map(to_micros),
+            last_access_utc: record.last_access_utc.map(to_micros),
+            creation_utc: record.creation_utc.map(to_micros),
+            is_secure: record.is_secure,
+            is_http_only: record.is_http_only,
+        };
+
+        let mut inner = self.inner.lock().unwrap();
+        let writer = inner.get_or_create_writer(ParquetCategory::BrowserCookies)?;
+        writer.append_cookie(row)
+    }
+
+    fn record_download(&self, record: &BrowserDownloadRecord) -> Result<(), MetadataError> {
+        let row = BrowserDownloadRow {
+            source_file: record.source_file.to_string_lossy().to_string(),
+            browser: record.browser.clone(),
+            profile: record.profile.clone(),
+            url: record.url.clone(),
+            target_path: record.target_path.clone(),
+            start_time_utc: record.start_time.map(to_micros),
+            end_time_utc: record.end_time.map(to_micros),
+            total_bytes: record.total_bytes,
+            state: record.state.clone(),
+        };
+
+        let mut inner = self.inner.lock().unwrap();
+        let writer = inner.get_or_create_writer(ParquetCategory::BrowserDownloads)?;
+        writer.append_download(row)
     }
 
     fn record_run_summary(&self, summary: &RunSummary) -> Result<(), MetadataError> {
@@ -772,6 +902,61 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("visit_source", DataType::Utf8, true),
             Field::new("row_id", DataType::Int64, true),
             Field::new("table_name", DataType::Utf8, true),
+        ])),
+        ParquetCategory::BrowserCookies => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("source_file", DataType::Utf8, false),
+            Field::new("browser", DataType::Utf8, false),
+            Field::new("profile", DataType::Utf8, false),
+            Field::new("host", DataType::Utf8, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("value", DataType::Utf8, true),
+            Field::new("path", DataType::Utf8, true),
+            Field::new(
+                "expires_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new(
+                "last_access_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new(
+                "creation_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new("is_secure", DataType::Boolean, true),
+            Field::new("is_http_only", DataType::Boolean, true),
+        ])),
+        ParquetCategory::BrowserDownloads => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("source_file", DataType::Utf8, false),
+            Field::new("browser", DataType::Utf8, false),
+            Field::new("profile", DataType::Utf8, false),
+            Field::new("url", DataType::Utf8, true),
+            Field::new("target_path", DataType::Utf8, true),
+            Field::new(
+                "start_time_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new(
+                "end_time_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new("total_bytes", DataType::Int64, true),
+            Field::new("state", DataType::Utf8, true),
         ])),
         ParquetCategory::EntropyRegions => Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
@@ -1100,6 +1285,131 @@ fn build_history_batch(
         Arc::new(visit_source.finish()),
         Arc::new(row_id.finish()),
         Arc::new(table_name.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_cookies_batch(
+    ctx: &ParquetContext,
+    rows: &[BrowserCookieRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut source_file = StringBuilder::new();
+    let mut browser = StringBuilder::new();
+    let mut profile = StringBuilder::new();
+    let mut host = StringBuilder::new();
+    let mut name = StringBuilder::new();
+    let mut value = StringBuilder::new();
+    let mut path = StringBuilder::new();
+    let mut expires = TimestampMicrosecondBuilder::new();
+    let mut last_access = TimestampMicrosecondBuilder::new();
+    let mut creation = TimestampMicrosecondBuilder::new();
+    let mut is_secure = BooleanBuilder::new();
+    let mut is_http_only = BooleanBuilder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        source_file.append_value(&row.source_file);
+        browser.append_value(&row.browser);
+        profile.append_value(&row.profile);
+        host.append_value(&row.host);
+        name.append_value(&row.name);
+        value.append_option(row.value.as_deref());
+        path.append_option(row.path.as_deref());
+        expires.append_option(row.expires_utc);
+        last_access.append_option(row.last_access_utc);
+        creation.append_option(row.creation_utc);
+        is_secure.append_option(row.is_secure);
+        is_http_only.append_option(row.is_http_only);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(source_file.finish()),
+        Arc::new(browser.finish()),
+        Arc::new(profile.finish()),
+        Arc::new(host.finish()),
+        Arc::new(name.finish()),
+        Arc::new(value.finish()),
+        Arc::new(path.finish()),
+        Arc::new(expires.finish()),
+        Arc::new(last_access.finish()),
+        Arc::new(creation.finish()),
+        Arc::new(is_secure.finish()),
+        Arc::new(is_http_only.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_downloads_batch(
+    ctx: &ParquetContext,
+    rows: &[BrowserDownloadRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut source_file = StringBuilder::new();
+    let mut browser = StringBuilder::new();
+    let mut profile = StringBuilder::new();
+    let mut url = StringBuilder::new();
+    let mut target_path = StringBuilder::new();
+    let mut start_time = TimestampMicrosecondBuilder::new();
+    let mut end_time = TimestampMicrosecondBuilder::new();
+    let mut total_bytes = Int64Builder::new();
+    let mut state = StringBuilder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        source_file.append_value(&row.source_file);
+        browser.append_value(&row.browser);
+        profile.append_value(&row.profile);
+        url.append_option(row.url.as_deref());
+        target_path.append_option(row.target_path.as_deref());
+        start_time.append_option(row.start_time_utc);
+        end_time.append_option(row.end_time_utc);
+        total_bytes.append_option(row.total_bytes);
+        state.append_option(row.state.as_deref());
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(source_file.finish()),
+        Arc::new(browser.finish()),
+        Arc::new(profile.finish()),
+        Arc::new(url.finish()),
+        Arc::new(target_path.finish()),
+        Arc::new(start_time.finish()),
+        Arc::new(end_time.finish()),
+        Arc::new(total_bytes.finish()),
+        Arc::new(state.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)

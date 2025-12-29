@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{output_path, CarveError, CarveHandler, CarvedFile, ExtractionContext};
+use crate::carve::{output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext};
 use crate::scanner::NormalizedHit;
 
 const ZIP_HEADER: &[u8] = b"PK\x03\x04";
@@ -15,15 +16,29 @@ pub struct ZipCarveHandler {
     min_size: u64,
     max_size: u64,
     require_eocd: bool,
+    allowed_kinds: Option<HashSet<String>>,
 }
 
 impl ZipCarveHandler {
-    pub fn new(extension: String, min_size: u64, max_size: u64, require_eocd: bool) -> Self {
+    pub fn new(
+        extension: String,
+        min_size: u64,
+        max_size: u64,
+        require_eocd: bool,
+        allowed_kinds: Option<Vec<String>>,
+    ) -> Self {
+        let allowed_kinds = allowed_kinds.map(|kinds| {
+            kinds
+                .into_iter()
+                .map(|kind| kind.to_ascii_lowercase())
+                .collect()
+        });
         Self {
             extension,
             min_size,
             max_size,
             require_eocd,
+            allowed_kinds,
         }
     }
 }
@@ -66,7 +81,7 @@ impl CarveHandler for ZipCarveHandler {
                 }
             }
 
-            let (full_path, mut rel_path) =
+            let (mut full_path, mut rel_path) =
                 output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
             let mut file = File::create(&full_path)?;
             let mut md5 = md5::Context::new();
@@ -110,9 +125,17 @@ impl CarveHandler for ZipCarveHandler {
                         ) {
                             if std::fs::rename(&full_path, &new_path).is_ok() {
                                 rel_path = new_rel;
+                                full_path = new_path;
                             }
                         }
                     }
+                }
+            }
+
+            if let Some(allowed) = &self.allowed_kinds {
+                if !allowed.contains(&file_type) {
+                    let _ = std::fs::remove_file(&full_path);
+                    return Ok(None);
                 }
             }
 
@@ -371,44 +394,6 @@ fn find_eocd(
     }
 }
 
-fn write_range(
-    ctx: &ExtractionContext,
-    start: u64,
-    end: u64,
-    file: &mut File,
-    md5: &mut md5::Context,
-    sha256: &mut Sha256,
-) -> Result<(u64, bool), CarveError> {
-    let mut offset = start;
-    let mut remaining = end.saturating_sub(start);
-    let mut bytes_written = 0u64;
-    let buf_size = 64 * 1024;
-
-    while remaining > 0 {
-        let read_len = remaining.min(buf_size as u64) as usize;
-        let mut buf = vec![0u8; read_len];
-        let n = ctx
-            .evidence
-            .read_at(offset, &mut buf)
-            .map_err(|e| CarveError::Evidence(e.to_string()))?;
-        if n == 0 {
-            return Ok((bytes_written, true));
-        }
-        buf.truncate(n);
-        file.write_all(&buf)?;
-        md5.consume(&buf);
-        sha256.update(&buf);
-        bytes_written = bytes_written.saturating_add(buf.len() as u64);
-        offset = offset.saturating_add(buf.len() as u64);
-        remaining = remaining.saturating_sub(buf.len() as u64);
-        if n < read_len {
-            return Ok((bytes_written, true));
-        }
-    }
-
-    Ok((bytes_written, false))
-}
-
 #[derive(Debug, Clone)]
 struct ZipEocd {
     cd_offset: u64,
@@ -612,7 +597,7 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
         };
-        let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true);
+        let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "zip".to_string(),
@@ -622,5 +607,62 @@ mod tests {
         let result = handler.process_hit(&hit, &ctx).expect("process");
         assert!(result.is_none());
         assert!(!dir.path().join("zip").exists());
+    }
+
+    #[test]
+    fn filters_zip_kinds_when_configured() {
+        let dir = tempdir().expect("tempdir");
+        let evidence_path = dir.path().join("evidence.bin");
+        let mut file = File::create(&evidence_path).expect("create");
+        let data = sample_zip_with_entry("word/document.xml");
+        file.write_all(&data).expect("write");
+        drop(file);
+
+        let evidence = RawFileSource::open(&evidence_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "run",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "zip".to_string(),
+            pattern_id: "zip_header".to_string(),
+        };
+
+        let handler = ZipCarveHandler::new(
+            "zip".to_string(),
+            0,
+            1024,
+            true,
+            Some(vec!["docx".to_string()]),
+        );
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        let carved = result.expect("carved");
+        assert_eq!(carved.file_type, "docx");
+        assert!(dir.path().join("docx").exists());
+
+        let dir = tempdir().expect("tempdir");
+        let evidence_path = dir.path().join("evidence.bin");
+        let mut file = File::create(&evidence_path).expect("create");
+        file.write_all(&data).expect("write");
+        drop(file);
+
+        let evidence = RawFileSource::open(&evidence_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "run",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+        let handler = ZipCarveHandler::new(
+            "zip".to_string(),
+            0,
+            1024,
+            true,
+            Some(vec!["xlsx".to_string()]),
+        );
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none());
+        assert!(!dir.path().join("xlsx").exists());
     }
 }

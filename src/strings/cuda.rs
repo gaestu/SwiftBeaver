@@ -10,21 +10,74 @@ use crate::strings::cpu::CpuStringScanner;
 use crate::strings::{StringScanner, StringSpan};
 
 const KERNEL_SRC: &str = r#"
-extern "C" __global__ void mark_printable(
+extern "C" __global__ void scan_ascii_spans(
     const unsigned char* data,
     unsigned long long data_len,
-    unsigned char* mask) {
-    
+    unsigned int min_len,
+    unsigned int max_len,
+    unsigned int* span_starts,
+    unsigned int* span_lens,
+    unsigned int* span_flags,
+    unsigned int* span_count,
+    unsigned int max_spans) {
+
     unsigned long long gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid >= data_len) {
         return;
     }
-    
     unsigned char b = data[gid];
-    if (b == 9 || (b >= 32 && b <= 126)) {
-        mask[gid] = 1;
-    } else {
-        mask[gid] = 0;
+    if (!(b == 9 || (b >= 32 && b <= 126))) {
+        return;
+    }
+    if (gid > 0) {
+        unsigned char prev = data[gid - 1];
+        if (prev == 9 || (prev >= 32 && prev <= 126)) {
+            return;
+        }
+    }
+
+    unsigned int len = 0;
+    unsigned int digits = 0;
+    unsigned int flags = 0;
+    unsigned int window = 0;
+    const unsigned int HTTP = 0x68747470;
+    const unsigned int WWW = 0x7777772e;
+
+    while ((gid + len) < data_len) {
+        unsigned char c = data[gid + len];
+        if (!(c == 9 || (c >= 32 && c <= 126))) {
+            break;
+        }
+        unsigned char lower = c;
+        if (lower >= 'A' && lower <= 'Z') {
+            lower = lower + 32;
+        }
+        window = (window << 8) | (unsigned int)lower;
+        if (window == HTTP || window == WWW) {
+            flags |= 16;
+        }
+        if (c == '@') {
+            flags |= 32;
+        }
+        if (c >= '0' && c <= '9') {
+            digits += 1;
+        }
+        len += 1;
+        if (len >= max_len) {
+            break;
+        }
+    }
+
+    if (digits >= 10) {
+        flags |= 64;
+    }
+    if (len >= min_len) {
+        unsigned int idx = atomicAdd(span_count, 1);
+        if (idx < max_spans) {
+            span_starts[idx] = (unsigned int)gid;
+            span_lens[idx] = len;
+            span_flags[idx] = flags;
+        }
     }
 }
 "#;
@@ -36,6 +89,9 @@ pub struct CudaStringScanner {
     device: Mutex<Arc<CudaDevice>>,
     min_len: usize,
     max_len: usize,
+    min_len_u32: u32,
+    max_len_u32: u32,
+    max_spans_per_chunk: u32,
     scan_utf16: bool,
     cpu_fallback: CpuStringScanner,
 }
@@ -49,7 +105,7 @@ impl CudaStringScanner {
             .map_err(|e| anyhow!("CUDA kernel compilation failed: {e}"))?;
         
         device
-            .load_ptx(ptx, "strings", &["mark_printable"])
+            .load_ptx(ptx, "strings", &["scan_ascii_spans"])
             .map_err(|e| anyhow!("CUDA PTX load failed: {e}"))?;
 
         let max_len = if cfg.string_max_len == 0 {
@@ -57,11 +113,24 @@ impl CudaStringScanner {
         } else {
             cfg.string_max_len
         };
+        let min_len_u32 = cfg.string_min_len.min(u32::MAX as usize) as u32;
+        let max_len_u32 = if max_len > u32::MAX as usize {
+            u32::MAX
+        } else {
+            max_len as u32
+        };
+        let max_spans_per_chunk = cfg
+            .gpu_max_string_spans_per_chunk
+            .min(u32::MAX as usize)
+            .max(1) as u32;
 
         Ok(Self {
             device: Mutex::new(device),
             min_len: cfg.string_min_len,
             max_len,
+            min_len_u32,
+            max_len_u32,
+            max_spans_per_chunk,
             scan_utf16: cfg.string_scan_utf16,
             cpu_fallback: CpuStringScanner::new(
                 cfg.string_min_len,
@@ -102,11 +171,32 @@ impl StringScanner for CudaStringScanner {
             }
         };
 
-        // Allocate mask buffer
-        let mask_gpu: CudaSlice<u8> = match device.alloc_zeros(data.len()) {
+        let span_capacity = self.max_spans_per_chunk as usize;
+        let starts_gpu: CudaSlice<u32> = match device.alloc_zeros(span_capacity) {
             Ok(buf) => buf,
             Err(err) => {
-                warn!("CUDA mask alloc failed: {err}; using cpu fallback");
+                warn!("CUDA span starts alloc failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let lens_gpu: CudaSlice<u32> = match device.alloc_zeros(span_capacity) {
+            Ok(buf) => buf,
+            Err(err) => {
+                warn!("CUDA span lengths alloc failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let flags_gpu: CudaSlice<u32> = match device.alloc_zeros(span_capacity) {
+            Ok(buf) => buf,
+            Err(err) => {
+                warn!("CUDA span flags alloc failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let count_gpu: CudaSlice<u32> = match device.alloc_zeros(1) {
+            Ok(buf) => buf,
+            Err(err) => {
+                warn!("CUDA span count alloc failed: {err}; using cpu fallback");
                 return self.cpu_fallback.scan_chunk(chunk, data);
             }
         };
@@ -121,7 +211,7 @@ impl StringScanner for CudaStringScanner {
         };
 
         // Get the kernel function
-        let func: CudaFunction = match device.get_func("strings", "mark_printable") {
+        let func: CudaFunction = match device.get_func("strings", "scan_ascii_spans") {
             Some(f) => f,
             None => {
                 warn!("CUDA kernel not found; using cpu fallback");
@@ -131,7 +221,20 @@ impl StringScanner for CudaStringScanner {
 
         // Launch kernel
         let launch_result = unsafe {
-            func.launch(launch_cfg, (&data_gpu, data_len, &mask_gpu))
+            func.launch(
+                launch_cfg,
+                (
+                    &data_gpu,
+                    data_len,
+                    self.min_len_u32,
+                    self.max_len_u32,
+                    &starts_gpu,
+                    &lens_gpu,
+                    &flags_gpu,
+                    &count_gpu,
+                    self.max_spans_per_chunk,
+                ),
+            )
         };
 
         if let Err(err) = launch_result {
@@ -145,17 +248,54 @@ impl StringScanner for CudaStringScanner {
             return self.cpu_fallback.scan_chunk(chunk, data);
         }
 
-        // Read back mask
-        let mask: Vec<u8> = match device.dtoh_sync_copy(&mask_gpu) {
+        let count_host: Vec<u32> = match device.dtoh_sync_copy(&count_gpu) {
             Ok(v) => v,
             Err(err) => {
-                warn!("CUDA mask read failed: {err}; using cpu fallback");
+                warn!("CUDA span count read failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let mut count = count_host[0] as usize;
+        if count > span_capacity {
+            warn!(
+                "CUDA span overflow: count={} max={}",
+                count, span_capacity
+            );
+            count = span_capacity;
+        }
+
+        let starts: Vec<u32> = match device.dtoh_sync_copy(&starts_gpu) {
+            Ok(v) => v,
+            Err(err) => {
+                warn!("CUDA span starts read failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let lens: Vec<u32> = match device.dtoh_sync_copy(&lens_gpu) {
+            Ok(v) => v,
+            Err(err) => {
+                warn!("CUDA span lengths read failed: {err}; using cpu fallback");
+                return self.cpu_fallback.scan_chunk(chunk, data);
+            }
+        };
+        let flags: Vec<u32> = match device.dtoh_sync_copy(&flags_gpu) {
+            Ok(v) => v,
+            Err(err) => {
+                warn!("CUDA span flags read failed: {err}; using cpu fallback");
                 return self.cpu_fallback.scan_chunk(chunk, data);
             }
         };
 
-        // Convert mask to spans on CPU
-        let mut spans = mask_to_spans(chunk, data, &mask, self.min_len, self.max_len);
+        let mut spans = Vec::with_capacity(count);
+        for idx in 0..count {
+            spans.push(StringSpan {
+                chunk_id: chunk.id,
+                local_start: starts[idx] as u64,
+                length: lens[idx],
+                flags: flags[idx],
+            });
+        }
+        let mut spans = extend_long_ascii_spans(chunk, data, spans, self.min_len, self.max_len);
         let mut utf8 = crate::strings::cpu::scan_utf8_runs(
             data,
             chunk,
@@ -185,48 +325,55 @@ impl StringScanner for CudaStringScanner {
     }
 }
 
-fn mask_to_spans(
+fn extend_long_ascii_spans(
     chunk: &ScanChunk,
     data: &[u8],
-    mask: &[u8],
+    spans: Vec<StringSpan>,
     min_len: usize,
     max_len: usize,
 ) -> Vec<StringSpan> {
-    let mut spans = Vec::new();
-    let mut i = 0usize;
-
-    while i < mask.len() {
-        if mask[i] == 0 {
-            i += 1;
+    if max_len == usize::MAX {
+        return spans;
+    }
+    let mut out = Vec::with_capacity(spans.len());
+    for span in spans {
+        let start = span.local_start as usize;
+        let len = span.length as usize;
+        out.push(span);
+        if len < max_len {
             continue;
         }
-
-        let start = i;
-        let mut len = 0usize;
-        while i < mask.len() && mask[i] != 0 {
-            i += 1;
-            len += 1;
-            if len >= max_len {
-                break;
+        let mut idx = start + len;
+        if idx >= data.len() || !is_printable(data[idx]) {
+            continue;
+        }
+        while idx < data.len() && is_printable(data[idx]) {
+            let run_start = idx;
+            let mut run_len = 0usize;
+            while idx < data.len() && is_printable(data[idx]) {
+                idx += 1;
+                run_len += 1;
+                if run_len >= max_len {
+                    break;
+                }
+            }
+            if run_len >= min_len {
+                let slice = &data[run_start..run_start + run_len];
+                let flags = crate::strings::cpu::span_flags_ascii(slice);
+                out.push(StringSpan {
+                    chunk_id: chunk.id,
+                    local_start: run_start as u64,
+                    length: run_len as u32,
+                    flags,
+                });
             }
         }
-
-        if len >= min_len {
-            let slice = &data[start..start + len];
-            let flags = crate::strings::cpu::span_flags_ascii(slice);
-            spans.push(StringSpan {
-                chunk_id: chunk.id,
-                local_start: start as u64,
-                length: len as u32,
-                flags,
-            });
-        }
-
-        // If we hit max_len, continue from current position (already incremented)
-        // to find more spans
     }
+    out
+}
 
-    spans
+fn is_printable(byte: u8) -> bool {
+    matches!(byte, b'\t' | 0x20..=0x7E)
 }
 
 #[cfg(test)]
@@ -288,15 +435,20 @@ mod tests {
             valid_length: data.len() as u64,
         };
 
-        let spans = scanner.scan_chunk(&chunk, data);
-        
+        let mut spans = scanner.scan_chunk(&chunk, data);
+        spans.sort_by_key(|span| span.local_start);
+
         // Should find at least 2 strings
-        assert!(spans.len() >= 2, "Should find at least 2 string spans, found {}", spans.len());
-        
+        assert!(
+            spans.len() >= 2,
+            "Should find at least 2 string spans, found {}",
+            spans.len()
+        );
+
         // First string "hello world" starts at offset 2
         assert_eq!(spans[0].local_start, 2);
         assert_eq!(spans[0].length, 11); // "hello world"
-        
+
         // Second string "test string" starts at offset 16
         assert_eq!(spans[1].local_start, 16);
         assert_eq!(spans[1].length, 11); // "test string"

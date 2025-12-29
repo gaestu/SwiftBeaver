@@ -1,5 +1,8 @@
 # High-Speed Forensic Carver with Optional GPU Acceleration
 
+Status: Implemented  
+Implemented in version: unreleased
+
 **Architecture & Project Blueprint**
 
 ---
@@ -138,7 +141,7 @@ Build a **high-speed, forensic-grade file and artefact carver** that:
 6. **Output**
 
    * Carved files written to disk.
-   * Metadata stored via a pluggable **MetadataSink** (JSONL/CSV/SQLite/DuckDB).
+   * Metadata stored via a pluggable **MetadataSink** (JSONL/CSV/Parquet).
 
 ### 3.2 Concurrency Model
 
@@ -186,7 +189,7 @@ The stages are connected via bounded channels to avoid unbounded memory growth.
 * `--chunk-size 512M`
 * `--overlap 32K`
 * `--workers 16`
-* `--metadata-backend jsonl|csv|sqlite|duckdb`
+* `--metadata-backend jsonl|csv|parquet`
 
 ### 4.2 EvidenceSource Abstraction (`evidence` module)
 
@@ -441,14 +444,8 @@ pub trait MetadataSink: Send + Sync {
 * `JsonlSink` – writes one JSON object per line.
 * `CsvSink` – separate CSV files for file records, strings, history.
 * `ParquetSink` – columnar files per category.
-* `SqliteSink` – tables (deferred; replaced by Parquet for now):
 
-  * `carved_files`
-  * `string_artefacts`
-  * `browser_history`
-* `DuckdbSink` – similar schema, optimised for analytics (deferred; use Parquet + DuckDB query).
-
-Start with `JsonlSink` + `CsvSink` (simplest for v1). Parquet is the primary analytics output; SQLite/DuckDB sinks are out of scope for now.
+Start with `JsonlSink` + `CsvSink` (simplest for v1). Parquet is the primary analytics output.
 
 ### 4.9 Logging & Metrics (`logging` module)
 
@@ -611,15 +608,11 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
-# Optional: for SQLite / DuckDB metadata backends
-rusqlite = { version = "0.32", optional = true, features = ["bundled"] }
-duckdb = { version = "0.10", optional = true }
+# Optional: for Parquet metadata backend (using `parquet` + `arrow`)
 
 [features]
 default = []
 gpu = []          # later: add CUDA/OpenCL wrapper crates here
-sqlite-meta = ["rusqlite"]
-duckdb-meta = ["duckdb"]
 
 [dev-dependencies]
 tempfile = "3"
@@ -806,7 +799,7 @@ impl EvidenceSource for RawFileSource {
     }
 }
 
-// TODO: EwfSource with libewf bindings
+// EwfSource is implemented via libewf bindings.
 
 use crate::cli::CliOptions;
 

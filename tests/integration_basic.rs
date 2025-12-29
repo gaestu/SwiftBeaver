@@ -130,12 +130,93 @@ fn sample_webp() -> Vec<u8> {
     data
 }
 
+fn sample_bmp() -> Vec<u8> {
+    let mut data = Vec::new();
+    let file_size = 58u32;
+    data.extend_from_slice(b"BM");
+    data.extend_from_slice(&file_size.to_le_bytes());
+    data.extend_from_slice(&0u16.to_le_bytes());
+    data.extend_from_slice(&0u16.to_le_bytes());
+    data.extend_from_slice(&54u32.to_le_bytes());
+    data.extend_from_slice(&40u32.to_le_bytes());
+    data.extend_from_slice(&[0u8; 36]);
+    data.extend_from_slice(&[0u8; 4]);
+    data
+}
+
+fn sample_tiff() -> Vec<u8> {
+    let mut tiff = Vec::new();
+    tiff.extend_from_slice(&[0x49, 0x49, 0x2A, 0x00]);
+    tiff.extend_from_slice(&8u32.to_le_bytes());
+
+    let ifd_offset = 8usize;
+    let entry_count = 2u16;
+    tiff.extend_from_slice(&entry_count.to_le_bytes());
+
+    let strip_offset = (ifd_offset + 2 + 12 * 2 + 4) as u32;
+    let strip_len = 4u32;
+
+    tiff.extend_from_slice(&273u16.to_le_bytes());
+    tiff.extend_from_slice(&4u16.to_le_bytes());
+    tiff.extend_from_slice(&1u32.to_le_bytes());
+    tiff.extend_from_slice(&strip_offset.to_le_bytes());
+
+    tiff.extend_from_slice(&279u16.to_le_bytes());
+    tiff.extend_from_slice(&4u16.to_le_bytes());
+    tiff.extend_from_slice(&1u32.to_le_bytes());
+    tiff.extend_from_slice(&strip_len.to_le_bytes());
+
+    tiff.extend_from_slice(&0u32.to_le_bytes());
+    tiff.extend_from_slice(&[0u8; 4]);
+    tiff
+}
+
+fn sample_mp4() -> Vec<u8> {
+    let mut mp4 = Vec::new();
+    mp4.extend_from_slice(&24u32.to_be_bytes());
+    mp4.extend_from_slice(b"ftyp");
+    mp4.extend_from_slice(b"isom");
+    mp4.extend_from_slice(&0u32.to_be_bytes());
+    mp4.extend_from_slice(b"isom");
+    mp4.extend_from_slice(b"iso2");
+    mp4.extend_from_slice(&8u32.to_be_bytes());
+    mp4.extend_from_slice(b"moov");
+    mp4
+}
+
+fn sample_rar4() -> Vec<u8> {
+    let mut rar = Vec::new();
+    rar.extend_from_slice(&[0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00]);
+    rar.extend_from_slice(&[0u8; 2]);
+    rar.push(0x73);
+    rar.extend_from_slice(&0u16.to_le_bytes());
+    rar.extend_from_slice(&13u16.to_le_bytes());
+    rar.extend_from_slice(&[0u8; 6]);
+    rar.extend_from_slice(&[0u8; 2]);
+    rar.push(0x7B);
+    rar.extend_from_slice(&0u16.to_le_bytes());
+    rar.extend_from_slice(&12u16.to_le_bytes());
+    rar.extend_from_slice(&[0u8; 5]);
+    rar
+}
+
+fn sample_7z() -> Vec<u8> {
+    let mut sevenz = Vec::new();
+    sevenz.extend_from_slice(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]);
+    sevenz.extend_from_slice(&[0u8, 4u8]);
+    sevenz.extend_from_slice(&[0u8; 4]);
+    sevenz.extend_from_slice(&0u64.to_le_bytes());
+    sevenz.extend_from_slice(&0u64.to_le_bytes());
+    sevenz.extend_from_slice(&[0u8; 4]);
+    sevenz
+}
+
 #[test]
 fn integration_carves_basic_formats() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let input_path = temp_dir.path().join("image.bin");
 
-    let mut image = vec![0u8; 300_000];
+    let mut image = vec![0u8; 600_000];
     insert_bytes(&mut image, 1024, &sample_jpeg());
     insert_bytes(&mut image, 65_536, &sample_png());
     insert_bytes(&mut image, 131_072, &sample_gif());
@@ -143,6 +224,11 @@ fn integration_carves_basic_formats() {
     insert_bytes(&mut image, 200_000, &sample_pdf());
     insert_bytes(&mut image, 220_000, &sample_docx_zip());
     insert_bytes(&mut image, 260_000, &sample_webp());
+    insert_bytes(&mut image, 320_000, &sample_bmp());
+    insert_bytes(&mut image, 360_000, &sample_tiff());
+    insert_bytes(&mut image, 420_000, &sample_mp4());
+    insert_bytes(&mut image, 470_000, &sample_rar4());
+    insert_bytes(&mut image, 520_000, &sample_7z());
 
     fs::write(&input_path, &image).expect("write input");
 
@@ -181,6 +267,8 @@ fn integration_carves_basic_formats() {
         2,
         64 * 1024,
         64,
+        None,
+        None,
     )
     .expect("pipeline");
 
@@ -192,6 +280,11 @@ fn integration_carves_basic_formats() {
     assert!(carved_root.join("pdf").exists());
     assert!(carved_root.join("docx").exists());
     assert!(carved_root.join("webp").exists());
+    assert!(carved_root.join("bmp").exists());
+    assert!(carved_root.join("tiff").exists());
+    assert!(carved_root.join("mp4").exists());
+    assert!(carved_root.join("rar").exists());
+    assert!(carved_root.join("7z").exists());
 
     let meta_path = run_output_dir.join("metadata").join("carved_files.jsonl");
     let contents = fs::read_to_string(meta_path).expect("metadata read");
@@ -213,4 +306,9 @@ fn integration_carves_basic_formats() {
     assert!(types.contains(&"pdf".to_string()));
     assert!(types.contains(&"docx".to_string()));
     assert!(types.contains(&"webp".to_string()));
+    assert!(types.contains(&"bmp".to_string()));
+    assert!(types.contains(&"tiff".to_string()));
+    assert!(types.contains(&"mp4".to_string()));
+    assert!(types.contains(&"rar".to_string()));
+    assert!(types.contains(&"7z".to_string()));
 }

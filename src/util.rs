@@ -33,6 +33,8 @@ enum MetadataEvent {
     File(crate::carve::CarvedFile),
     String(crate::strings::artifacts::StringArtefact),
     History(crate::parsers::browser::BrowserHistoryRecord),
+    Cookie(crate::parsers::browser::BrowserCookieRecord),
+    Download(crate::parsers::browser::BrowserDownloadRecord),
     RunSummary(RunSummary),
     Entropy(crate::metadata::EntropyRegion),
 }
@@ -53,6 +55,8 @@ pub fn run_pipeline(
     workers: usize,
     chunk_size: u64,
     overlap: u64,
+    max_bytes: Option<u64>,
+    max_chunks: Option<u64>,
 ) -> Result<()> {
     let carve_registry = Arc::new(build_carve_registry(cfg)?);
 
@@ -111,6 +115,7 @@ pub fn run_pipeline(
         hit_rx,
         meta_tx.clone(),
         files_carved.clone(),
+        cfg.enable_sqlite_page_recovery,
     );
 
     let string_handles = if let Some(rx) = string_rx {
@@ -131,14 +136,35 @@ pub fn run_pipeline(
         Vec::new()
     };
 
+    let max_bytes = max_bytes.unwrap_or(u64::MAX);
+    let max_chunks = max_chunks.unwrap_or(u64::MAX);
+    let mut chunks_seen = 0u64;
+    let mut hit_max_bytes = false;
+    let mut hit_max_chunks = false;
+
     for chunk in chunks {
-        let data = read_chunk(evidence.as_ref(), &chunk)?;
+        if chunks_seen >= max_chunks {
+            hit_max_chunks = true;
+            break;
+        }
+        let scanned = bytes_scanned.load(Ordering::Relaxed);
+        if scanned >= max_bytes {
+            hit_max_bytes = true;
+            break;
+        }
+        let remaining = (max_bytes - scanned).min(chunk.length) as usize;
+        let data = read_chunk_limited(evidence.as_ref(), &chunk, remaining)?;
         if data.is_empty() {
             break;
         }
         bytes_scanned.fetch_add(data.len() as u64, Ordering::Relaxed);
         chunks_processed.fetch_add(1, Ordering::Relaxed);
+        chunks_seen += 1;
         scan_tx.send(ScanJob { chunk, data: Arc::new(data) })?;
+        if bytes_scanned.load(Ordering::Relaxed) >= max_bytes {
+            hit_max_bytes = true;
+            break;
+        }
     }
 
     drop(scan_tx);
@@ -170,6 +196,13 @@ pub fn run_pipeline(
 
     drop(meta_tx);
     let _ = meta_handle.join();
+
+    if hit_max_bytes {
+        info!("max_bytes limit reached; stopping early");
+    }
+    if hit_max_chunks {
+        info!("max_chunks limit reached; stopping early");
+    }
 
     info!(
         "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} string_spans={} artefacts_extracted={}",
@@ -203,6 +236,16 @@ fn spawn_metadata_thread(
                 }
                 MetadataEvent::History(record) => {
                     if let Err(err) = sink.record_history(&record) {
+                        warn!("metadata record error: {err}");
+                    }
+                }
+                MetadataEvent::Cookie(record) => {
+                    if let Err(err) = sink.record_cookie(&record) {
+                        warn!("metadata record error: {err}");
+                    }
+                }
+                MetadataEvent::Download(record) => {
+                    if let Err(err) = sink.record_download(&record) {
                         warn!("metadata record error: {err}");
                     }
                 }
@@ -322,6 +365,7 @@ fn spawn_carve_workers(
     rx: Receiver<NormalizedHit>,
     meta_tx: Sender<MetadataEvent>,
     files_carved: Arc<AtomicU64>,
+    enable_sqlite_page_recovery: bool,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -334,6 +378,7 @@ fn spawn_carve_workers(
         let rx = rx.clone();
         let meta_tx = meta_tx.clone();
         let files_carved = files_carved.clone();
+        let enable_sqlite_page_recovery = enable_sqlite_page_recovery;
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -361,13 +406,74 @@ fn spawn_carve_workers(
                         let _ = meta_tx.send(MetadataEvent::File(file));
 
                         if file_type == "sqlite" {
-                            if let Ok(records) = crate::parsers::sqlite_db::extract_browser_history(
+                            let mut records = match crate::parsers::sqlite_db::extract_browser_history(
                                 &path,
                                 &run_id,
                                 &rel_path,
                             ) {
-                                for record in records {
-                                    let _ = meta_tx.send(MetadataEvent::History(record));
+                                Ok(records) => records,
+                                Err(err) => {
+                                    warn!(
+                                        "sqlite parse failed for {}: {err}",
+                                        path.display()
+                                    );
+                                    Vec::new()
+                                }
+                            };
+
+                            if records.is_empty() && enable_sqlite_page_recovery {
+                                match crate::parsers::sqlite_pages::extract_history_from_pages(
+                                    &path,
+                                    &run_id,
+                                    &rel_path,
+                                ) {
+                                    Ok(mut recovered) => records.append(&mut recovered),
+                                    Err(err) => {
+                                        warn!(
+                                            "sqlite page recovery failed for {}: {err}",
+                                            path.display()
+                                        );
+                                    }
+                                }
+                            }
+
+                            for record in records {
+                                let _ = meta_tx.send(MetadataEvent::History(record));
+                            }
+
+                            match crate::parsers::sqlite_db::extract_browser_cookies(
+                                &path,
+                                &run_id,
+                                &rel_path,
+                            ) {
+                                Ok(records) => {
+                                    for record in records {
+                                        let _ = meta_tx.send(MetadataEvent::Cookie(record));
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "sqlite cookie parse failed for {}: {err}",
+                                        path.display()
+                                    );
+                                }
+                            }
+
+                            match crate::parsers::sqlite_db::extract_browser_downloads(
+                                &path,
+                                &run_id,
+                                &rel_path,
+                            ) {
+                                Ok(records) => {
+                                    for record in records {
+                                        let _ = meta_tx.send(MetadataEvent::Download(record));
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "sqlite download parse failed for {}: {err}",
+                                        path.display()
+                                    );
                                 }
                             }
                         }
@@ -430,8 +536,15 @@ fn spawn_string_workers(
     handles
 }
 
-fn read_chunk(evidence: &dyn EvidenceSource, chunk: &ScanChunk) -> Result<Vec<u8>> {
-    let mut buf = vec![0u8; chunk.length as usize];
+fn read_chunk_limited(
+    evidence: &dyn EvidenceSource,
+    chunk: &ScanChunk,
+    max_len: usize,
+) -> Result<Vec<u8>> {
+    if max_len == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buf = vec![0u8; max_len];
     let mut read = 0usize;
     while read < buf.len() {
         let n = evidence
@@ -529,6 +642,7 @@ fn build_carve_registry(cfg: &Config) -> Result<CarveRegistry> {
                         file_type.min_size,
                         file_type.max_size,
                         file_type.require_eocd,
+                        cfg.zip_allowed_kinds.clone(),
                     )),
                 );
             }
@@ -536,6 +650,56 @@ fn build_carve_registry(cfg: &Config) -> Result<CarveRegistry> {
                 handlers.insert(
                     file_type.id.clone(),
                     Box::new(carve::webp::WebpCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "bmp" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::bmp::BmpCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "tiff" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::tiff::TiffCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "mp4" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::mp4::Mp4CarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "rar" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::rar::RarCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "sevenz" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::sevenz::SevenZCarveHandler::new(
                         ext,
                         file_type.min_size,
                         file_type.max_size,
@@ -626,10 +790,21 @@ pub fn filter_file_types(
         }
 
         let mut known = HashSet::new();
+        let mut has_zip = false;
         for file_type in &cfg.file_types {
             known.insert(file_type.id.to_ascii_lowercase());
             if !file_type.validator.trim().is_empty() {
                 known.insert(file_type.validator.to_ascii_lowercase());
+            }
+            if file_type.id.eq_ignore_ascii_case("zip")
+                || file_type.validator.eq_ignore_ascii_case("zip")
+            {
+                has_zip = true;
+            }
+        }
+        if has_zip {
+            for kind in ["zip", "docx", "xlsx", "pptx"] {
+                known.insert(kind.to_string());
             }
         }
 
@@ -639,6 +814,8 @@ pub fn filter_file_types(
             }
         }
 
+        let allow_zip_family = allow.iter().any(|entry| is_zip_kind(entry));
+
         cfg.file_types.retain(|file_type| {
             let id = file_type.id.to_ascii_lowercase();
             let validator = if file_type.validator.trim().is_empty() {
@@ -646,8 +823,23 @@ pub fn filter_file_types(
             } else {
                 file_type.validator.to_ascii_lowercase()
             };
-            allow.contains(&id) || allow.contains(&validator)
+            let is_zip = id == "zip" || validator == "zip";
+            allow.contains(&id) || allow.contains(&validator) || (is_zip && allow_zip_family)
         });
+
+        if allow_zip_family && has_zip {
+            if allow.contains("zip") {
+                cfg.zip_allowed_kinds = None;
+            } else {
+                let mut kinds = Vec::new();
+                for kind in ["docx", "xlsx", "pptx"] {
+                    if allow.contains(kind) {
+                        kinds.push(kind.to_string());
+                    }
+                }
+                cfg.zip_allowed_kinds = if kinds.is_empty() { None } else { Some(kinds) };
+            }
+        }
     }
 
     if disable_zip {
@@ -656,10 +848,15 @@ pub fn filter_file_types(
                 || file_type.validator.eq_ignore_ascii_case("zip");
             !is_zip
         });
+        cfg.zip_allowed_kinds = None;
     }
 
     unknown.sort();
     unknown
+}
+
+fn is_zip_kind(value: &str) -> bool {
+    matches!(value, "zip" | "docx" | "xlsx" | "pptx")
 }
 
 #[cfg(test)]
@@ -699,5 +896,18 @@ mod tests {
             false,
         );
         assert_eq!(unknown, vec!["nope"]);
+    }
+
+    #[test]
+    fn allows_docx_through_zip_handler() {
+        let loaded = config::load_config(None).expect("config");
+        let mut cfg = loaded.config;
+        let unknown = filter_file_types(&mut cfg, Some(&vec!["docx".to_string()]), false);
+        assert!(unknown.is_empty());
+        let ids: Vec<&str> = cfg.file_types.iter().map(|ft| ft.id.as_str()).collect();
+        assert_eq!(ids, vec!["zip"]);
+        let mut kinds = cfg.zip_allowed_kinds.unwrap_or_default();
+        kinds.sort();
+        assert_eq!(kinds, vec!["docx"]);
     }
 }

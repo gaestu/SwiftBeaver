@@ -14,12 +14,15 @@ The default config is `config/default.yml`.
 - `string_min_len` (usize): minimum printable string length.
 - `string_max_len` (usize): maximum string length per span.
 - `gpu_max_hits_per_chunk` (usize): maximum GPU hits per chunk (overflow truncates).
+- `gpu_max_string_spans_per_chunk` (usize): maximum GPU ASCII string spans per chunk (overflow truncates).
 - `parquet_row_group_size` (usize): max rows per Parquet row group.
 - `enable_entropy_detection` (bool): enable entropy region detection.
 - `entropy_window_size` (usize): window size (bytes) used for entropy calculation.
 - `entropy_threshold` (float): entropy threshold for marking high-entropy regions.
+- `enable_sqlite_page_recovery` (bool): enable SQLite page-level URL recovery when DB parsing fails.
 - `opencl_platform_index` (usize, optional): select OpenCL platform by index.
 - `opencl_device_index` (usize, optional): select OpenCL device by index.
+- `zip_allowed_kinds` (list, optional): restrict ZIP outputs to `zip`, `docx`, `xlsx`, `pptx` when set.
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx based on central directory entries when present.
@@ -34,7 +37,7 @@ Each entry in `file_types` contains:
 - `footer_patterns`: footer signatures used by the `footer` validator
 - `max_size`: maximum carve size in bytes
 - `min_size`: minimum carve size in bytes
-- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `pdf`, `zip`, `webp`, `footer`)
+- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `pdf`, `zip`, `webp`, `bmp`, `tiff`, `mp4`, `rar`, `sevenz`, `footer`)
 - `require_eocd`: optional; for ZIP, require an EOCD before carving (prevents large false positives)
 
 The `footer` validator performs a simple header-to-footer carve for formats without a dedicated handler.
@@ -92,4 +95,57 @@ file_types:
     max_size: 104857600
     min_size: 20
     validator: "webp"
+  - id: "bmp"
+    extensions: ["bmp"]
+    header_patterns:
+      - id: "bmp_header"
+        hex: "424D"
+    footer_patterns: []
+    max_size: 104857600
+    min_size: 54
+    validator: "bmp"
+  - id: "tiff"
+    extensions: ["tiff", "tif"]
+    header_patterns:
+      - id: "tiff_le_header"
+        hex: "49492A00"
+      - id: "tiff_be_header"
+        hex: "4D4D002A"
+    footer_patterns: []
+    max_size: 104857600
+    min_size: 8
+    validator: "tiff"
+  - id: "mp4"
+    extensions: ["mp4"]
+    header_patterns:
+      - id: "mp4_ftyp_18"
+        hex: "0000001866747970"
+      - id: "mp4_ftyp_1c"
+        hex: "0000001C66747970"
+      - id: "mp4_ftyp_20"
+        hex: "0000002066747970"
+    footer_patterns: []
+    max_size: 1073741824
+    min_size: 16
+    validator: "mp4"
+  - id: "rar"
+    extensions: ["rar"]
+    header_patterns:
+      - id: "rar4_header"
+        hex: "526172211A0700"
+      - id: "rar5_header"
+        hex: "526172211A070100"
+    footer_patterns: []
+    max_size: 1073741824
+    min_size: 32
+    validator: "rar"
+  - id: "7z"
+    extensions: ["7z"]
+    header_patterns:
+      - id: "7z_header"
+        hex: "377ABCAF271C"
+    footer_patterns: []
+    max_size: 1073741824
+    min_size: 32
+    validator: "sevenz"
 ```

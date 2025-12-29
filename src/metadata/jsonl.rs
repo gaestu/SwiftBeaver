@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::carve::CarvedFile;
 use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
+use crate::parsers::browser::{BrowserCookieRecord as CookieRecord, BrowserDownloadRecord as DownloadRecord};
 use crate::strings::artifacts::StringArtefact;
 
 pub struct JsonlSink {
@@ -17,6 +18,8 @@ pub struct JsonlSink {
     files_writer: Mutex<BufWriter<File>>,
     strings_writer: Mutex<BufWriter<File>>,
     history_writer: Mutex<BufWriter<File>>,
+    cookies_writer: Mutex<BufWriter<File>>,
+    downloads_writer: Mutex<BufWriter<File>>,
     run_writer: Mutex<BufWriter<File>>,
     entropy_writer: Mutex<BufWriter<File>>,
 }
@@ -45,6 +48,26 @@ struct StringArtefactRecord<'a> {
 struct BrowserHistoryRecord<'a> {
     #[serde(flatten)]
     record: &'a crate::parsers::browser::BrowserHistoryRecord,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
+#[derive(Serialize)]
+struct BrowserCookieRecord<'a> {
+    #[serde(flatten)]
+    record: &'a CookieRecord,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
+#[derive(Serialize)]
+struct BrowserDownloadRecord<'a> {
+    #[serde(flatten)]
+    record: &'a DownloadRecord,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -85,11 +108,15 @@ impl JsonlSink {
         let files_path = meta_dir.join("carved_files.jsonl");
         let strings_path = meta_dir.join("string_artefacts.jsonl");
         let history_path = meta_dir.join("browser_history.jsonl");
+        let cookies_path = meta_dir.join("browser_cookies.jsonl");
+        let downloads_path = meta_dir.join("browser_downloads.jsonl");
         let run_path = meta_dir.join("run_summary.jsonl");
         let entropy_path = meta_dir.join("entropy_regions.jsonl");
         let files_file = File::create(files_path)?;
         let strings_file = File::create(strings_path)?;
         let history_file = File::create(history_path)?;
+        let cookies_file = File::create(cookies_path)?;
+        let downloads_file = File::create(downloads_path)?;
         let run_file = File::create(run_path)?;
         let entropy_file = File::create(entropy_path)?;
         Ok(Self {
@@ -100,6 +127,8 @@ impl JsonlSink {
             files_writer: Mutex::new(BufWriter::new(files_file)),
             strings_writer: Mutex::new(BufWriter::new(strings_file)),
             history_writer: Mutex::new(BufWriter::new(history_file)),
+            cookies_writer: Mutex::new(BufWriter::new(cookies_file)),
+            downloads_writer: Mutex::new(BufWriter::new(downloads_file)),
             run_writer: Mutex::new(BufWriter::new(run_file)),
             entropy_writer: Mutex::new(BufWriter::new(entropy_file)),
         })
@@ -149,6 +178,34 @@ impl MetadataSink for JsonlSink {
         Ok(())
     }
 
+    fn record_cookie(&self, record: &CookieRecord) -> Result<(), MetadataError> {
+        let record = BrowserCookieRecord {
+            record,
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self.cookies_writer.lock().unwrap();
+        serde_json::to_writer(&mut *guard, &record)?;
+        guard.write_all(b"\n")?;
+        Ok(())
+    }
+
+    fn record_download(&self, record: &DownloadRecord) -> Result<(), MetadataError> {
+        let record = BrowserDownloadRecord {
+            record,
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self.downloads_writer.lock().unwrap();
+        serde_json::to_writer(&mut *guard, &record)?;
+        guard.write_all(b"\n")?;
+        Ok(())
+    }
+
     fn record_run_summary(&self, summary: &RunSummary) -> Result<(), MetadataError> {
         let record = RunSummaryRecord {
             summary,
@@ -181,11 +238,15 @@ impl MetadataSink for JsonlSink {
         let mut files = self.files_writer.lock().unwrap();
         let mut strings = self.strings_writer.lock().unwrap();
         let mut history = self.history_writer.lock().unwrap();
+        let mut cookies = self.cookies_writer.lock().unwrap();
+        let mut downloads = self.downloads_writer.lock().unwrap();
         let mut run = self.run_writer.lock().unwrap();
         let mut entropy = self.entropy_writer.lock().unwrap();
         files.flush()?;
         strings.flush()?;
         history.flush()?;
+        cookies.flush()?;
+        downloads.flush()?;
         run.flush()?;
         entropy.flush()?;
         Ok(())
