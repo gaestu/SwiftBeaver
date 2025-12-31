@@ -1,0 +1,11 @@
+https://file-examples.com/wp-content/storage/2017/02/file_example_CSV_5000.csv
+https://file-examples.com/wp-content/storage/2017/02/file_example_JSON_1kb.json
+https://file-examples.com/wp-content/storage/2017/02/file_example_XML_24kb.xml
+https://file-examples.com/storage/fe1e2f952269540b292fb10/2017/02/index.html
+https://file-examples.com/wp-content/storage/2017/02/zip_2MB.zip
+
+eBook
+https://filesamples.com/samples/ebook/azw3/sample1.azw3
+https://filesamples.com/samples/ebook/epub/sample1.epub
+https://filesamples.com/samples/ebook/fb2/sample1.fb2
+https://filesamples.com/samples/ebook/lrf/sample1.lrf

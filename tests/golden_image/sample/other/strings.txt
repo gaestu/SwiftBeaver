@@ -1,0 +1,83 @@
+# Golden Image String Test Data
+# This file contains test patterns for URL/email/phone extraction
+
+# URLs - Various formats
+https://www.example.com/path/to/page?query=value&foo=bar
+http://test-server.local:8080/api/v1/users
+https://subdomain.domain.co.uk/resource.html
+ftp://files.example.net/downloads/archive.zip
+https://192.168.1.100/admin/login.php
+http://user:password@internal.corp.local/secure
+https://cdn.jsdelivr.net/npm/package@1.0.0/dist/file.min.js
+
+# Email addresses - Various formats
+user@example.com
+admin.test@test-domain.org
+john.doe+newsletter@company.example.net
+support_ticket@help.example.com
+info@münchen.de
+contact@日本語.jp
+
+# Phone numbers - International formats
++1-555-123-4567
++1 (800) 555-0199
++44 20 7946 0958
++49 30 12345678
++33 1 23 45 67 89
+555-123-4567
+(555) 123-4567
+
+# Credit card numbers (test/fake numbers)
+4111111111111111
+5500000000000004
+378282246310005
+6011111111111117
+
+# File paths - Windows and Unix
+C:\Users\TestUser\Documents\evidence.docx
+C:\Windows\System32\config\SYSTEM
+D:\Backups\2025\full_backup.zip
+/home/user/forensics/case_001/image.dd
+/var/log/auth.log
+/etc/passwd
+\\\\server\\share\\folder\\file.txt
+\\\\192.168.1.50\\c$\\Windows\\System32
+
+# IP addresses
+192.168.1.1
+10.0.0.254
+172.16.0.1
+8.8.8.8
+2001:0db8:85a3:0000:0000:8a2e:0370:7334
+
+# MAC addresses
+00:1A:2B:3C:4D:5E
+AA-BB-CC-DD-EE-FF
+001A.2B3C.4D5E
+
+# Registry paths (Windows)
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+HKCU\Software\Classes\.txt
+
+# Misc identifiers
+UUID: 550e8400-e29b-41d4-a716-446655440000
+SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+MD5: d41d8cd98f00b204e9800998ecf8427e
+
+# Plain ASCII text for printable string detection
+The quick brown fox jumps over the lazy dog.
+ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789
+Pack my box with five dozen liquor jugs.
+How vexingly quick daft zebras jump!
+
+# Base64 encoded data (for entropy detection)
+SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IG1lc3NhZ2UgZW5jb2RlZCBpbiBiYXNlNjQu
+
+# JSON-like content
+{"user_id": 12345, "email": "test@example.com", "api_key": "sk_live_abc123xyz"}
+
+# SQL-like content
+SELECT * FROM users WHERE email = 'admin@example.com';
+INSERT INTO logs VALUES (1, '2025-12-30', 'login_attempt');
+
+# END OF TEST DATA
