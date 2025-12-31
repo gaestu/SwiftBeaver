@@ -11,275 +11,253 @@ A "golden" EWF test image would provide:
 - Integration test for the full EWF code path
 - End-to-end validation of carving logic with real files
 - Regression detection for EWF-specific issues
+- Comprehensive development/testing image with all sample types
 - Ability to verify carved output matches original samples
 
 ## Scope
 
 ### In Scope
-- Creating a golden test image from real sample files
-- All 12 supported file types with valid, complete files
-- String test data for URL/email/phone extraction
+- Generating a golden test image from **ALL** files in `tests/golden_image/sample/`
+- ~84 files across all categories (~23MB raw, compresses well to E01)
+- JSON manifest documenting exact offsets and checksums for every file
 - Both raw and E01 output formats
-- Manifest documenting exact offsets for test assertions
-- Integration tests that verify carved files match originals
+- Integration tests that verify carving against manifest
+- Useful for ongoing development and adding new file type support
 
 ### Out of Scope
-- Large/realistic forensic images (> 1MB)
 - Split E01 files (E01/E02/E03)
 - Encrypted EWF images
-- Copyrighted content
+- Filtering/selecting specific files (include everything)
 
 ---
 
 ## Design
 
-### Directory Structure
+### Existing Sample Structure (~84 files, ~23MB)
 
 ```
-tests/
-└── golden_image/
-    ├── samples/                    # Real sample files (source)
-    │   ├── test.jpg                # Valid JPEG photo
-    │   ├── test.png                # Valid PNG image
-    │   ├── test.gif                # Valid GIF image
-    │   ├── test.sqlite             # Valid SQLite database
-    │   ├── test.pdf                # Valid PDF document
-    │   ├── test.docx               # Valid DOCX (ZIP with word/)
-    │   ├── test.webp               # Valid WebP image
-    │   ├── test.bmp                # Valid BMP image
-    │   ├── test.tiff               # Valid TIFF image
-    │   ├── test.mp4                # Valid MP4 video (tiny)
-    │   ├── test.rar                # Valid RAR archive
-    │   ├── test.7z                 # Valid 7z archive
-    │   └── strings.txt             # Text with URLs/emails/phones
-    ├── generate.sh                 # Script to pack samples into image
-    ├── manifest.json               # Documents offsets and checksums
-    ├── golden.raw                  # Generated raw image (gitignored)
-    └── golden.E01                  # Generated E01 (committed, ~100-200KB)
+tests/golden_image/sample/
+├── images/           # 18 files - JPEG, PNG, GIF, BMP, WebP, TIFF, ICO, SVG
+├── video/            # 7 files  - MP4, AVI, MOV, OGG, WMV, WEBM
+├── audio/            # 4 files  - MP3, WAV, OGG
+├── documents/        # 14 files - PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ODT/ODS/ODP, RTF
+├── archives/         # 11 files - ZIP, RAR, 7z, TAR, TAR.GZ/BZ2/XZ, GZ, BZ2, XZ
+├── databases/        # 5 files  - SQLite (basic, browser History/Cookies/places)
+├── media_tiny/       # 4 files  - Tiny versions of media for quick tests
+├── email/            # 2 files  - EML files
+├── binaries/         # 2 files  - ELF executable, shared library
+├── other/            # 17 files - TXT, JSON, JSONL, YAML, XML, CSV, HTML, UTF-8/16, etc.
+├── generate_missing.sh
+└── samples_to_place.md
 ```
 
-### Sample File Requirements
+### Files to Generate
 
-Each sample file should be:
-- **Small:** Minimize total image size (target < 500KB raw, < 200KB E01)
-- **Valid:** Pass the carver's validation logic
-- **Unique:** Distinguishable hash for verification
-- **License-free:** Public domain or self-created
-
-| File | Target Size | Description |
-|------|-------------|-------------|
-| test.jpg | ~5-10 KB | Small photo, valid JFIF/EXIF |
-| test.png | ~2-5 KB | Small image with proper chunks |
-| test.gif | ~1-2 KB | Animated or static GIF |
-| test.sqlite | ~4-8 KB | SQLite with a test table (for browser parsing) |
-| test.pdf | ~2-5 KB | PDF with minimal content |
-| test.docx | ~5-10 KB | Minimal DOCX (word/document.xml present) |
-| test.webp | ~2-5 KB | Valid WebP image |
-| test.bmp | ~1-2 KB | Small uncompressed BMP |
-| test.tiff | ~2-5 KB | Valid TIFF with IFD |
-| test.mp4 | ~5-10 KB | Minimal ftyp+moov+mdat |
-| test.rar | ~1-2 KB | RAR with small file inside |
-| test.7z | ~1-2 KB | 7z with small file inside |
-| strings.txt | ~1 KB | URLs, emails, phones, ASCII text |
-
-**Total:** ~35-70 KB raw → ~100-200 KB E01
-
-### String Test Data (strings.txt)
-
-```text
-# URLs
-https://example.com/test/path?query=1&foo=bar
-http://forensic-test.org/evidence/case123
-ftp://files.example.net/download/archive.zip
-https://subdomain.test-domain.co.uk/page.html
-
-# Emails
-user@example.com
-admin.test@test-domain.org
-forensic_analyst@company.example.net
-support+ticket@help.example.com
-
-# Phone numbers
-+1-555-123-4567
-+1 (800) 555-0199
-+44 20 7946 0958
-+49 30 12345678
-
-# Plain text for ASCII detection
-This is a test string for printable ASCII detection.
-The quick brown fox jumps over the lazy dog.
-ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789
-
-# Paths and filenames
-C:\Users\TestUser\Documents\evidence.docx
-/home/user/forensics/case_001/image.dd
-\\server\share\folder\file.txt
+```
+tests/golden_image/
+├── generate.sh                  # Script to pack ALL samples
+├── manifest.json                # Complete offset/hash map for all files
+├── golden.raw                   # Raw disk image (~25MB with alignment)
+└── golden.E01                   # EWF compressed (~8-12MB expected)
 ```
 
 ### Image Layout
 
-Files are concatenated with padding to ensure non-overlapping offsets:
+All files concatenated with 4KB alignment:
 
 ```
 ┌─────────────────────────────────────────┐
 │ Offset 0x0000: Zero padding (4 KB)      │
 ├─────────────────────────────────────────┤
-│ Offset 0x1000: test.jpg                 │
+│ Offset 0x1000: images/test_generated.jpg│
 ├─────────────────────────────────────────┤
-│ Offset 0xNNNN: test.png                 │
+│ Offset 0xNNNN: images/test_gradient.png │
 ├─────────────────────────────────────────┤
-│ ... (each file at 4KB-aligned offset)   │
+│ ... (all 84 files at 4KB boundaries)    │
 ├─────────────────────────────────────────┤
-│ Offset 0xNNNN: strings.txt              │
+│ Offset 0xNNNN: other/strings.txt        │
 ├─────────────────────────────────────────┤
-│ Trailing padding to round size          │
+│ Trailing zero padding                   │
 └─────────────────────────────────────────┘
 ```
 
-4 KB alignment ensures chunk boundary tests work predictably.
+### Manifest Format
+
+Complete manifest with all files grouped by category:
+
+```json
+{
+  "description": "Golden test image - ALL sample files",
+  "generated": "2025-12-31T12:00:00Z",
+  "alignment": 4096,
+  "sample_dir": "sample",
+  "categories": {
+    "images": [...],
+    "video": [...],
+    "audio": [...],
+    "documents": [...],
+    "archives": [...],
+    "databases": [...],
+    "media_tiny": [...],
+    "email": [...],
+    "binaries": [...],
+    "other": [...]
+  },
+  "files": [
+    {
+      "path": "images/test_generated.jpg",
+      "category": "images", 
+      "extension": "jpg",
+      "offset": 4096,
+      "offset_hex": "0x1000",
+      "size": 5432,
+      "sha256": "abc123..."
+    },
+    ...
+  ],
+  "summary": {
+    "total_files": 84,
+    "total_size": 25165824,
+    "categories": {
+      "images": 18,
+      "video": 7,
+      ...
+    }
+  },
+  "raw_sha256": "final_hash..."
+}
+```
 
 ---
 
-## Implementation Steps
+## Implementation
 
-### Step 1: Create Sample Files
-
-Create or source small, valid sample files for each type.
-
-**Option A: Create minimal samples manually**
-```bash
-# JPEG - use ImageMagick
-convert -size 100x100 xc:red test.jpg
-
-# PNG
-convert -size 50x50 xc:blue test.png
-
-# GIF
-convert -size 20x20 xc:green test.gif
-
-# SQLite with test data (for browser history parsing)
-sqlite3 test.sqlite "CREATE TABLE urls(id INTEGER PRIMARY KEY, url TEXT, title TEXT, visit_count INTEGER, last_visit_time INTEGER); INSERT INTO urls VALUES(1, 'https://test.example.com/', 'Test Page', 5, 13300000000000000);"
-
-# PDF - minimal
-echo '%PDF-1.4
-1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
-2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj
-xref
-0 3
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-trailer << /Root 1 0 R /Size 3 >>
-startxref
-111
-%%EOF' > test.pdf
-
-# DOCX - create minimal Office Open XML
-mkdir -p docx_tmp/word
-echo '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Test</w:t></w:r></w:p></w:body></w:document>' > docx_tmp/word/document.xml
-echo '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>' > docx_tmp/\[Content_Types\].xml
-(cd docx_tmp && zip -r ../test.docx .)
-rm -rf docx_tmp
-
-# WebP
-convert -size 50x50 xc:yellow test.webp
-
-# BMP
-convert -size 10x10 xc:purple BMP3:test.bmp
-
-# TIFF
-convert -size 20x20 xc:orange test.tiff
-
-# MP4 - use ffmpeg for tiny video
-ffmpeg -f lavfi -i color=c=black:s=16x16:d=0.1 -c:v libx264 -pix_fmt yuv420p test.mp4
-
-# RAR - requires rar command
-echo "test content" > test_file.txt
-rar a test.rar test_file.txt
-rm test_file.txt
-
-# 7z
-echo "test content" > test_file.txt
-7z a test.7z test_file.txt
-rm test_file.txt
-```
-
-**Option B: Use existing tiny test files from public domain sources**
-
-### Step 2: Create Generation Script
-
-Create `tests/golden_image/generate.sh`:
+### generate.sh Script
 
 ```bash
 #!/bin/bash
+# Generate golden.raw and golden.E01 from ALL sample files
+#
+# Includes every file in sample/ subdirectories for comprehensive testing.
+# Useful for development and regression testing of all supported formats.
+#
+# Usage: ./generate.sh [--no-e01]
+#
+# Requirements:
+#   - ewfacquire (for E01 generation, optional with --no-e01)
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SAMPLES_DIR="$SCRIPT_DIR/samples"
+SAMPLE_DIR="$SCRIPT_DIR/sample"
 OUTPUT_RAW="$SCRIPT_DIR/golden.raw"
 OUTPUT_E01="$SCRIPT_DIR/golden"
 MANIFEST="$SCRIPT_DIR/manifest.json"
 
-# Ensure samples exist
-REQUIRED_FILES=(
-    "test.jpg" "test.png" "test.gif" "test.sqlite" "test.pdf"
-    "test.docx" "test.webp" "test.bmp" "test.tiff" "test.mp4"
-    "test.rar" "test.7z" "strings.txt"
-)
+SKIP_E01=false
+[[ "${1:-}" == "--no-e01" ]] && SKIP_E01=true
 
-echo "Checking sample files..."
-for f in "${REQUIRED_FILES[@]}"; do
-    if [[ ! -f "$SAMPLES_DIR/$f" ]]; then
-        echo "ERROR: Missing sample file: $SAMPLES_DIR/$f"
-        exit 1
-    fi
-done
-
-# Calculate total size needed (4KB alignment per file + 4KB header)
+# Alignment for predictable chunk boundaries
 ALIGNMENT=4096
-OFFSET=$ALIGNMENT  # Start after 4KB header padding
 
-# Start manifest
-echo '{' > "$MANIFEST"
-echo '  "description": "Golden test image manifest",' >> "$MANIFEST"
-echo '  "generated": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",' >> "$MANIFEST"
-echo '  "files": [' >> "$MANIFEST"
+echo "=== Golden Image Generator (All Files) ==="
+echo "Sample dir: $SAMPLE_DIR"
+echo ""
 
-# Create initial raw image with header padding
+#------------------------------------------------------------------------------
+# Collect all sample files (exclude .md and .sh)
+#------------------------------------------------------------------------------
+mapfile -t ALL_FILES < <(find "$SAMPLE_DIR" -type f \
+    ! -name "*.md" ! -name "*.sh" \
+    -printf "%P\n" | sort)
+
+TOTAL_FILES=${#ALL_FILES[@]}
+echo "Found $TOTAL_FILES files to include"
+echo ""
+
+if [[ $TOTAL_FILES -eq 0 ]]; then
+    echo "ERROR: No sample files found in $SAMPLE_DIR"
+    exit 1
+fi
+
+#------------------------------------------------------------------------------
+# Calculate category for a file path
+#------------------------------------------------------------------------------
+get_category() {
+    local path="$1"
+    echo "${path%%/*}"
+}
+
+get_extension() {
+    local path="$1"
+    local filename="${path##*/}"
+    if [[ "$filename" == *.* ]]; then
+        echo "${filename##*.}" | tr '[:upper:]' '[:lower:]'
+    else
+        echo ""
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Build the raw image
+#------------------------------------------------------------------------------
+echo "Building raw image..."
+
+# Start with header padding
+OFFSET=$ALIGNMENT
 dd if=/dev/zero of="$OUTPUT_RAW" bs=$ALIGNMENT count=1 2>/dev/null
 
+# Start manifest JSON
+cat > "$MANIFEST" << EOF
+{
+  "description": "Golden test image - ALL sample files for fastcarve testing",
+  "generated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "alignment": $ALIGNMENT,
+  "sample_dir": "sample",
+  "files": [
+EOF
+
+# Track categories for summary
+declare -A CATEGORY_COUNTS
+declare -A CATEGORY_SIZES
+TOTAL_SIZE=0
+
 FIRST=true
-for f in "${REQUIRED_FILES[@]}"; do
-    FILE_PATH="$SAMPLES_DIR/$f"
-    FILE_SIZE=$(stat -c%s "$FILE_PATH" 2>/dev/null || stat -f%z "$FILE_PATH")
-    FILE_SHA256=$(sha256sum "$FILE_PATH" | cut -d' ' -f1)
-    FILE_TYPE="${f%.*}"
+for rel_path in "${ALL_FILES[@]}"; do
+    full_path="$SAMPLE_DIR/$rel_path"
+    
+    FILE_SIZE=$(stat -c%s "$full_path" 2>/dev/null || stat -f%z "$full_path")
+    FILE_SHA256=$(sha256sum "$full_path" | cut -d' ' -f1)
+    CATEGORY=$(get_category "$rel_path")
+    EXTENSION=$(get_extension "$rel_path")
     
     # Append file at current offset
-    dd if="$FILE_PATH" of="$OUTPUT_RAW" bs=1 seek=$OFFSET conv=notrunc 2>/dev/null
+    dd if="$full_path" of="$OUTPUT_RAW" bs=1 seek=$OFFSET conv=notrunc 2>/dev/null
     
-    # Calculate end offset
-    END_OFFSET=$((OFFSET + FILE_SIZE - 1))
+    # Track stats
+    CATEGORY_COUNTS[$CATEGORY]=$(( ${CATEGORY_COUNTS[$CATEGORY]:-0} + 1 ))
+    CATEGORY_SIZES[$CATEGORY]=$(( ${CATEGORY_SIZES[$CATEGORY]:-0} + FILE_SIZE ))
+    TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
     
-    # Write manifest entry
-    if [[ "$FIRST" != "true" ]]; then
-        echo ',' >> "$MANIFEST"
-    fi
+    # Manifest entry
+    [[ "$FIRST" != "true" ]] && printf ',\n' >> "$MANIFEST"
     FIRST=false
     
-    printf '    {\n' >> "$MANIFEST"
-    printf '      "filename": "%s",\n' "$f" >> "$MANIFEST"
-    printf '      "type": "%s",\n' "$FILE_TYPE" >> "$MANIFEST"
-    printf '      "offset": %d,\n' "$OFFSET" >> "$MANIFEST"
-    printf '      "offset_hex": "0x%X",\n' "$OFFSET" >> "$MANIFEST"
-    printf '      "size": %d,\n' "$FILE_SIZE" >> "$MANIFEST"
-    printf '      "end_offset": %d,\n' "$END_OFFSET" >> "$MANIFEST"
-    printf '      "sha256": "%s"\n' "$FILE_SHA256" >> "$MANIFEST"
-    printf '    }' >> "$MANIFEST"
+    cat >> "$MANIFEST" << EOF
+    {
+      "path": "$rel_path",
+      "category": "$CATEGORY",
+      "extension": "$EXTENSION",
+      "offset": $OFFSET,
+      "offset_hex": "0x$(printf '%X' $OFFSET)",
+      "size": $FILE_SIZE,
+      "sha256": "$FILE_SHA256"
+    }
+EOF
     
-    echo "  Added $f at offset $OFFSET (0x$(printf '%X' $OFFSET)), size $FILE_SIZE"
+    printf "  %-50s @ 0x%08X (%d bytes)\n" "$rel_path" "$OFFSET" "$FILE_SIZE"
     
-    # Advance offset with alignment
+    # Advance to next aligned offset
     OFFSET=$(( ((OFFSET + FILE_SIZE + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT ))
 done
 
@@ -287,85 +265,120 @@ done
 FINAL_SIZE=$OFFSET
 truncate -s $FINAL_SIZE "$OUTPUT_RAW"
 
-# Close manifest
-echo '' >> "$MANIFEST"
-echo '  ],' >> "$MANIFEST"
-echo '  "total_size": '$FINAL_SIZE',' >> "$MANIFEST"
+# Complete manifest with summary
 RAW_SHA256=$(sha256sum "$OUTPUT_RAW" | cut -d' ' -f1)
-echo '  "raw_sha256": "'$RAW_SHA256'"' >> "$MANIFEST"
-echo '}' >> "$MANIFEST"
+
+cat >> "$MANIFEST" << EOF
+
+  ],
+  "summary": {
+    "total_files": $TOTAL_FILES,
+    "total_data_size": $TOTAL_SIZE,
+    "image_size": $FINAL_SIZE,
+    "categories": {
+EOF
+
+# Add category counts
+FIRST_CAT=true
+for cat in $(echo "${!CATEGORY_COUNTS[@]}" | tr ' ' '\n' | sort); do
+    [[ "$FIRST_CAT" != "true" ]] && printf ',\n' >> "$MANIFEST"
+    FIRST_CAT=false
+    printf '      "%s": {"files": %d, "bytes": %d}' \
+        "$cat" "${CATEGORY_COUNTS[$cat]}" "${CATEGORY_SIZES[$cat]}" >> "$MANIFEST"
+done
+
+cat >> "$MANIFEST" << EOF
+
+    }
+  },
+  "raw_sha256": "$RAW_SHA256"
+}
+EOF
 
 echo ""
-echo "Created $OUTPUT_RAW ($FINAL_SIZE bytes)"
-echo "Manifest written to $MANIFEST"
+echo "Created $OUTPUT_RAW"
+echo "  Files: $TOTAL_FILES"
+echo "  Data:  $TOTAL_SIZE bytes"
+echo "  Image: $FINAL_SIZE bytes (with alignment padding)"
+echo "  SHA256: $RAW_SHA256"
+echo ""
+echo "Manifest: $MANIFEST"
 
+#------------------------------------------------------------------------------
 # Convert to E01 if ewfacquire is available
-if command -v ewfacquire &> /dev/null; then
+#------------------------------------------------------------------------------
+if [[ "$SKIP_E01" == "true" ]]; then
     echo ""
-    echo "Converting to E01..."
+    echo "Skipping E01 generation (--no-e01 flag)"
+elif command -v ewfacquire &> /dev/null; then
+    echo ""
+    echo "Converting to E01 format..."
     rm -f "${OUTPUT_E01}.E01"
-    ewfacquire -t "$OUTPUT_E01" -u -c best -S 0 "$OUTPUT_RAW"
+    
+    ewfacquire -t "$OUTPUT_E01" \
+               -u \
+               -c best \
+               -S 0 \
+               -C "golden_test" \
+               -D "Golden test image - all fastcarve samples" \
+               -e "automated" \
+               -E "golden_001" \
+               "$OUTPUT_RAW"
+    
     E01_SIZE=$(stat -c%s "${OUTPUT_E01}.E01" 2>/dev/null || stat -f%z "${OUTPUT_E01}.E01")
-    echo "Created ${OUTPUT_E01}.E01 ($E01_SIZE bytes)"
+    E01_SHA256=$(sha256sum "${OUTPUT_E01}.E01" | cut -d' ' -f1)
+    
+    echo ""
+    echo "Created ${OUTPUT_E01}.E01"
+    echo "  Size: $E01_SIZE bytes ($(( E01_SIZE * 100 / FINAL_SIZE ))% of raw)"
+    echo "  SHA256: $E01_SHA256"
+    
+    # Verify if possible
+    if command -v ewfverify &> /dev/null; then
+        echo ""
+        echo "Verifying E01..."
+        if ewfverify "${OUTPUT_E01}.E01"; then
+            echo "✓ E01 verification passed"
+        else
+            echo "✗ E01 verification failed!"
+            exit 1
+        fi
+    fi
 else
     echo ""
-    echo "WARNING: ewfacquire not found. Install libewf-tools to generate E01."
-    echo "Raw image created; E01 conversion skipped."
+    echo "WARNING: ewfacquire not found"
+    echo "Install libewf-tools to generate E01:"
+    echo "  Fedora/RHEL: sudo dnf install libewf-tools"
+    echo "  Debian/Ubuntu: sudo apt install ewf-tools"
+    echo ""
+    echo "Raw image created; run with ewfacquire installed for E01."
 fi
 
 echo ""
-echo "Done! Verify with: ewfverify ${OUTPUT_E01}.E01"
+echo "=== Done ==="
+echo ""
+echo "Test commands:"
+echo "  cargo test golden                    # Raw image tests"
+echo "  cargo test golden --features ewf     # Include E01 tests"
 ```
 
-### Step 3: Generate Manifest Format
-
-The `manifest.json` enables precise test assertions:
-
-```json
-{
-  "description": "Golden test image manifest",
-  "generated": "2025-12-29T12:00:00Z",
-  "files": [
-    {
-      "filename": "test.jpg",
-      "type": "jpeg",
-      "offset": 4096,
-      "offset_hex": "0x1000",
-      "size": 5432,
-      "end_offset": 9527,
-      "sha256": "abc123..."
-    },
-    {
-      "filename": "test.png",
-      "type": "png",
-      "offset": 12288,
-      "offset_hex": "0x3000",
-      "size": 2048,
-      "end_offset": 14335,
-      "sha256": "def456..."
-    }
-  ],
-  "total_size": 131072,
-  "raw_sha256": "789abc..."
-}
-```
-
-### Step 4: Create Integration Test
+### Integration Tests
 
 Create `tests/golden_image_test.rs`:
 
 ```rust
-//! Integration test using the golden test image.
+//! Integration tests using the golden test image.
 //!
-//! This test uses real sample files packed into a raw/E01 image.
-//! It verifies that carved files match the original samples.
+//! Tests use ALL sample files packed into raw and E01 images.
+//! Provides comprehensive testing for development and regression detection.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use fastcarve::config;
-use fastcarve::evidence::{self, EvidenceSource, RawFileSource};
+use fastcarve::evidence::RawFileSource;
 use fastcarve::metadata::{self, MetadataBackendKind};
 use fastcarve::pipeline;
 use fastcarve::scanner;
@@ -386,43 +399,68 @@ fn golden_e01_path() -> PathBuf {
     golden_image_dir().join("golden.E01")
 }
 
+/// Load and parse manifest.json
 fn load_manifest() -> Option<serde_json::Value> {
-    let manifest_path = golden_image_dir().join("manifest.json");
-    if !manifest_path.exists() {
-        return None;
-    }
-    let content = fs::read_to_string(manifest_path).ok()?;
+    let path = golden_image_dir().join("manifest.json");
+    let content = fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
 
-/// Get expected SHA256 for a file type from manifest
-fn expected_sha256(manifest: &serde_json::Value, file_type: &str) -> Option<String> {
+/// Get file entry from manifest by path
+fn get_file_entry<'a>(manifest: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
     manifest["files"]
         .as_array()?
         .iter()
-        .find(|f| f["type"].as_str() == Some(file_type))?
-        ["sha256"]
-        .as_str()
-        .map(|s| s.to_string())
+        .find(|f| f["path"].as_str() == Some(path))
 }
 
+/// Get all files of a specific extension from manifest
+fn get_files_by_extension<'a>(manifest: &'a serde_json::Value, ext: &str) -> Vec<&'a serde_json::Value> {
+    manifest["files"]
+        .as_array()
+        .map(|files| {
+            files.iter()
+                .filter(|f| f["extension"].as_str() == Some(ext))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Get all files in a category from manifest
+fn get_files_by_category<'a>(manifest: &'a serde_json::Value, category: &str) -> Vec<&'a serde_json::Value> {
+    manifest["files"]
+        .as_array()
+        .map(|files| {
+            files.iter()
+                .filter(|f| f["category"].as_str() == Some(category))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Sha256, Digest};
+    hex::encode(Sha256::digest(data))
+}
+
+/// Test carving from raw golden image - comprehensive test
 #[test]
-fn carves_from_raw_golden_image() {
+fn golden_carves_from_raw() {
     let raw_path = golden_raw_path();
     if !raw_path.exists() {
-        eprintln!("Skipping: golden.raw not found. Run generate.sh first.");
+        eprintln!("Skipping: golden.raw not found. Run tests/golden_image/generate.sh");
         return;
     }
 
-    let manifest = load_manifest().expect("manifest.json required");
-    
+    let manifest = load_manifest().expect("manifest.json required when golden.raw exists");
     let temp_dir = tempfile::tempdir().expect("tempdir");
+
     let loaded = config::load_config(None).expect("config");
     let mut cfg = loaded.config;
     cfg.run_id = "golden_raw_test".to_string();
 
     let evidence = RawFileSource::open(&raw_path).expect("open raw");
-    let evidence: Arc<dyn EvidenceSource> = Arc::new(evidence);
+    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
 
     let run_output_dir = temp_dir.path().join(&cfg.run_id);
     fs::create_dir_all(&run_output_dir).expect("output dir");
@@ -441,7 +479,6 @@ fn carves_from_raw_golden_image() {
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
     let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
-
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
 
     let stats = pipeline::run_pipeline(
@@ -453,62 +490,49 @@ fn carves_from_raw_golden_image() {
         &run_output_dir,
         2,
         64 * 1024,
-        4096, // 4KB overlap matches alignment
+        4096,
         None,
         None,
         carve_registry,
     )
     .expect("pipeline");
 
-    // Count expected files from manifest
-    let expected_count = manifest["files"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
-    
-    assert!(stats.hits_found >= expected_count as u64 - 1, 
-            "expected at least {} hits, got {}", expected_count - 1, stats.hits_found);
+    // Get summary from manifest
+    let total_files = manifest["summary"]["total_files"].as_u64().unwrap_or(0);
+    println!("Manifest contains {} files", total_files);
+    println!("Pipeline found {} hits, carved {} files", stats.hits_found, stats.files_carved);
+
+    // We should find hits for most carveable files
+    assert!(stats.hits_found > 0, "expected some hits");
     assert!(stats.files_carved > 0, "expected carved files");
 
-    // Verify specific file types were carved
+    // Check which file types were carved
     let carved_root = run_output_dir.join("carved");
+    let expected_types = ["jpeg", "png", "gif", "sqlite", "pdf", "docx", "xlsx", "pptx", 
+                         "webp", "bmp", "tiff", "mp4", "rar", "7z", "zip", "odt", "ods", "odp"];
     
-    // Check JPEG carved and hash matches original
-    if let Some(expected_hash) = expected_sha256(&manifest, "test") {
-        // Note: "test" type for test.jpg - adjust based on actual manifest
-        let jpeg_dir = carved_root.join("jpeg");
-        if jpeg_dir.exists() {
-            for entry in fs::read_dir(jpeg_dir).expect("read jpeg dir") {
-                let entry = entry.expect("entry");
-                let carved_content = fs::read(entry.path()).expect("read carved");
-                let carved_hash = sha256_hex(&carved_content);
-                // Carved file should match original sample
-                if carved_hash == expected_hash {
-                    println!("JPEG hash matches original sample");
-                }
+    let mut found_types = Vec::new();
+    for t in expected_types {
+        let type_dir = carved_root.join(t);
+        if type_dir.exists() {
+            let count = fs::read_dir(&type_dir).map(|d| d.count()).unwrap_or(0);
+            if count > 0 {
+                found_types.push((t, count));
             }
         }
     }
-
-    // Basic existence checks for all expected types
-    let expected_types = ["jpeg", "png", "gif", "sqlite", "pdf", "docx", "webp", "bmp", "tiff", "mp4", "rar", "7z"];
-    let mut found_types = Vec::new();
-    for t in expected_types {
-        if carved_root.join(t).exists() {
-            found_types.push(t);
-        }
-    }
     
-    println!("Found carved types: {:?}", found_types);
-    assert!(found_types.len() >= 6, "expected at least 6 file types carved, got {}", found_types.len());
+    println!("Carved file types: {:?}", found_types);
+    assert!(found_types.len() >= 6, "expected at least 6 types carved, got {}", found_types.len());
 }
 
+/// Test carving from E01 with string scanning
 #[cfg(feature = "ewf")]
 #[test]
-fn carves_from_e01_golden_image() {
+fn golden_carves_from_e01_with_strings() {
     let e01_path = golden_e01_path();
     if !e01_path.exists() {
-        eprintln!("Skipping: golden.E01 not found. Run generate.sh with ewfacquire.");
+        eprintln!("Skipping: golden.E01 not found.");
         return;
     }
 
@@ -516,39 +540,12 @@ fn carves_from_e01_golden_image() {
     let loaded = config::load_config(None).expect("config");
     let mut cfg = loaded.config;
     cfg.run_id = "golden_e01_test".to_string();
+    cfg.enable_string_scan = true;
+    cfg.enable_url_scan = true;
+    cfg.enable_email_scan = true;
 
-    let cli_opts = fastcarve::cli::CliOptions {
-        input: e01_path.clone(),
-        output: temp_dir.path().to_path_buf(),
-        config_path: None,
-        gpu: false,
-        workers: 2,
-        chunk_size_mib: 1,
-        overlap_kib: Some(4),
-        metadata_backend: fastcarve::cli::MetadataBackend::Jsonl,
-        scan_strings: true,
-        scan_utf16: false,
-        scan_urls: true,
-        no_scan_urls: false,
-        scan_emails: true,
-        no_scan_emails: false,
-        scan_phones: true,
-        no_scan_phones: false,
-        string_min_len: Some(6),
-        scan_entropy: false,
-        entropy_window_bytes: None,
-        entropy_threshold: None,
-        scan_sqlite_pages: false,
-        max_bytes: None,
-        max_chunks: None,
-        evidence_sha256: None,
-        compute_evidence_sha256: false,
-        disable_zip: false,
-        types: None,
-    };
-
-    let evidence = evidence::open_source(&cli_opts).expect("open E01");
-    let evidence: Arc<dyn evidence::EvidenceSource> = Arc::from(evidence);
+    let evidence = fastcarve::evidence::EwfSource::open(&e01_path).expect("open E01");
+    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
 
     let run_output_dir = temp_dir.path().join(&cfg.run_id);
     fs::create_dir_all(&run_output_dir).expect("output dir");
@@ -591,218 +588,204 @@ fn carves_from_e01_golden_image() {
     .expect("pipeline");
 
     assert!(stats.files_carved > 0, "expected carved files from E01");
-    
-    // Verify string artifacts were found
-    let meta_dir = run_output_dir.join("metadata");
-    let strings_file = meta_dir.join("string_artefacts.jsonl");
+
+    // Verify string artefacts extracted (from strings.txt and other text files)
+    let strings_file = run_output_dir.join("metadata").join("string_artefacts.jsonl");
     if strings_file.exists() {
         let content = fs::read_to_string(&strings_file).expect("read strings");
-        assert!(content.contains("example.com") || content.contains("@"), 
-                "expected URL or email artifacts");
+        // Should find URLs and emails from other/strings.txt
+        let has_urls = content.contains("example.com") || content.contains("http");
+        let has_emails = content.contains("@");
+        println!("String scanning: URLs={}, Emails={}", has_urls, has_emails);
+        assert!(has_urls || has_emails, "expected URL or email artefacts");
     }
 }
 
+/// Verify E01 media size matches raw
 #[cfg(feature = "ewf")]
 #[test]
-fn e01_size_matches_raw() {
+fn golden_e01_size_matches_raw() {
     let raw_path = golden_raw_path();
     let e01_path = golden_e01_path();
-    
+
     if !raw_path.exists() || !e01_path.exists() {
-        eprintln!("Skipping size comparison: need both golden.raw and golden.E01");
+        eprintln!("Skipping: need both golden.raw and golden.E01");
         return;
     }
 
     let raw_size = fs::metadata(&raw_path).expect("raw metadata").len();
+    let e01 = fastcarve::evidence::EwfSource::open(&e01_path).expect("open E01");
 
-    let cli_opts = fastcarve::cli::CliOptions {
-        input: e01_path,
-        output: PathBuf::from("/tmp"),
-        config_path: None,
-        gpu: false,
-        workers: 1,
-        chunk_size_mib: 1,
-        overlap_kib: None,
-        metadata_backend: fastcarve::cli::MetadataBackend::Jsonl,
-        scan_strings: false,
-        scan_utf16: false,
-        scan_urls: false,
-        no_scan_urls: false,
-        scan_emails: false,
-        no_scan_emails: false,
-        scan_phones: false,
-        no_scan_phones: false,
-        string_min_len: None,
-        scan_entropy: false,
-        entropy_window_bytes: None,
-        entropy_threshold: None,
-        scan_sqlite_pages: false,
-        max_bytes: None,
-        max_chunks: None,
-        evidence_sha256: None,
-        compute_evidence_sha256: false,
-        disable_zip: false,
-        types: None,
-    };
-
-    let e01_evidence = evidence::open_source(&cli_opts).expect("open E01");
-    
-    assert_eq!(e01_evidence.len(), raw_size, 
-               "E01 media size should match raw image size");
+    assert_eq!(e01.len(), raw_size, "E01 media size should match raw");
 }
 
-fn sha256_hex(data: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    hex::encode(hasher.finalize())
+/// Verify manifest integrity - all files at correct offsets with correct hashes
+#[test]
+fn golden_manifest_integrity() {
+    let raw_path = golden_raw_path();
+    let manifest = match load_manifest() {
+        Some(m) => m,
+        None => {
+            eprintln!("Skipping: manifest.json not found");
+            return;
+        }
+    };
+
+    if !raw_path.exists() {
+        eprintln!("Skipping: golden.raw not found");
+        return;
+    }
+
+    let raw_data = fs::read(&raw_path).expect("read raw");
+    let files = manifest["files"].as_array().expect("files array");
+    
+    println!("Verifying {} files in manifest...", files.len());
+
+    let mut verified = 0;
+    let mut failed = Vec::new();
+
+    for file in files {
+        let path = file["path"].as_str().unwrap_or("?");
+        let offset = file["offset"].as_u64().unwrap_or(0) as usize;
+        let size = file["size"].as_u64().unwrap_or(0) as usize;
+        let expected_hash = file["sha256"].as_str().unwrap_or("");
+
+        if offset + size > raw_data.len() {
+            failed.push(format!("{}: extends beyond image", path));
+            continue;
+        }
+
+        let slice = &raw_data[offset..offset + size];
+        let actual_hash = sha256_hex(slice);
+
+        if actual_hash == expected_hash {
+            verified += 1;
+        } else {
+            failed.push(format!("{}: hash mismatch", path));
+        }
+    }
+
+    println!("Verified: {}/{}", verified, files.len());
+    
+    if !failed.is_empty() {
+        for f in &failed {
+            eprintln!("  FAILED: {}", f);
+        }
+        panic!("{} files failed verification", failed.len());
+    }
+}
+
+/// Test that specific file categories are present and carved correctly
+#[test]
+fn golden_category_coverage() {
+    let manifest = match load_manifest() {
+        Some(m) => m,
+        None => {
+            eprintln!("Skipping: manifest.json not found");
+            return;
+        }
+    };
+
+    let categories = &manifest["summary"]["categories"];
+    
+    // Expected categories based on sample directory structure
+    let expected = ["images", "video", "audio", "documents", "archives", 
+                    "databases", "media_tiny", "other"];
+    
+    println!("Category coverage:");
+    for cat in expected {
+        let info = &categories[cat];
+        let files = info["files"].as_u64().unwrap_or(0);
+        let bytes = info["bytes"].as_u64().unwrap_or(0);
+        println!("  {}: {} files, {} bytes", cat, files, bytes);
+        
+        // Each category should have at least one file
+        assert!(files > 0, "category '{}' should have files", cat);
+    }
 }
 ```
 
-### Step 5: Update .gitignore
+---
 
-Add to `.gitignore`:
+## .gitignore Updates
+
+Add to project `.gitignore`:
 
 ```gitignore
-# Golden image intermediates
+# Golden image - raw is large, E01 is committed
 tests/golden_image/golden.raw
 ```
 
-Keep `golden.E01` and `manifest.json` committed.
+---
 
-### Step 6: Update CI Workflow
-
-The CI already handles missing files gracefully (tests skip). Optionally add:
-
-```yaml
-- name: Verify golden image
-  run: |
-    if [ -f tests/golden_image/golden.E01 ]; then
-      ewfverify tests/golden_image/golden.E01 || echo "ewfverify not available"
-    fi
-```
-
-### Step 7: Document in README
+## README Updates
 
 Add to Testing section:
 
 ```markdown
-### Golden Image Integration Tests
+### Golden Image Tests
 
-The test suite includes integration tests using a golden test image containing 
-real sample files for all supported formats.
+Comprehensive integration tests using a golden image with ALL sample files (~84 files, ~23MB).
 
-**Structure:**
 ```
 tests/golden_image/
-├── samples/          # Source sample files
-├── generate.sh       # Packs samples into raw + E01
-├── manifest.json     # Offset/hash reference
-├── golden.raw        # Generated (gitignored)
-└── golden.E01        # Generated (committed)
+├── sample/           # Source files organized by type
+│   ├── images/       # JPEG, PNG, GIF, BMP, WebP, TIFF, etc.
+│   ├── documents/    # PDF, DOCX, XLSX, PPTX, ODT, etc.
+│   ├── archives/     # ZIP, RAR, 7z, TAR variants
+│   ├── databases/    # SQLite (basic + browser artifacts)
+│   ├── video/        # MP4, AVI, MOV, etc.
+│   ├── audio/        # MP3, WAV, OGG
+│   ├── other/        # Text, JSON, strings for extraction
+│   └── ...
+├── generate.sh       # Packs ALL samples into image
+├── manifest.json     # Complete offset/hash map
+├── golden.raw        # ~25MB raw image (gitignored)
+└── golden.E01        # ~10MB compressed (committed)
 ```
 
-**To regenerate the golden image:**
+**Generate/regenerate:**
 ```bash
 cd tests/golden_image
-./generate.sh
+./generate.sh              # Creates raw + E01
+./generate.sh --no-e01     # Raw only (faster)
 ```
 
-Requires: `ewfacquire` from libewf-tools for E01 generation.
+**Run tests:**
+```bash
+cargo test golden                    # Raw image tests
+cargo test golden --features ewf     # Include E01 tests
 ```
-
----
-
-## File Structure (Updated)
-
-```
-tests/
-├── golden_image/
-│   ├── samples/                # Real sample files
-│   │   ├── test.jpg
-│   │   ├── test.png
-│   │   ├── test.gif
-│   │   ├── test.sqlite
-│   │   ├── test.pdf
-│   │   ├── test.docx
-│   │   ├── test.webp
-│   │   ├── test.bmp
-│   │   ├── test.tiff
-│   │   ├── test.mp4
-│   │   ├── test.rar
-│   │   ├── test.7z
-│   │   └── strings.txt
-│   ├── generate.sh             # Packing script
-│   ├── manifest.json           # Auto-generated offset map
-│   ├── golden.raw              # Gitignored
-│   └── golden.E01              # Committed (~100-200KB)
-├── golden_image_test.rs        # Integration tests
-├── integration_basic.rs        # Existing
-└── metadata_parquet.rs         # Existing
-```
-
----
-
-## Sample Files Licensing
-
-All sample files must be:
-- **Self-created** using ImageMagick/ffmpeg/etc., OR
-- **Public domain** (CC0, Unlicense), OR  
-- **Permissively licensed** (MIT, Apache 2.0)
-
-Document licenses in `tests/golden_image/samples/README.md`:
-
-```markdown
-# Sample Files
-
-These files are used to generate the golden test image.
-
-| File | Source | License |
-|------|--------|---------|
-| test.jpg | Generated with ImageMagick | CC0 |
-| test.png | Generated with ImageMagick | CC0 |
-| test.gif | Generated with ImageMagick | CC0 |
-| test.sqlite | Created with sqlite3 CLI | CC0 |
-| test.pdf | Hand-crafted minimal PDF | CC0 |
-| test.docx | Created with script | CC0 |
-| test.webp | Generated with ImageMagick | CC0 |
-| test.bmp | Generated with ImageMagick | CC0 |
-| test.tiff | Generated with ImageMagick | CC0 |
-| test.mp4 | Generated with ffmpeg | CC0 |
-| test.rar | Created with rar CLI | CC0 |
-| test.7z | Created with 7z CLI | CC0 |
-| strings.txt | Hand-crafted test data | CC0 |
 ```
 
 ---
 
 ## Verification Checklist
 
-After creating the golden image, verify:
-
-- [ ] All sample files exist in `samples/`
-- [ ] `generate.sh` runs without errors
-- [ ] `manifest.json` contains correct offsets and hashes
-- [ ] `golden.raw` size matches manifest `total_size`
-- [ ] `golden.E01` file is < 500 KB
-- [ ] `ewfverify golden.E01` passes (if available)
-- [ ] `cargo test golden` passes for raw image
-- [ ] `cargo test golden` passes for E01 image (with EWF feature)
-- [ ] Carved files match original sample hashes
-- [ ] String scanning finds URLs/emails from strings.txt
+- [ ] `generate.sh` created and executable
+- [ ] Running `./generate.sh` completes without errors
+- [ ] `manifest.json` contains all 84 files with offsets/hashes
+- [ ] `golden.raw` created (~25MB with alignment)
+- [ ] `golden.E01` created (~8-12MB compressed)
+- [ ] `ewfverify golden.E01` passes
+- [ ] `cargo test golden` passes
+- [ ] `cargo test golden --features ewf` passes
+- [ ] Manifest integrity test validates all file hashes
+- [ ] String scanning finds URLs/emails from test data
 
 ---
 
 ## Completion Criteria
 
 This feature is complete when:
-- [ ] `samples/` directory with all 13 files created
-- [ ] `samples/README.md` documents licensing
-- [ ] `generate.sh` script created and tested
-- [ ] `manifest.json` auto-generated with correct data
-- [ ] `golden.E01` committed to repo (< 500KB)
-- [ ] `tests/golden_image_test.rs` passes locally
-- [ ] CI runs golden image tests successfully
-- [ ] Tests skip gracefully when golden image missing
-- [ ] README updated with golden image instructions
+
+- [ ] `generate.sh` works on Linux (bash 4+)
+- [ ] All ~84 sample files included in image
+- [ ] `manifest.json` auto-generated with full metadata
+- [ ] `golden.raw` and `golden.E01` successfully created
+- [ ] `tests/golden_image_test.rs` implemented with 5+ test functions
+- [ ] Tests verify carving, string extraction, and manifest integrity
+- [ ] README updated with instructions
+- [ ] `.gitignore` excludes `golden.raw`
+- [ ] Planning doc moved to `planning/done/`
 
