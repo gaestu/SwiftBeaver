@@ -1,0 +1,18 @@
+From: sender@example.com
+To: recipient@test.org
+Subject: Test Email for Carving
+Date: Wed, 01 Jan 2025 12:00:00 +0000
+Message-ID: <test-001@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+
+This is a test email message for forensic carving tests.
+It contains some sample text content that should be extractable.
+
+Some interesting data:
+- IP: 192.168.1.100
+- URL: https://www.example.com/page
+- Phone: +1-555-123-4567
+
+Best regards,
+Test Sender

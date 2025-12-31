@@ -1,0 +1,76 @@
+=== Email Addresses ===
+user@example.com
+admin@test-domain.org
+john.doe+tag@company.co.uk
+support@subdomain.example.org
+名前@例え.jp
+
+=== URLs ===
+https://www.example.com/path\?query\=value\&other\=123
+http://192.168.1.1:8080/admin/login
+ftp://files.example.org/pub/download.zip
+https://user:pass@secure.example.com/
+file:///home/user/documents/file.txt
+
+=== IP Addresses ===
+192.168.1.1
+10.0.0.1
+172.16.254.1
+255.255.255.0
+8.8.8.8
+2001:0db8:85a3:0000:0000:8a2e:0370:7334
+::1
+fe80::1
+
+=== Phone Numbers ===
++1-555-123-4567
+(202) 555-0123
++44 20 7946 0958
++49 30 12345678
+1-800-555-1234
+
+=== Credit Card Test Numbers (Luhn-valid) ===
+4111111111111111
+5500000000000004
+340000000000009
+6011111111111117
+3530111333300000
+
+=== Bitcoin Addresses ===
+1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2
+3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy
+bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq
+
+=== MAC Addresses ===
+00:1A:2B:3C:4D:5E
+AA-BB-CC-DD-EE-FF
+00:00:00:00:00:00
+
+=== Hashes ===
+MD5: d41d8cd98f00b204e9800998ecf8427e
+SHA1: da39a3ee5e6b4b0d3255bfef95601890afd80709
+SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+=== File Paths ===
+C:\Users\Admin\Documents\secret.docx
+/home/user/.ssh/id_rsa
+/var/log/syslog
+\\server\share\folder\file.txt
+
+=== Registry Keys ===
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+HKCU\Software\Classes\Local Settings
+
+=== Dates and Times ===
+2025-01-01T12:00:00Z
+01/01/2025 12:00:00
+Jan 1, 2025
+1735689600
+
+=== UUIDs ===
+550e8400-e29b-41d4-a716-446655440000
+6ba7b810-9dad-11d1-80b4-00c04fd430c8
+
+=== SSN Test Patterns ===
+123-45-6789
+987-65-4321

@@ -6,6 +6,8 @@ This document tracks sample files for the golden test image.
 
 **Scope:** fastcarve currently carves jpeg/png/gif/pdf/zip/webp/sqlite/bmp/tiff/mp4/rar/7z; docx/xlsx/pptx are classified from ZIP content. Other formats below are optional/future.
 
+**Placement:** the files should be placed in tests/golden_image in the according folders.
+
 ---
 
 ## Pictures / Images
@@ -14,13 +16,19 @@ This document tracks sample files for the golden test image.
 |--------|--------|------|------|-------|
 | jpeg/jpg | ✅ Have | file_example_JPG_100kB.jpg | 100 KB | |
 | jpeg/jpg | ✅ Have | file_example_JPG_500kB.jpg | 500 KB | (pick smaller) |
+| jpeg/jpg | ✅ Have | test_generated.jpg | small | Generated plasma |
 | png | ✅ Have | file_example_PNG_500kB.png | 500 KB | |
 | png | ✅ Have | file_example_PNG_1MB.png | 1 MB | (pick smaller) |
+| png | ✅ Have | test_gradient.png | small | Generated gradient |
 | gif | ✅ Have | file_example_GIF_500kB.gif | 500 KB | |
 | gif | ✅ Have | 20251230_*.gif | ? | AI-generated |
+| gif | ✅ Have | test_animated.gif | small | Generated animated |
 | bmp | ✅ Have | test.bmp | small | Generated |
+| bmp | ✅ Have | test_generated.bmp | small | Generated yellow |
 | webp | ✅ Have | file_example_WEBP_250kB.webp | 250 KB | |
+| webp | ✅ Have | test_generated.webp | small | Generated gradient |
 | tiff/tif | ✅ Have | file_example_TIFF_1MB.tiff | 1 MB | Large, consider smaller |
+| tiff/tif | ✅ Have | test_pattern.tiff | small | Generated checkerboard |
 | ico | ✅ Have | file_example_favicon.ico | small | |
 | svg | ✅ Have | file_example_SVG_30kB.svg | 30 KB | Text-based, no carver |
 | heic | ❌ Missing | - | - | Need to source |
@@ -61,6 +69,7 @@ This document tracks sample files for the golden test image.
 | Format | Status | File | Size | Notes |
 |--------|--------|------|------|-------|
 | pdf | ✅ Have | file-sample_150kB.pdf | 150 KB | |
+| pdf | ✅ Have | test_minimal.pdf | small | Generated minimal PDF |
 | doc | ✅ Have | file-sample_100kB.doc | 100 KB | OLE format |
 | docx | ✅ Have | file-sample_100kB.docx | 100 KB | ZIP-based |
 | xls | ✅ Have | file_example_XLS_50.xls | 50 KB | OLE format |
@@ -75,7 +84,7 @@ This document tracks sample files for the golden test image.
 | csv | ✅ Have | file_example_CSV_5000.csv | ~5 KB | |
 | json | ✅ Have | file_example_JSON_1kb.json | 1 KB | |
 | xml | ✅ Have | file_example_XML_24kb.xml.xml | 24 KB | |
-| yaml | ❌ Missing | - | - | Create manually |
+| yaml | ✅ Have | other/test_config.yaml | small | Generated |
 | html | ✅ Have | Title.html | small | |
 
 ---
@@ -85,6 +94,7 @@ This document tracks sample files for the golden test image.
 | Format | Status | File | Size | Notes |
 |--------|--------|------|------|-------|
 | zip | ✅ Have | zip_2MB.zip | 2 MB | Large! |
+| zip (nested) | ✅ Have | nested.zip | small | ZIP with inner ZIP |
 | rar | ✅ Have | test.rar | small | RAR4? add RAR5 sample |
 | rar (v5) | ❌ Missing | test.rar5 | small | Generate with `rar a -ma5 test.rar5 *.jpg` |
 | 7z | ✅ Have | test.7z | small | |
@@ -103,7 +113,8 @@ This document tracks sample files for the golden test image.
 
 | Format | Status | File | Size | Notes |
 |--------|--------|------|------|-------|
-| sqlite | ✅ Have | test.sqlite | small | |
+| sqlite | ✅ Have | databases/test.sqlite | small | |
+| sqlite | ✅ Have | databases/test_forensic.sqlite | small | Users/logs/bookmarks tables |
 | mdb/accdb | ❌ Missing | - | - | Low priority |
 
 ---
@@ -125,8 +136,8 @@ This document tracks sample files for the golden test image.
 |--------|--------|------|------|-------|
 | exe | ❌ Missing | - | - | Get minimal PE |
 | dll | ❌ Missing | - | - | Get minimal DLL |
-| elf | ❌ Missing | - | - | Compile hello world |
-| so | ❌ Missing | - | - | Compile minimal lib |
+| elf | ✅ Have | binaries/test_elf | small | Generated |
+| so | ✅ Have | binaries/libtest.so | small | Generated |
 | apk | ❌ Missing | - | - | Low priority |
 
 ---
@@ -135,7 +146,8 @@ This document tracks sample files for the golden test image.
 
 | Format | Status | File | Size | Notes |
 |--------|--------|------|------|-------|
-| eml | ❌ Missing | - | - | Create manually |
+| eml | ✅ Have | email/test_simple.eml | small | Generated |
+| eml | ✅ Have | email/test_with_attachment.eml | small | With base64 attachment |
 | msg | ❌ Missing | - | - | Hard to create |
 | pst | ❌ Missing | - | - | Hard to create |
 | mbox | ❌ Missing | - | - | Create manually |
@@ -157,17 +169,35 @@ This document tracks sample files for the golden test image.
 | Format | Status | File | Size | Notes |
 |--------|--------|------|------|-------|
 | strings.txt | ✅ Have | other/strings.txt | small | URLs/emails/phones |
-| utf16 text | ❌ Missing | utf16_test.txt | small | Generate: `echo "Test string" \| iconv -t UTF-16LE > utf16_test.txt` |
+| forensic patterns | ✅ Have | other/forensic_patterns.txt | small | Emails/URLs/IPs/CCs/hashes |
+| utf8 multilingual | ✅ Have | other/utf8_multilingual.txt | small | Multi-language text |
+| utf16 LE | ✅ Have | other/utf16_le.txt | small | UTF-16 Little Endian |
+| utf16 BE | ✅ Have | other/utf16_be.txt | small | UTF-16 Big Endian |
+| json | ✅ Have | other/test_data.json | small | Generated JSON |
+| jsonl/ndjson | ✅ Have | other/test_logs.jsonl | small | Log format |
+| yaml | ✅ Have | other/test_config.yaml | small | Config file |
 
 ---
 
 ### Files to Add (High Priority)
 
 - `test.rar5` - RAR5 format coverage (generate with `rar a -ma5`)
-- `utf16_test.txt` - UTF-16 string scan coverage (generate with `iconv`)
-- `test_exif.jpg` - JPEG with EXIF/GPS metadata (generate with ImageMagick)
+- `test_exif.jpg` - JPEG with EXIF/GPS metadata (generate with exiftool)
 - `test_encrypted.rar` - Encrypted RAR for graceful skip testing
+
+### Recently Generated ✅
+
 - `nested.zip` - ZIP containing other files for nested carving
+- `utf16_le.txt` / `utf16_be.txt` - UTF-16 string scan coverage
+- `utf8_multilingual.txt` - Multi-language UTF-8 text
+- `forensic_patterns.txt` - Emails/URLs/IPs/credit cards/hashes
+- `test_data.json` / `test_logs.jsonl` - JSON test files
+- `test_config.yaml` - YAML configuration
+- `test_simple.eml` / `test_with_attachment.eml` - Email files
+- `test_forensic.sqlite` - SQLite with users/logs/bookmarks
+- `test_elf` / `libtest.so` - ELF binaries
+- `test_generated.*` - Various generated images
+- `test_minimal.pdf` - Minimal valid PDF
 
 ---
 

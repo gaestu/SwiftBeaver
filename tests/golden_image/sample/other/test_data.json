@@ -1,0 +1,19 @@
+{
+  "name": "Test User",
+  "email": "test@example.com",
+  "age": 30,
+  "active": true,
+  "address": {
+    "street": "123 Test Street",
+    "city": "Test City",
+    "country": "Testland",
+    "zip": "12345"
+  },
+  "phones": ["+1-555-123-4567", "+1-555-987-6543"],
+  "tags": ["forensics", "testing", "carving", "analysis"],
+  "metadata": {
+    "created": "2025-01-01T12:00:00Z",
+    "modified": "2025-01-01T14:30:00Z",
+    "version": 1
+  }
+}
