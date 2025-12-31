@@ -1,6 +1,7 @@
 # Golden EWF Test Image
 
-Status: WIP
+Status: Implemented
+Implemented in version: 0.1.0
 
 ## Problem Statement
 

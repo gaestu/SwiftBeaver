@@ -149,6 +149,36 @@ CUDA tests skip automatically on machines without a CUDA device. To force CUDA t
 FASTCARVE_REQUIRE_CUDA=1 cargo test --features gpu-cuda
 ```
 
+### Golden Image Tests
+
+Comprehensive integration tests can use a golden image that packs all files
+under `tests/golden_image/samples/`. See `docs/golden_image.md` for details.
+
+```
+tests/golden_image/
+├── .goldenignore     # Optional ignore list for non-samples
+├── samples/          # Source files organized by type
+├── generate.sh       # Packs all samples into an image
+├── manifest.json     # Complete offset/hash map
+├── golden.raw        # Raw image (gitignored)
+└── golden.E01        # EWF image (optional)
+```
+
+Generate or regenerate the images:
+
+```bash
+cd tests/golden_image
+./generate.sh              # Creates raw + E01
+./generate.sh --no-e01     # Raw only (faster)
+```
+
+Run the golden image tests:
+
+```bash
+cargo test golden
+cargo test golden --features ewf
+```
+
 ## License
 
 MIT (see `LICENSE`).

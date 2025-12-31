@@ -26,3 +26,6 @@ Thumbs.db
 
 # image files
 /images
+
+# Golden image artifacts
+/tests/golden_image/golden.raw
