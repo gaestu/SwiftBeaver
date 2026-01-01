@@ -139,3 +139,43 @@ file_types:
     max_size: 1073741824
     min_size: 32
     validator: "sevenz"
+  - id: "wav"
+    extensions: ["wav"]
+    header_patterns:
+      - id: "wav_riff"
+        hex: "52494646"
+    footer_patterns: []
+    max_size: 1073741824
+    min_size: 44
+    validator: "wav"
+  - id: "avi"
+    extensions: ["avi"]
+    header_patterns:
+      - id: "avi_riff"
+        hex: "52494646"
+    footer_patterns: []
+    max_size: 4294967296
+    min_size: 128
+    validator: "avi"
+  - id: "mp3"
+    extensions: ["mp3"]
+    header_patterns:
+      - id: "mp3_id3v2"
+        hex: "494433"
+      - id: "mp3_sync_fb"
+        hex: "FFFB"
+      - id: "mp3_sync_fa"
+        hex: "FFFA"
+    footer_patterns: []
+    max_size: 104857600
+    min_size: 128
+    validator: "mp3"
+  - id: "ole"
+    extensions: ["doc"]
+    header_patterns:
+      - id: "ole_cfb"
+        hex: "D0CF11E0A1B11AE1"
+    footer_patterns: []
+    max_size: 536870912
+    min_size: 512
+    validator: "ole"

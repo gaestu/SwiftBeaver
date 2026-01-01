@@ -1,6 +1,12 @@
 # Audio File Carving (MP3, WAV, OGG)
 
-Status: Planned
+Status: Partially Implemented
+
+## Implementation Status
+
+- ✅ **WAV**: Implemented in `src/carve/wav.rs` with RIFF validation
+- ✅ **MP3**: Implemented in `src/carve/mp3.rs` with ID3v2 and frame walking
+- ⏳ **OGG**: Not yet implemented
 
 ## Problem Statement
 

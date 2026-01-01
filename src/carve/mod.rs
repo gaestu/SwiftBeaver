@@ -1,14 +1,19 @@
+pub mod avi;
 pub mod bmp;
 pub mod footer;
 pub mod gif;
 pub mod jpeg;
+pub mod mp3;
 pub mod mp4;
+pub mod ole;
 pub mod pdf;
 pub mod png;
 pub mod rar;
+pub mod riff;
 pub mod sevenz;
 pub mod sqlite;
 pub mod tiff;
+pub mod wav;
 pub mod webp;
 pub mod zip;
 
@@ -284,6 +289,11 @@ impl<'a> CarveStream<'a> {
         let md5 = format!("{:x}", self.md5.compute());
         let sha256 = hex::encode(self.sha256.finalize());
         Ok((self.written, md5, sha256))
+    }
+
+    /// Get the number of bytes written so far
+    pub(crate) fn bytes_written(&self) -> u64 {
+        self.written
     }
 }
 

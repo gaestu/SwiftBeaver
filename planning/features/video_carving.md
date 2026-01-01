@@ -1,6 +1,13 @@
 # Video File Carving (AVI, MOV, WEBM, WMV)
 
-Status: Planned
+Status: Partially Implemented
+
+## Implementation Status
+
+- ✅ **AVI**: Implemented in `src/carve/avi.rs` using shared RIFF module
+- ⏳ **MOV**: Not yet implemented (can leverage MP4 box-walking)
+- ⏳ **WEBM**: Not yet implemented (requires EBML parsing)
+- ⏳ **WMV**: Not yet implemented (requires ASF parsing)
 
 ## Problem Statement
 

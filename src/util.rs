@@ -283,6 +283,46 @@ pub fn build_carve_registry(cfg: &Config) -> Result<CarveRegistry> {
                     )),
                 );
             }
+            "wav" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::wav::WavCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "avi" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::avi::AviCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "mp3" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::mp3::Mp3CarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "ole" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::ole::OleCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
             "footer" => {
                 let headers = decode_patterns(&file_type.header_patterns, &file_type.id, "header")?;
                 let footers = decode_patterns(&file_type.footer_patterns, &file_type.id, "footer")?;

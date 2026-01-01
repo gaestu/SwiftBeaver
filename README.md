@@ -48,7 +48,7 @@ cargo run -- --input /path/to/image.dd --output ./output --scan-strings --scan-u
 
 This creates a run directory under `./output/<run_id>/` with:
 
-- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/bmp/tiff/mp4/rar/7z). ZIPs are classified into docx/xlsx/pptx when entries match.
+- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/bmp/tiff/mp4/rar/7z/wav/avi/mp3/doc/xls/ppt). ZIPs are classified into docx/xlsx/pptx when entries match. OLE compound documents are classified as doc/xls/ppt.
 - `metadata/` - JSONL records for carved files, string artefacts, and browser history
 
 ## Configuration

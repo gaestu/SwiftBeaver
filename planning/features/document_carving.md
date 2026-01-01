@@ -1,6 +1,13 @@
 # Document Carving (OLE Compound, RTF, Office Open XML)
 
-Status: Planned
+Status: Partially Implemented
+
+## Implementation Status
+
+- ✅ **OLE Compound Documents**: Implemented in `src/carve/ole.rs` (DOC, XLS, PPT)
+- ⏳ **RTF**: Not yet implemented
+- ✅ **Office Open XML**: Already handled by ZIP classifier (DOCX, XLSX, PPTX)
+- ✅ **OpenDocument**: Already handled by ZIP classifier (ODT, ODS, ODP)
 
 ## Problem Statement
 

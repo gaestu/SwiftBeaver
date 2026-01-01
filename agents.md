@@ -201,20 +201,25 @@ Agents should use `planning/features` and `planning/done` to keep track of work.
    - Idiomatic Rust: ownership, lifetimes, error handling with `Result` and error enums.
    - Use `clippy`-friendly patterns where possible.
 
-2. **Error handling.**
+2. **Run `cargo fmt` before finishing work.**
+   - **Always** run `cargo fmt` after making code changes to ensure consistent formatting.
+   - CI enforces formatting via `cargo fmt --check` — code that is not formatted will fail the pipeline.
+   - This is **mandatory** before committing or finishing any task.
+
+3. **Error handling.**
    - Do not panic in library code for expected error conditions.
    - Use structured error types (e.g. `thiserror`) and propagate with `Result`.
 
-3. **Logging.**
+4. **Logging.**
    - Use the existing logging infrastructure (`tracing`).
    - Do not print directly to stdout/stderr except where explicitly intended.
 
-4. **Configuration.**
+5. **Configuration.**
    - All tunables (chunk sizes, overlaps, row group sizes, etc.) should either:
      - Be part of configuration, or
      - Have clearly documented defaults.
 
-5. **Public APIs & formats are contracts.**
+6. **Public APIs & formats are contracts.**
    - If you change a public API, CLI, or on-disk format (e.g. Parquet schemas), treat it as a contract change:
      - Update `/docs`.
      - Update `README.md` if user-facing.
@@ -252,9 +257,10 @@ When you work on this repository, always:
 
 1. **Read `agents.md` and relevant `/docs` before changing code.**
 2. **Update code, tests, planning, and docs together.**
-3. **Ensure `README.md` stays correct and usable after your changes.**
-4. **Preserve the forensic nature and reproducibility of the tool.**
-5. **Keep changes well-scoped and traceable to a feature document in `planning/features` or `planning/done`.**
+3. **Run `cargo fmt` before finishing work** — CI will reject unformatted code.
+4. **Ensure `README.md` stays correct and usable after your changes.**
+5. **Preserve the forensic nature and reproducibility of the tool.**
+6. **Keep changes well-scoped and traceable to a feature document in `planning/features` or `planning/done`.**
 
 If in doubt, prefer:
 

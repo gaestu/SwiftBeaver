@@ -1,6 +1,6 @@
 # File Type Coverage Expansion - Overview
 
-Status: Planned
+Status: In Progress
 
 ## Summary
 
@@ -22,6 +22,10 @@ This document provides an overview of the file type coverage expansion effort, t
 | 7z | 7z | `sevenz.rs` | Start header sizes |
 | SQLite | sqlite | `sqlite.rs` | Page-based structure |
 | MP4 | mp4 | `mp4.rs` | Atom/box walking |
+| **WAV** | wav | `wav.rs` | ✅ RIFF container, shared module |
+| **AVI** | avi | `avi.rs` | ✅ RIFF container, shared module |
+| **MP3** | mp3 | `mp3.rs` | ✅ ID3v2 + frame walking |
+| **OLE** | doc, xls, ppt | `ole.rs` | ✅ CFB sector parsing |
 
 ## Planned Coverage
 
@@ -77,13 +81,13 @@ See: [misc_format_carving.md](misc_format_carving.md)
 ## Recommended Implementation Order
 
 ### Phase 1: Quick Wins (Low Complexity, High Value)
-1. **WAV** - RIFF structure, size in header
-2. **AVI** - RIFF structure, size in header
-3. **OLE Compound** - Important forensic format
-4. **ZIP Classification** - Enhance existing handler
+1. ✅ **WAV** - RIFF structure, size in header - IMPLEMENTED
+2. ✅ **AVI** - RIFF structure, size in header - IMPLEMENTED
+3. ✅ **OLE Compound** - Important forensic format - IMPLEMENTED
+4. **ZIP Classification** - Enhance existing handler (already works)
 
 ### Phase 2: Medium Complexity
-5. **MP3** - Frame walking with ID3 handling
+5. ✅ **MP3** - Frame walking with ID3 handling - IMPLEMENTED
 6. **MOV** - Reuse MP4 box-walking
 7. **XZ** - Structured block format
 8. **RTF** - Brace counting
@@ -104,13 +108,13 @@ See: [misc_format_carving.md](misc_format_carving.md)
 
 ## Shared Infrastructure Needs
 
-### RIFF Handler Unification
+### ✅ RIFF Handler Unification (IMPLEMENTED)
 Multiple formats use RIFF container:
-- WAV (RIFF + "WAVE")
-- AVI (RIFF + "AVI ")
+- WAV (RIFF + "WAVE") ✅
+- AVI (RIFF + "AVI ") ✅
 - WebP (RIFF + "WEBP")
 
-**Recommendation:** Create shared RIFF parsing in `src/carve/riff.rs`, specific handlers validate form type.
+**Implemented:** Created shared RIFF parsing in `src/carve/riff.rs`, specific handlers validate form type.
 
 ### Offset-Based Pattern Matching
 Some formats have signatures at non-zero offsets:
@@ -133,20 +137,20 @@ GZIP and BZIP2 require understanding compressed streams:
 
 Files from `tests/golden_image/manifest.json`:
 
-| Category | Files | Currently Covered | After Implementation |
-|----------|-------|-------------------|---------------------|
+| Category | Files | Currently Covered | After Full Implementation |
+|----------|-------|-------------------|--------------------------|
 | archives | 11 | ZIP, RAR, 7z (3) | +TAR, GZ, BZ2, XZ (7) |
-| audio | 4 | - | MP3, OGG, WAV (4) |
+| audio | 4 | ✅ MP3, WAV (3) | +OGG (4) |
 | binaries | 2 | - | ELF (2) |
 | databases | 5 | SQLite (5) | (5) |
-| documents | 14 | PDF, ZIP-based (4) | +OLE, RTF, classified ZIP (14) |
+| documents | 14 | PDF, ZIP-based, ✅ OLE (8) | +RTF (14) |
 | email | 2 | - | (deferred) |
 | images | 18 | JPG,PNG,GIF,BMP,TIFF,WebP (15) | +ICO (16) |
-| media_tiny | 4 | - | MP3, WAV, AVI, WEBM (4) |
+| media_tiny | 4 | ✅ MP3, WAV, AVI (3) | +WEBM (4) |
 | other | 17 | - | (text/misc - deferred) |
-| video | 7 | MP4 (1) | +AVI, MOV, WEBM, WMV, OGG (6) |
+| video | 7 | MP4, ✅ AVI (2) | +MOV, WEBM, WMV, OGG (6) |
 
-**Current coverage:** ~28/84 files (33%)
+**Current coverage:** ~36/84 files (43%) - UP FROM 33%
 **After Phase 1-3:** ~70/84 files (83%)
 **Notes:** 
 - "other" category contains mostly text/data formats (JSON, XML, CSV, TXT) not typically carved
