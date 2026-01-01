@@ -107,8 +107,10 @@ file_types:
     min_size: 8
     validator: "tiff"
   - id: "mp4"
-    extensions: ["mp4"]
+    extensions: ["mp4", "mov", "m4a", "m4v"]
     header_patterns:
+      - id: "mp4_ftyp_14"
+        hex: "0000001466747970"
       - id: "mp4_ftyp_18"
         hex: "0000001866747970"
       - id: "mp4_ftyp_1c"
