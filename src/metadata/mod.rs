@@ -49,6 +49,42 @@ pub enum MetadataError {
     Other(String),
 }
 
+/// Metadata output sink for carved files and artefacts.
+///
+/// # Example
+/// ```rust
+/// use fastcarve::config;
+/// use fastcarve::metadata::{self, MetadataBackendKind, MetadataSink, RunSummary};
+/// use std::path::PathBuf;
+///
+/// let loaded = config::load_config(None).unwrap();
+/// let run_output_dir = std::env::temp_dir().join("fastcarve_meta_example");
+/// std::fs::create_dir_all(&run_output_dir).unwrap();
+///
+/// let sink = metadata::build_sink(
+///     MetadataBackendKind::Jsonl,
+///     &loaded.config,
+///     "example_run",
+///     "0.1.0",
+///     &loaded.config_hash,
+///     PathBuf::from("image.raw").as_path(),
+///     "",
+///     &run_output_dir,
+/// )
+/// .unwrap();
+///
+/// let summary = RunSummary {
+///     run_id: "example_run".to_string(),
+///     bytes_scanned: 0,
+///     chunks_processed: 0,
+///     hits_found: 0,
+///     files_carved: 0,
+///     string_spans: 0,
+///     artefacts_extracted: 0,
+/// };
+/// sink.record_run_summary(&summary).unwrap();
+/// sink.flush().unwrap();
+/// ```
 pub trait MetadataSink: Send + Sync {
     fn record_file(&self, file: &CarvedFile) -> Result<(), MetadataError>;
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError>;

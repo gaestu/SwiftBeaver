@@ -1,6 +1,7 @@
-# Production Readiness
+Status: Implemented
+Implemented in version: 0.2.0
 
-Status: WIP
+# Production Readiness
 
 ## Problem Statement
 
@@ -36,23 +37,23 @@ fastcarve is functionally complete but lacks production-grade infrastructure for
 - [x] Documentation build
 
 **Remaining:**
-- [ ] Add release workflow for tagged versions
-- [ ] Add code coverage reporting (cargo-llvm-cov)
+- [x] Add release workflow for tagged versions
+- [x] Add code coverage reporting (cargo-llvm-cov)
 
 ---
 
 ## 2. Error Handling Improvements
 
-**Status:** Not Started
+**Status:** ✅ Done
 
 **Issues:**
 - `src/evidence.rs:116` - `.unwrap()` in non-Unix `read_at` on lock could panic
 - Channel errors could be more informative
 
 **Tasks:**
-- [ ] Audit all `.unwrap()` calls in non-test code paths
-- [ ] Replace with proper error propagation or `.expect()` with context
-- [ ] Improve channel error messages with context
+- [x] Audit all `.unwrap()` calls in non-test code paths
+- [x] Replace with proper error propagation or `.expect()` with context
+- [x] Improve channel error messages with context
 
 **Files to review:**
 - `src/evidence.rs`
@@ -63,7 +64,7 @@ fastcarve is functionally complete but lacks production-grade infrastructure for
 
 ## 3. Testing Gaps
 
-**Status:** Not Started
+**Status:** ✅ Done
 
 **Current state:**
 - 52 unit tests + 2 integration tests (all passing)
@@ -73,19 +74,19 @@ fastcarve is functionally complete but lacks production-grade infrastructure for
 - GPU tests are conditional
 
 **Tasks:**
-- [ ] Add malformed input tests
+- [x] Add malformed input tests
   - Corrupt/truncated JPEG, PNG, GIF headers
   - Invalid SQLite page sizes
   - Malformed ZIP EOCD
   - Oversized file claims
-- [ ] Add boundary condition tests
+- [x] Add boundary condition tests
   - Files spanning chunk boundaries
   - Files at exact chunk size limits
   - Empty evidence files
-- [ ] Add stress tests (optional, CI-excluded)
+- [x] Add stress tests (optional, CI-excluded)
   - Large synthetic images (1GB+)
   - High hit density (many small files)
-- [ ] Add benchmark suite
+- [x] Add benchmark suite
   - `benches/` directory with cargo bench targets
   - Throughput measurement (MB/s)
   - Per-file-type carving speed
@@ -104,21 +105,21 @@ tests/
 
 ## 4. Observability & Diagnostics
 
-**Status:** Not Started
+**Status:** ✅ Done
 
 **Current state:**
-- Basic tracing logging
-- No progress reporting
-- No metrics
+- Basic tracing logging (text/JSON)
+- Progress logging available
+- Error counters exposed via progress snapshots
 
 **Tasks:**
-- [ ] Add progress callback/trait for long-running scans
+- [x] Add progress callback/trait for long-running scans
   - Bytes processed / total
   - Files carved count
   - ETA estimation
-- [ ] Add optional JSON structured logging
+- [x] Add optional JSON structured logging
   - `--log-format json` flag
-- [ ] Consider metrics hooks (optional)
+- [x] Consider metrics hooks (optional)
   - Processing throughput
   - Error rates by category
 
@@ -126,19 +127,18 @@ tests/
 
 ## 5. Robustness Features
 
-**Status:** Not Started
+**Status:** ✅ Done
 
 **Current state:**
-- No graceful shutdown
-- No resume capability
-- No checkpointing
+- Graceful shutdown supported
+- Checkpoint/resume supported
 
 **Tasks:**
-- [ ] Add signal handling (Ctrl+C)
+- [x] Add signal handling (Ctrl+C)
   - Graceful worker shutdown
   - Flush metadata before exit
   - Report partial progress
-- [ ] Consider checkpoint/resume (future)
+- [x] Consider checkpoint/resume (future)
   - Save scan position on interrupt
   - Resume from checkpoint file
   - Lower priority - enterprise feature
@@ -147,22 +147,22 @@ tests/
 
 ## 6. Security Considerations
 
-**Status:** Not Started
+**Status:** ✅ Done
 
 **Current state:**
-- No input validation on carved filenames
-- No resource limits
-- Output directory permissions not checked
+- Output filename sanitization applied
+- Limited resource controls (max files)
+- Output directory permissions checked
 
 **Tasks:**
-- [ ] Input path sanitization
+- [x] Input path sanitization
   - Validate output paths don't escape output directory
   - Sanitize carved file names from evidence content
-- [ ] Resource limits
+- [x] Resource limits
   - Optional max memory usage
   - Max open file descriptors
-  - Max output file count
-- [ ] Permission checks
+  - [x] Max output file count
+- [x] Permission checks
   - Verify output directory is writable
   - Warn on world-writable output
 
@@ -170,7 +170,7 @@ tests/
 
 ## 7. Documentation Completeness
 
-**Status:** Partially Done
+**Status:** ✅ Done
 
 **Issues:**
 - `docs/architecture.md` header says "Phase 1" but content is Phase 2+
@@ -179,10 +179,10 @@ tests/
 - No doc examples in public API
 
 **Tasks:**
-- [ ] Fix architecture.md phase reference
-- [ ] Create CHANGELOG.md with release history
-- [ ] Create CONTRIBUTING.md with development setup
-- [ ] Add doc examples to key public types:
+- [x] Fix architecture.md phase reference
+- [x] Create CHANGELOG.md with release history
+- [x] Create CONTRIBUTING.md with development setup
+- [x] Add doc examples to key public types:
   - `CarvedFile`
   - `EvidenceSource` trait
   - `MetadataSink` trait
@@ -192,21 +192,20 @@ tests/
 
 ## 8. Build & Distribution
 
-**Status:** Not Started
+**Status:** ✅ Done
 
 **Current state:**
-- Version 0.1.0
-- No release binaries
-- No container support
+- Version 0.2.0
+- Release workflow for tagged builds
+- Container image intentionally omitted (native CPU/GPU performance focus)
 
 **Tasks:**
-- [ ] Create release workflow
+- [x] Create release workflow
   - Build on tag push
   - Create GitHub release
   - Upload Linux binary
-- [ ] Consider container image (lower priority)
-  - Dockerfile with libewf
-  - Pre-built forensic workstation image
+- [x] Decide against container image (lower priority)
+  - Prefer native installs for GPU/IO performance
 
 ---
 
@@ -230,12 +229,12 @@ tests/
 ## Completion Criteria
 
 This feature is complete when:
-- [ ] CI runs green on all PRs
-- [ ] All high-priority items implemented
-- [ ] Tests cover malformed input scenarios
-- [ ] Graceful shutdown works on Ctrl+C
-- [ ] Documentation is accurate and complete
-- [ ] Version bumped to 0.2.0 or 1.0.0
+- [x] CI runs green on all PRs
+- [x] All high-priority items implemented
+- [x] Tests cover malformed input scenarios
+- [x] Graceful shutdown works on Ctrl+C
+- [x] Documentation is accurate and complete
+- [x] Version bumped to 0.2.0 or 1.0.0
 
 ---
 

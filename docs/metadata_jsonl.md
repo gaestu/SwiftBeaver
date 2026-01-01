@@ -37,7 +37,7 @@ Example:
   "truncated": false,
   "errors": [],
   "pattern_id": "jpeg_soi",
-  "tool_version": "0.1.0",
+  "tool_version": "0.2.0",
   "config_hash": "...",
   "evidence_path": "/cases/image.dd",
   "evidence_sha256": ""

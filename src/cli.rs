@@ -9,6 +9,12 @@ pub enum MetadataBackend {
     Parquet,
 }
 
+#[derive(ValueEnum, Debug, Clone, Copy)]
+pub enum LogFormat {
+    Text,
+    Json,
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct CliOptions {
@@ -43,6 +49,14 @@ pub struct CliOptions {
     /// Metadata backend
     #[arg(long, value_enum, default_value_t = MetadataBackend::Jsonl)]
     pub metadata_backend: MetadataBackend,
+
+    /// Log format
+    #[arg(long, value_enum, default_value_t = LogFormat::Text)]
+    pub log_format: LogFormat,
+
+    /// Progress log interval in seconds (0 disables progress logging)
+    #[arg(long, default_value_t = 5)]
+    pub progress_interval_secs: u64,
 
     /// Enable printable string scanning
     #[arg(long)]
@@ -104,6 +118,26 @@ pub struct CliOptions {
     #[arg(long)]
     pub max_chunks: Option<u64>,
 
+    /// Stop after carving this many files
+    #[arg(long)]
+    pub max_files: Option<u64>,
+
+    /// Limit address space usage in MiB (Unix only)
+    #[arg(long)]
+    pub max_memory_mib: Option<u64>,
+
+    /// Limit maximum open file descriptors (Unix only)
+    #[arg(long)]
+    pub max_open_files: Option<u64>,
+
+    /// Write checkpoint state to this path on early exit
+    #[arg(long)]
+    pub checkpoint_path: Option<PathBuf>,
+
+    /// Resume scanning from a checkpoint file
+    #[arg(long)]
+    pub resume_from: Option<PathBuf>,
+
     /// Provide evidence SHA-256 (hex) for metadata output
     #[arg(long)]
     pub evidence_sha256: Option<String>,
@@ -129,6 +163,7 @@ pub fn parse() -> CliOptions {
 mod tests {
     use super::CliOptions;
     use clap::Parser;
+    use std::path::PathBuf;
 
     #[test]
     fn parses_disable_zip_flag() {
@@ -213,5 +248,76 @@ mod tests {
         .expect("parse");
         assert_eq!(opts.max_bytes, Some(1_048_576));
         assert_eq!(opts.max_chunks, Some(4));
+    }
+
+    #[test]
+    fn parses_log_format() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--log-format",
+            "json",
+        ])
+        .expect("parse");
+        assert!(matches!(opts.log_format, super::LogFormat::Json));
+    }
+
+    #[test]
+    fn parses_progress_interval() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--progress-interval-secs",
+            "10",
+        ])
+        .expect("parse");
+        assert_eq!(opts.progress_interval_secs, 10);
+    }
+
+    #[test]
+    fn parses_max_files() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--max-files",
+            "25",
+        ])
+        .expect("parse");
+        assert_eq!(opts.max_files, Some(25));
+    }
+
+    #[test]
+    fn parses_resource_limits() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--max-memory-mib",
+            "256",
+            "--max-open-files",
+            "2048",
+        ])
+        .expect("parse");
+        assert_eq!(opts.max_memory_mib, Some(256));
+        assert_eq!(opts.max_open_files, Some(2048));
+    }
+
+    #[test]
+    fn parses_checkpoint_paths() {
+        let opts = CliOptions::try_parse_from([
+            "fastcarve",
+            "--input",
+            "image.dd",
+            "--checkpoint-path",
+            "checkpoint.json",
+            "--resume-from",
+            "resume.json",
+        ])
+        .expect("parse");
+        assert_eq!(opts.checkpoint_path, Some(PathBuf::from("checkpoint.json")));
+        assert_eq!(opts.resume_from, Some(PathBuf::from("resume.json")));
     }
 }

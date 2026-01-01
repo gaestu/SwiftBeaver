@@ -21,6 +21,26 @@ pub struct NormalizedHit {
     pub pattern_id: String,
 }
 
+/// Signature scanner for file headers within a scan chunk.
+///
+/// # Example
+/// ```rust
+/// use fastcarve::chunk::ScanChunk;
+/// use fastcarve::config;
+/// use fastcarve::scanner::{build_signature_scanner, SignatureScanner};
+///
+/// let loaded = config::load_config(None).unwrap();
+/// let scanner = build_signature_scanner(&loaded.config, false).unwrap();
+/// let chunk = ScanChunk {
+///     id: 0,
+///     start: 0,
+///     length: 16,
+///     valid_length: 16,
+/// };
+/// let data = vec![0u8; 16];
+/// let hits = scanner.scan_chunk(&chunk, &data);
+/// let _ = hits;
+/// ```
 pub trait SignatureScanner: Send + Sync {
     fn scan_chunk(&self, chunk: &ScanChunk, data: &[u8]) -> Vec<Hit>;
 }

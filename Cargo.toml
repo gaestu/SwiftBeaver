@@ -1,6 +1,6 @@
 [package]
 name = "fastcarve"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Uris"]
 description = "High-speed forensic file and artefact carver with optional GPU acceleration."
@@ -13,6 +13,7 @@ arrow-schema = "51"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
+ctrlc = "3"
 csv = "1"
 hex = "0.4"
 libc = "0.2"
@@ -31,10 +32,15 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 thiserror = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"] }
 
 [dev-dependencies]
 tempfile = "3"
+criterion = "0.5"
+
+[[bench]]
+name = "throughput"
+harness = false
 
 [features]
 default = ["ewf"]

@@ -4,9 +4,13 @@
 //! and carve registry building.
 
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use tracing::debug;
+use tracing::{debug, warn};
+#[cfg(unix)]
+use tracing::info;
 
 use crate::carve::{self, CarveRegistry};
 use crate::config::Config;
@@ -19,6 +23,107 @@ pub fn backend_from_cli(backend: crate::cli::MetadataBackend) -> MetadataBackend
         crate::cli::MetadataBackend::Csv => MetadataBackendKind::Csv,
         crate::cli::MetadataBackend::Parquet => MetadataBackendKind::Parquet,
     }
+}
+
+/// Ensure output directory exists and is writable, warning on unsafe permissions.
+pub fn ensure_output_dir(path: &Path) -> Result<()> {
+    if path.exists() {
+        let metadata = std::fs::metadata(path)?;
+        if !metadata.is_dir() {
+            return Err(anyhow!("output path is not a directory: {}", path.display()));
+        }
+    } else {
+        std::fs::create_dir_all(path)?;
+    }
+    let metadata = std::fs::metadata(path)?;
+
+    let probe_path = path.join(".fastcarve_write_probe");
+    match OpenOptions::new().write(true).create(true).open(&probe_path) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe_path);
+        }
+        Err(err) => {
+            return Err(anyhow!(
+                "output directory is not writable: {} ({})",
+                path.display(),
+                err
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = metadata.permissions().mode();
+        if mode & 0o002 != 0 {
+            warn!("output directory is world-writable: {}", path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Apply optional resource limits for this process.
+pub fn apply_resource_limits(max_memory_mib: Option<u64>, max_open_files: Option<u64>) -> Result<()> {
+    #[cfg(unix)]
+    {
+        if let Some(mem_mib) = max_memory_mib {
+            let bytes = mem_mib.saturating_mul(1024 * 1024);
+            set_limit(libc::RLIMIT_AS, bytes, "address space")?;
+        }
+        if let Some(open_files) = max_open_files {
+            set_limit(libc::RLIMIT_NOFILE, open_files, "open file descriptors")?;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if max_memory_mib.is_some() || max_open_files.is_some() {
+            warn!("resource limits are only supported on Unix platforms");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_limit(resource: libc::__rlimit_resource_t, requested: u64, label: &str) -> Result<()> {
+    unsafe {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if libc::getrlimit(resource, &mut limit) != 0 {
+            return Err(anyhow!(
+                "getrlimit failed for {}: {}",
+                label,
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        let requested = requested as libc::rlim_t;
+        let mut new_cur = requested;
+        if requested > limit.rlim_max {
+            warn!(
+                "requested {} limit {} exceeds hard limit {}; using {}",
+                label, requested, limit.rlim_max, limit.rlim_max
+            );
+            new_cur = limit.rlim_max;
+        }
+
+        let new_limit = libc::rlimit {
+            rlim_cur: new_cur,
+            rlim_max: limit.rlim_max,
+        };
+
+        if libc::setrlimit(resource, &new_limit) != 0 {
+            return Err(anyhow!(
+                "setrlimit failed for {}: {}",
+                label,
+                std::io::Error::last_os_error()
+            ));
+        }
+        info!("set {} limit to {}", label, new_cur);
+    }
+    Ok(())
 }
 
 /// Build the carve registry from configuration
@@ -322,8 +427,10 @@ fn is_zip_kind(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::filter_file_types;
+    use super::{ensure_output_dir, filter_file_types};
     use crate::config;
+    use std::fs::File;
+    use tempfile::tempdir;
 
     #[test]
     fn filters_allowed_types() {
@@ -373,5 +480,20 @@ mod tests {
         let mut kinds = cfg.zip_allowed_kinds.unwrap_or_default();
         kinds.sort();
         assert_eq!(kinds, vec!["docx"]);
+    }
+
+    #[test]
+    fn ensures_output_dir_is_writable() {
+        let dir = tempdir().expect("tempdir");
+        ensure_output_dir(dir.path()).expect("ensure output dir");
+    }
+
+    #[test]
+    fn rejects_output_path_that_is_file() {
+        let dir = tempdir().expect("tempdir");
+        let file_path = dir.path().join("output.txt");
+        let _ = File::create(&file_path).expect("create file");
+        let err = ensure_output_dir(&file_path).expect_err("should fail");
+        assert!(err.to_string().contains("not a directory"));
     }
 }

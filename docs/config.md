@@ -6,6 +6,9 @@ The default config is `config/default.yml`.
 
 - `run_id` (string): optional; if empty, a timestamp-based ID is generated.
 - `overlap_bytes` (u64): overlap between chunks.
+- `max_files` (u64, optional): stop after carving this many files.
+- `max_memory_mib` (u64, optional): limit address space in MiB (Unix only).
+- `max_open_files` (u64, optional): limit max open file descriptors (Unix only).
 - `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.
 - `enable_url_scan` (bool): enable URL extraction from string spans.
 - `enable_email_scan` (bool): enable email extraction from string spans.

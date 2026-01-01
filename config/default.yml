@@ -1,5 +1,8 @@
 run_id: ""
 overlap_bytes: 65536
+max_files:
+max_memory_mib:
+max_open_files:
 enable_string_scan: false
 enable_url_scan: true
 enable_email_scan: true

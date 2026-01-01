@@ -39,48 +39,57 @@ pub struct StringJob {
 pub fn spawn_metadata_thread(
     sink: Box<dyn MetadataSink>,
     rx: Receiver<MetadataEvent>,
+    error_count: Arc<AtomicU64>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         for event in rx {
             match event {
                 MetadataEvent::File(file) => {
                     if let Err(err) = sink.record_file(&file) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
                 }
                 MetadataEvent::String(artefact) => {
                     if let Err(err) = sink.record_string(&artefact) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
                 }
                 MetadataEvent::History(record) => {
                     if let Err(err) = sink.record_history(&record) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
                 }
                 MetadataEvent::Cookie(record) => {
                     if let Err(err) = sink.record_cookie(&record) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
                 }
                 MetadataEvent::Download(record) => {
                     if let Err(err) = sink.record_download(&record) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
                 }
                 MetadataEvent::RunSummary(summary) => {
                     if let Err(err) = sink.record_run_summary(&summary) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
                 }
                 MetadataEvent::Entropy(region) => {
                     if let Err(err) = sink.record_entropy(&region) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
                 }
             }
         }
         if let Err(err) = sink.flush() {
+            error_count.fetch_add(1, Ordering::Relaxed);
             warn!("metadata flush error: {err}");
         }
     })
@@ -132,7 +141,8 @@ pub fn spawn_scan_workers(
                         file_type_id: hit.file_type_id,
                         pattern_id: hit.pattern_id,
                     };
-                    if hit_tx.send(normalized).is_err() {
+                    if let Err(err) = hit_tx.send(normalized) {
+                        warn!("hit channel closed while sending hit: {err}");
                         break;
                     }
                 }
@@ -152,7 +162,8 @@ pub fn spawn_scan_workers(
                                 data: Arc::clone(&job.data),
                                 spans: filtered,
                             };
-                            if tx.send(string_job).is_err() {
+                            if let Err(err) = tx.send(string_job) {
+                                warn!("string channel closed while sending spans: {err}");
                                 break;
                             }
                         }
@@ -170,7 +181,10 @@ pub fn spawn_scan_workers(
                             cfg.threshold,
                         );
                         for region in regions {
-                            let _ = meta_tx.send(MetadataEvent::Entropy(region));
+                            if let Err(err) = meta_tx.send(MetadataEvent::Entropy(region)) {
+                                warn!("metadata channel closed while sending entropy region: {err}");
+                                break;
+                            }
                         }
                     }
                 }
@@ -192,6 +206,9 @@ pub fn spawn_carve_workers(
     meta_tx: Sender<MetadataEvent>,
     files_carved: Arc<AtomicU64>,
     enable_sqlite_page_recovery: bool,
+    max_files: Option<u64>,
+    carve_errors: Arc<AtomicU64>,
+    sqlite_errors: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -204,6 +221,9 @@ pub fn spawn_carve_workers(
         let rx = rx.clone();
         let meta_tx = meta_tx.clone();
         let files_carved = files_carved.clone();
+        let max_files = max_files;
+        let carve_errors = carve_errors.clone();
+        let sqlite_errors = sqlite_errors.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -214,6 +234,11 @@ pub fn spawn_carve_workers(
             };
 
             for hit in rx {
+                if let Some(limit) = max_files {
+                    if files_carved.load(Ordering::Relaxed) >= limit {
+                        break;
+                    }
+                }
                 let handler = match registry.get(&hit.file_type_id) {
                     Some(handler) => handler,
                     None => {
@@ -224,11 +249,13 @@ pub fn spawn_carve_workers(
 
                 match handler.process_hit(&hit, &ctx) {
                     Ok(Some(file)) => {
-                        files_carved.fetch_add(1, Ordering::Relaxed);
+                        let new_total = files_carved.fetch_add(1, Ordering::Relaxed) + 1;
                         let path = carved_root.join(&file.path);
                         let file_type = file.file_type.clone();
                         let rel_path = file.path.clone();
-                        let _ = meta_tx.send(MetadataEvent::File(file));
+                        if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {
+                            warn!("metadata channel closed while sending carved file: {err}");
+                        }
 
                         // Process SQLite files for browser artifacts
                         if file_type == "sqlite" {
@@ -238,11 +265,18 @@ pub fn spawn_carve_workers(
                                 &rel_path,
                                 &meta_tx,
                                 enable_sqlite_page_recovery,
+                                &sqlite_errors,
                             );
+                        }
+                        if let Some(limit) = max_files {
+                            if new_total >= limit {
+                                break;
+                            }
                         }
                     }
                     Ok(None) => {}
                     Err(err) => {
+                        carve_errors.fetch_add(1, Ordering::Relaxed);
                         warn!("carve error at offset {}: {err}", hit.global_offset);
                     }
                 }
@@ -260,12 +294,14 @@ fn process_sqlite_artifacts(
     rel_path: &str,
     meta_tx: &Sender<MetadataEvent>,
     enable_page_recovery: bool,
+    sqlite_errors: &Arc<AtomicU64>,
 ) {
     // Extract browser history
     let mut records = match crate::parsers::sqlite_db::extract_browser_history(path, run_id, rel_path)
     {
         Ok(records) => records,
         Err(err) => {
+            sqlite_errors.fetch_add(1, Ordering::Relaxed);
             warn!("sqlite parse failed for {}: {err}", path.display());
             Vec::new()
         }
@@ -276,23 +312,31 @@ fn process_sqlite_artifacts(
         match crate::parsers::sqlite_pages::extract_history_from_pages(path, run_id, rel_path) {
             Ok(mut recovered) => records.append(&mut recovered),
             Err(err) => {
+                sqlite_errors.fetch_add(1, Ordering::Relaxed);
                 warn!("sqlite page recovery failed for {}: {err}", path.display());
             }
         }
     }
 
     for record in records {
-        let _ = meta_tx.send(MetadataEvent::History(record));
+        if let Err(err) = meta_tx.send(MetadataEvent::History(record)) {
+            warn!("metadata channel closed while sending history record: {err}");
+            return;
+        }
     }
 
     // Extract browser cookies
     match crate::parsers::sqlite_db::extract_browser_cookies(path, run_id, rel_path) {
         Ok(records) => {
             for record in records {
-                let _ = meta_tx.send(MetadataEvent::Cookie(record));
+                if let Err(err) = meta_tx.send(MetadataEvent::Cookie(record)) {
+                    warn!("metadata channel closed while sending cookie record: {err}");
+                    return;
+                }
             }
         }
         Err(err) => {
+            sqlite_errors.fetch_add(1, Ordering::Relaxed);
             warn!("sqlite cookie parse failed for {}: {err}", path.display());
         }
     }
@@ -301,10 +345,14 @@ fn process_sqlite_artifacts(
     match crate::parsers::sqlite_db::extract_browser_downloads(path, run_id, rel_path) {
         Ok(records) => {
             for record in records {
-                let _ = meta_tx.send(MetadataEvent::Download(record));
+                if let Err(err) = meta_tx.send(MetadataEvent::Download(record)) {
+                    warn!("metadata channel closed while sending download record: {err}");
+                    return;
+                }
             }
         }
         Err(err) => {
+            sqlite_errors.fetch_add(1, Ordering::Relaxed);
             warn!("sqlite download parse failed for {}: {err}", path.display());
         }
     }
@@ -347,7 +395,10 @@ pub fn spawn_string_workers(
                     );
                     artefacts_found.fetch_add(artefacts.len() as u64, Ordering::Relaxed);
                     for artefact in artefacts {
-                        let _ = meta_tx.send(MetadataEvent::String(artefact));
+                        if let Err(err) = meta_tx.send(MetadataEvent::String(artefact)) {
+                            warn!("metadata channel closed while sending string artefact: {err}");
+                            break;
+                        }
                     }
                 }
             }

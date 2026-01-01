@@ -24,6 +24,29 @@ use thiserror::Error;
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
+/// Metadata about a carved file.
+///
+/// # Example
+/// ```rust
+/// use fastcarve::carve::CarvedFile;
+///
+/// let file = CarvedFile {
+///     run_id: "example_run".to_string(),
+///     file_type: "jpeg".to_string(),
+///     path: "jpeg/jpeg_000000001000.jpg".to_string(),
+///     extension: "jpg".to_string(),
+///     global_start: 4096,
+///     global_end: 8191,
+///     size: 4096,
+///     md5: None,
+///     sha256: Some("deadbeef".to_string()),
+///     validated: true,
+///     truncated: false,
+///     errors: Vec::new(),
+///     pattern_id: Some("jpeg_soi".to_string()),
+/// };
+/// let _ = file;
+/// ```
 #[derive(Debug, Clone, Serialize)]
 pub struct CarvedFile {
     pub run_id: String,
@@ -97,9 +120,16 @@ pub fn output_path(
     extension: &str,
     global_start: u64,
 ) -> Result<(PathBuf, String), CarveError> {
-    let dir = output_root.join(file_type);
+    let safe_type = sanitize_component(file_type);
+    let safe_ext = sanitize_extension(extension);
+    let dir = output_root.join(&safe_type);
     std::fs::create_dir_all(&dir)?;
-    let filename = format!("{}_{}.{}", file_type, format!("{:012X}", global_start), extension);
+    let base = format!("{}_{}", safe_type, format!("{:012X}", global_start));
+    let filename = if safe_ext.is_empty() {
+        base
+    } else {
+        format!("{base}.{safe_ext}")
+    };
     let full_path = dir.join(&filename);
     let rel_path = full_path
         .strip_prefix(output_root)
@@ -109,8 +139,30 @@ pub fn output_path(
     Ok((full_path, rel_path))
 }
 
+fn sanitize_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    while out.contains("..") {
+        out = out.replace("..", "_");
+    }
+    let trimmed = out.trim_matches('.').to_string();
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed
+    }
+}
+
 pub fn sanitize_extension(ext: &str) -> String {
-    ext.trim_start_matches('.').to_ascii_lowercase()
+    sanitize_component(ext)
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
 }
 
 /// Helper to build a CarvedFile result, reducing boilerplate in handlers
@@ -267,4 +319,26 @@ pub(crate) fn write_range(
     }
 
     Ok((bytes_written, false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{output_path, sanitize_extension, sanitize_component};
+    use tempfile::tempdir;
+
+    #[test]
+    fn sanitizes_output_path_components() {
+        let dir = tempdir().expect("tempdir");
+        let (full, rel) = output_path(dir.path(), "../weird", "../JPG", 0x1234)
+            .expect("output path");
+        assert!(full.starts_with(dir.path()));
+        assert!(!rel.contains(".."));
+        assert!(sanitize_component("../weird").contains("weird"));
+    }
+
+    #[test]
+    fn sanitizes_extension() {
+        assert_eq!(sanitize_extension(".JPG"), "jpg");
+        assert_eq!(sanitize_extension("..bad"), "_bad");
+    }
 }

@@ -12,6 +12,19 @@ pub enum EvidenceError {
     InvalidOffset(String),
 }
 
+/// A read-only evidence source backed by a linear byte space.
+///
+/// # Example
+/// ```rust
+/// use fastcarve::evidence::{EvidenceSource, RawFileSource};
+///
+/// let path = std::env::temp_dir().join("fastcarve_evidence_example.bin");
+/// std::fs::write(&path, b"hello").unwrap();
+/// let source = RawFileSource::open(&path).unwrap();
+/// let mut buf = [0u8; 5];
+/// source.read_at(0, &mut buf).unwrap();
+/// assert_eq!(&buf, b"hello");
+/// ```
 pub trait EvidenceSource: Send + Sync {
     fn len(&self) -> u64;
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, EvidenceError>;
@@ -51,7 +64,10 @@ impl EvidenceSource for RawFileSource {
         #[cfg(not(unix))]
         {
             use std::io::{Read, Seek, SeekFrom};
-            let _guard = self.lock.lock().unwrap();
+            let _guard = self
+                .lock
+                .lock()
+                .map_err(|_| EvidenceError::Unsupported("raw file lock poisoned".to_string()))?;
             let mut f = &self.file;
             f.seek(SeekFrom::Start(offset))?;
             Ok(f.read(buf)?)
@@ -112,7 +128,10 @@ impl EvidenceSource for DeviceSource {
         #[cfg(not(unix))]
         {
             use std::io::{Read, Seek, SeekFrom};
-            let _guard = self.lock.lock().unwrap();
+            let _guard = self
+                .lock
+                .lock()
+                .map_err(|_| EvidenceError::Unsupported("device lock poisoned".to_string()))?;
             let mut f = &self.file;
             f.seek(SeekFrom::Start(offset))?;
             Ok(f.read(buf)?)
@@ -294,7 +313,10 @@ mod ewf {
                 )));
             }
 
-            let guard = self.handle.lock().unwrap();
+            let guard = self
+                .handle
+                .lock()
+                .map_err(|_| EvidenceError::Unsupported("libewf handle lock poisoned".to_string()))?;
             if guard.handle.is_null() {
                 return Err(EvidenceError::Unsupported("libewf handle closed".to_string()));
             }
@@ -478,6 +500,8 @@ mod tests {
             chunk_size_mib: 1,
             overlap_kib: None,
             metadata_backend: MetadataBackend::Jsonl,
+            log_format: crate::cli::LogFormat::Text,
+            progress_interval_secs: 0,
             scan_strings: false,
             scan_utf16: false,
             scan_urls: false,
@@ -493,6 +517,11 @@ mod tests {
             scan_sqlite_pages: false,
             max_bytes: None,
             max_chunks: None,
+            max_files: None,
+            max_memory_mib: None,
+            max_open_files: None,
+            checkpoint_path: None,
+            resume_from: None,
             evidence_sha256: None,
             compute_evidence_sha256: false,
             disable_zip: false,

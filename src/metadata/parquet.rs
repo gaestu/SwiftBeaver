@@ -528,7 +528,9 @@ impl ParquetSinkInner {
             *slot = Some(writer);
         }
 
-        Ok(slot.as_mut().unwrap())
+        slot.as_mut().ok_or_else(|| {
+            MetadataError::Other("parquet writer slot missing after init".to_string())
+        })
     }
 
     fn finish_all(&mut self) -> Result<(), MetadataError> {
@@ -632,6 +634,12 @@ impl ParquetSink {
             }),
         })
     }
+
+    fn lock_inner(&self) -> Result<std::sync::MutexGuard<'_, ParquetSinkInner>, MetadataError> {
+        self.inner
+            .lock()
+            .map_err(|_| MetadataError::Other("parquet sink lock poisoned".to_string()))
+    }
 }
 
 impl MetadataSink for ParquetSink {
@@ -653,13 +661,13 @@ impl MetadataSink for ParquetSink {
             error: join_errors(&file.errors),
         };
 
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(category)?;
         writer.append_file(row)
     }
 
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         match artefact.artefact_kind {
             ArtefactKind::Url => {
                 let row = map_url_artefact(artefact)?;
@@ -693,7 +701,7 @@ impl MetadataSink for ParquetSink {
             table_name: None,
         };
 
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::BrowserHistory)?;
         writer.append_history(row)
     }
@@ -714,7 +722,7 @@ impl MetadataSink for ParquetSink {
             is_http_only: record.is_http_only,
         };
 
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::BrowserCookies)?;
         writer.append_cookie(row)
     }
@@ -732,7 +740,7 @@ impl MetadataSink for ParquetSink {
             state: record.state.clone(),
         };
 
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::BrowserDownloads)?;
         writer.append_download(row)
     }
@@ -746,7 +754,7 @@ impl MetadataSink for ParquetSink {
             string_spans: to_i64(summary.string_spans)?,
             artefacts_extracted: to_i64(summary.artefacts_extracted)?,
         };
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::RunSummary)?;
         writer.append_summary(row)
     }
@@ -758,13 +766,13 @@ impl MetadataSink for ParquetSink {
             entropy: region.entropy,
             window_size: to_i64(region.window_size)?,
         };
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::EntropyRegions)?;
         writer.append_entropy(row)
     }
 
     fn flush(&self) -> Result<(), MetadataError> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner()?;
         inner.finish_all()
     }
 }

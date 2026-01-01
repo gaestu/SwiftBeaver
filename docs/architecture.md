@@ -1,8 +1,10 @@
-# Architecture (Phase 1)
+# Architecture
 
-Phase 2 adds SQLite carving, string scanning, browser history extraction, and PDF/ZIP/WEBP carving.
-Phase 4 adds BMP/TIFF/MP4/RAR/7z carving.
-Phase 3 adds optional GPU-accelerated signature and string scanning via OpenCL (`gpu-opencl` / `gpu` alias) or CUDA (`gpu-cuda`), with CPU fallback when no GPU is available. GPU signature scanning uses a single multi-pattern kernel, and GPU string scanning emits ASCII spans with URL/email/phone hints.
+fastcarve currently includes SQLite carving, string scanning, browser history extraction,
+PDF/ZIP/WEBP carving, BMP/TIFF/MP4/RAR/7z carving, and optional GPU-accelerated
+signature and string scanning via OpenCL (`gpu-opencl` / `gpu` alias) or CUDA (`gpu-cuda`).
+GPU signature scanning uses a single multi-pattern kernel, and GPU string scanning emits
+ASCII spans with URL/email/phone hints.
 
 ## GPU Backends
 

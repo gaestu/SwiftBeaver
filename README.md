@@ -82,12 +82,21 @@ CLI overrides:
 - `--scan-sqlite-pages`: enable SQLite page-level URL recovery for damaged DBs
 - `--max-bytes`: stop after scanning this many bytes
 - `--max-chunks`: stop after scanning this many chunks
+- `--max-files`: stop after carving this many files
+- `--max-memory-mib`: limit address space in MiB (Unix only)
+- `--max-open-files`: limit max open file descriptors (Unix only)
 - `--evidence-sha256`: record a known evidence SHA-256
 - `--compute-evidence-sha256`: compute evidence SHA-256 before scanning (extra full pass)
 - `--metadata-backend csv`: write CSV instead of JSONL
 - `--metadata-backend parquet`: write Parquet instead of JSONL
+- `--log-format json`: emit JSON logs
+- `--progress-interval-secs N`: log progress every N seconds (0 disables)
+- `--checkpoint-path`: write a checkpoint file on early exit
+- `--resume-from`: resume scanning from a checkpoint file
 - `--types jpeg,png,sqlite,docx`: limit carving to listed file types (docx/xlsx/pptx are classified from ZIP content)
 - `--disable-zip`: disable ZIP carving (skips zip/docx/xlsx/pptx)
+
+Note: `--resume-from` requires the same chunk size and overlap used to create the checkpoint.
 
 See `docs/config.md` for the full schema.
 

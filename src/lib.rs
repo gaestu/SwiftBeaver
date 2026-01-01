@@ -6,6 +6,7 @@
 //! disk images and raw evidence sources.
 
 pub mod cli;
+pub mod checkpoint;
 pub mod config;
 pub mod constants;
 pub mod error;

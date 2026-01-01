@@ -27,6 +27,12 @@ pub struct PatternConfig {
 pub struct Config {
     pub run_id: String,
     pub overlap_bytes: u64,
+    #[serde(default)]
+    pub max_files: Option<u64>,
+    #[serde(default)]
+    pub max_memory_mib: Option<u64>,
+    #[serde(default)]
+    pub max_open_files: Option<u64>,
     pub enable_string_scan: bool,
     #[serde(default = "default_true")]
     pub enable_url_scan: bool,
@@ -177,6 +183,17 @@ impl Config {
         // String length
         if let Some(min_len) = cli.string_min_len {
             self.string_min_len = min_len;
+        }
+
+        // Output limits
+        if let Some(max_files) = cli.max_files {
+            self.max_files = Some(max_files);
+        }
+        if let Some(max_memory_mib) = cli.max_memory_mib {
+            self.max_memory_mib = Some(max_memory_mib);
+        }
+        if let Some(max_open_files) = cli.max_open_files {
+            self.max_open_files = Some(max_open_files);
         }
 
         // Entropy detection

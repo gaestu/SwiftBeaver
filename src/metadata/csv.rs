@@ -317,7 +317,10 @@ impl MetadataSink for CsvSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.files_writer.lock().unwrap();
+        let mut guard = self
+            .files_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("files writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
@@ -335,7 +338,10 @@ impl MetadataSink for CsvSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.strings_writer.lock().unwrap();
+        let mut guard = self
+            .strings_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
@@ -355,7 +361,10 @@ impl MetadataSink for CsvSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.history_writer.lock().unwrap();
+        let mut guard = self
+            .history_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("history writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
@@ -380,7 +389,10 @@ impl MetadataSink for CsvSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.cookies_writer.lock().unwrap();
+        let mut guard = self
+            .cookies_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("cookies writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
@@ -402,7 +414,10 @@ impl MetadataSink for CsvSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.downloads_writer.lock().unwrap();
+        let mut guard = self
+            .downloads_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("downloads writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
@@ -421,7 +436,10 @@ impl MetadataSink for CsvSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.run_writer.lock().unwrap();
+        let mut guard = self
+            .run_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("run writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
@@ -438,19 +456,43 @@ impl MetadataSink for CsvSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.entropy_writer.lock().unwrap();
+        let mut guard = self
+            .entropy_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("entropy writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
 
     fn flush(&self) -> Result<(), MetadataError> {
-        let mut files = self.files_writer.lock().unwrap();
-        let mut strings = self.strings_writer.lock().unwrap();
-        let mut history = self.history_writer.lock().unwrap();
-        let mut cookies = self.cookies_writer.lock().unwrap();
-        let mut downloads = self.downloads_writer.lock().unwrap();
-        let mut run = self.run_writer.lock().unwrap();
-        let mut entropy = self.entropy_writer.lock().unwrap();
+        let mut files = self
+            .files_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("files writer lock poisoned".into()))?;
+        let mut strings = self
+            .strings_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
+        let mut history = self
+            .history_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("history writer lock poisoned".into()))?;
+        let mut cookies = self
+            .cookies_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("cookies writer lock poisoned".into()))?;
+        let mut downloads = self
+            .downloads_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("downloads writer lock poisoned".into()))?;
+        let mut run = self
+            .run_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("run writer lock poisoned".into()))?;
+        let mut entropy = self
+            .entropy_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("entropy writer lock poisoned".into()))?;
         files.flush()?;
         strings.flush()?;
         history.flush()?;
