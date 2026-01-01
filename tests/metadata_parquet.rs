@@ -165,8 +165,16 @@ fn count_rows(path: &PathBuf) -> usize {
 fn assert_has_column(path: &PathBuf, column: &str) {
     let file = File::open(path).expect("open parquet");
     let reader = SerializedFileReader::new(file).expect("parquet reader");
-    let schema = reader.metadata().file_metadata().schema_descr().root_schema();
-    let columns: Vec<&str> = schema.get_fields().iter().map(|field| field.name()).collect();
+    let schema = reader
+        .metadata()
+        .file_metadata()
+        .schema_descr()
+        .root_schema();
+    let columns: Vec<&str> = schema
+        .get_fields()
+        .iter()
+        .map(|field| field.name())
+        .collect();
     assert!(
         columns.contains(&column),
         "expected column {column} in {} got {:?}",
