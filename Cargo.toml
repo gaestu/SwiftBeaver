@@ -1,6 +1,6 @@
 [package]
 name = "fastcarve"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Uris"]
 description = "High-speed forensic file and artefact carver with optional GPU acceleration."

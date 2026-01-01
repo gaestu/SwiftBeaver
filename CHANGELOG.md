@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 - TBD
 
+## 0.2.1
+
+- Fixed code formatting to pass `cargo fmt --check` in CI.
+
 ## 0.2.0
 
 - Added progress reporting, JSON logging, and error counters.
