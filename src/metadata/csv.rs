@@ -161,13 +161,27 @@ impl CsvSink {
         let run_file = File::create(meta_dir.join("run_summary.csv"))?;
         let entropy_file = File::create(meta_dir.join("entropy_regions.csv"))?;
 
-        let mut files_writer = csv::WriterBuilder::new().has_headers(false).from_writer(files_file);
-        let mut strings_writer = csv::WriterBuilder::new().has_headers(false).from_writer(strings_file);
-        let mut history_writer = csv::WriterBuilder::new().has_headers(false).from_writer(history_file);
-        let mut cookies_writer = csv::WriterBuilder::new().has_headers(false).from_writer(cookies_file);
-        let mut downloads_writer = csv::WriterBuilder::new().has_headers(false).from_writer(downloads_file);
-        let mut run_writer = csv::WriterBuilder::new().has_headers(false).from_writer(run_file);
-        let mut entropy_writer = csv::WriterBuilder::new().has_headers(false).from_writer(entropy_file);
+        let mut files_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(files_file);
+        let mut strings_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(strings_file);
+        let mut history_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(history_file);
+        let mut cookies_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(cookies_file);
+        let mut downloads_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(downloads_file);
+        let mut run_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(run_file);
+        let mut entropy_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(entropy_file);
 
         files_writer.write_record(&[
             "run_id",
@@ -346,7 +360,10 @@ impl MetadataSink for CsvSink {
         Ok(())
     }
 
-    fn record_history(&self, record: &crate::parsers::browser::BrowserHistoryRecord) -> Result<(), MetadataError> {
+    fn record_history(
+        &self,
+        record: &crate::parsers::browser::BrowserHistoryRecord,
+    ) -> Result<(), MetadataError> {
         let record = BrowserHistoryCsv {
             run_id: &record.run_id,
             browser: &record.browser,
@@ -622,12 +639,36 @@ mod tests {
 
         sink.flush().expect("flush");
 
-        assert!(dir.path().join("metadata").join("carved_files.csv").exists());
-        assert!(dir.path().join("metadata").join("string_artefacts.csv").exists());
-        assert!(dir.path().join("metadata").join("browser_history.csv").exists());
-        assert!(dir.path().join("metadata").join("browser_cookies.csv").exists());
-        assert!(dir.path().join("metadata").join("browser_downloads.csv").exists());
+        assert!(dir
+            .path()
+            .join("metadata")
+            .join("carved_files.csv")
+            .exists());
+        assert!(dir
+            .path()
+            .join("metadata")
+            .join("string_artefacts.csv")
+            .exists());
+        assert!(dir
+            .path()
+            .join("metadata")
+            .join("browser_history.csv")
+            .exists());
+        assert!(dir
+            .path()
+            .join("metadata")
+            .join("browser_cookies.csv")
+            .exists());
+        assert!(dir
+            .path()
+            .join("metadata")
+            .join("browser_downloads.csv")
+            .exists());
         assert!(dir.path().join("metadata").join("run_summary.csv").exists());
-        assert!(dir.path().join("metadata").join("entropy_regions.csv").exists());
+        assert!(dir
+            .path()
+            .join("metadata")
+            .join("entropy_regions.csv")
+            .exists());
     }
 }

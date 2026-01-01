@@ -7,12 +7,7 @@ use opencl3::context::Context;
 use opencl3::device::{Device, CL_DEVICE_TYPE_GPU};
 use opencl3::kernel::Kernel;
 use opencl3::memory::{
-    Buffer,
-    ClMem,
-    CL_MEM_COPY_HOST_PTR,
-    CL_MEM_READ_ONLY,
-    CL_MEM_READ_WRITE,
-    CL_MEM_WRITE_ONLY,
+    Buffer, ClMem, CL_MEM_COPY_HOST_PTR, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY,
 };
 use opencl3::platform::get_platforms;
 use opencl3::program::Program;
@@ -336,21 +331,11 @@ impl StringScanner for OpenClStringScanner {
             });
         }
         spans = extend_long_ascii_spans(chunk, data, spans, self.min_len, self.max_len);
-        let mut utf8 = crate::strings::cpu::scan_utf8_runs(
-            data,
-            chunk,
-            self.min_len,
-            self.max_len,
-        );
+        let mut utf8 = crate::strings::cpu::scan_utf8_runs(data, chunk, self.min_len, self.max_len);
         spans.append(&mut utf8);
         if self.scan_utf16 {
-            let mut utf16 = crate::strings::cpu::scan_utf16_runs(
-                data,
-                chunk,
-                self.min_len,
-                self.max_len,
-                true,
-            );
+            let mut utf16 =
+                crate::strings::cpu::scan_utf16_runs(data, chunk, self.min_len, self.max_len, true);
             spans.append(&mut utf16);
             let mut utf16 = crate::strings::cpu::scan_utf16_runs(
                 data,
@@ -422,7 +407,8 @@ fn select_device(cfg: &Config) -> Result<(Device, Context)> {
         return Err(anyhow!("no OpenCL platforms available"));
     }
 
-    if let (Some(platform_idx), Some(device_idx)) = (cfg.opencl_platform_index, cfg.opencl_device_index)
+    if let (Some(platform_idx), Some(device_idx)) =
+        (cfg.opencl_platform_index, cfg.opencl_device_index)
     {
         if platform_idx >= platforms.len() {
             return Err(anyhow!("opencl platform index out of range"));

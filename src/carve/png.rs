@@ -1,6 +1,8 @@
 use std::fs::File;
 
-use crate::carve::{output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
@@ -35,7 +37,12 @@ impl CarveHandler for PngCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
-        let (full_path, rel_path) = output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
+        let (full_path, rel_path) = output_path(
+            ctx.output_root,
+            self.file_type(),
+            &self.extension,
+            hit.global_offset,
+        )?;
         let file = File::create(&full_path)?;
         let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
 
@@ -51,7 +58,8 @@ impl CarveHandler for PngCarveHandler {
 
             loop {
                 let len_bytes = stream.read_exact(4)?;
-                let len = u32::from_be_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
+                let len =
+                    u32::from_be_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
                 let typ_bytes = stream.read_exact(4)?;
                 let chunk_type = std::str::from_utf8(&typ_bytes)
                     .map_err(|_| CarveError::Invalid("png chunk type invalid".to_string()))?

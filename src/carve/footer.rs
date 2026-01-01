@@ -41,9 +41,9 @@ impl FooterCarveHandler {
         if self.header_patterns.is_empty() {
             return true;
         }
-        self.header_patterns.iter().any(|pat| {
-            !pat.is_empty() && buf.len() >= pat.len() && &buf[..pat.len()] == pat
-        })
+        self.header_patterns
+            .iter()
+            .any(|pat| !pat.is_empty() && buf.len() >= pat.len() && &buf[..pat.len()] == pat)
     }
 }
 
@@ -61,8 +61,12 @@ impl CarveHandler for FooterCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
-        let (full_path, rel_path) =
-            output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
+        let (full_path, rel_path) = output_path(
+            ctx.output_root,
+            self.file_type(),
+            &self.extension,
+            hit.global_offset,
+        )?;
         let file = File::create(&full_path)?;
         let mut writer = BufWriter::new(file);
         let mut md5 = md5::Context::new();
@@ -278,6 +282,9 @@ mod tests {
             .expect("carved");
 
         assert!(carved.validated);
-        assert_eq!(carved.size, (header.len() + "payload".len() + footer.len()) as u64);
+        assert_eq!(
+            carved.size,
+            (header.len() + "payload".len() + footer.len()) as u64
+        );
     }
 }

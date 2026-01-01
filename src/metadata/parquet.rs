@@ -3,11 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use arrow_array::builder::{
-    BinaryBuilder,
-    BooleanBuilder,
-    Int32Builder,
-    Int64Builder,
-    StringBuilder,
+    BinaryBuilder, BooleanBuilder, Int32Builder, Int64Builder, StringBuilder,
     TimestampMicrosecondBuilder,
 };
 use arrow_array::{ArrayRef, RecordBatch};
@@ -269,7 +265,9 @@ impl CategoryWriter {
                 }
                 Ok(())
             }
-            _ => Err(MetadataError::Other("file row on non-file category".to_string())),
+            _ => Err(MetadataError::Other(
+                "file row on non-file category".to_string(),
+            )),
         }
     }
 
@@ -282,7 +280,9 @@ impl CategoryWriter {
                 }
                 Ok(())
             }
-            _ => Err(MetadataError::Other("url row on non-url category".to_string())),
+            _ => Err(MetadataError::Other(
+                "url row on non-url category".to_string(),
+            )),
         }
     }
 
@@ -295,7 +295,9 @@ impl CategoryWriter {
                 }
                 Ok(())
             }
-            _ => Err(MetadataError::Other("email row on non-email category".to_string())),
+            _ => Err(MetadataError::Other(
+                "email row on non-email category".to_string(),
+            )),
         }
     }
 
@@ -308,7 +310,9 @@ impl CategoryWriter {
                 }
                 Ok(())
             }
-            _ => Err(MetadataError::Other("phone row on non-phone category".to_string())),
+            _ => Err(MetadataError::Other(
+                "phone row on non-phone category".to_string(),
+            )),
         }
     }
 
@@ -1636,8 +1640,7 @@ fn join_errors(errors: &[String]) -> Option<String> {
 }
 
 fn to_i64(value: u64) -> Result<i64, MetadataError> {
-    i64::try_from(value)
-        .map_err(|_| MetadataError::Other("value exceeds i64 range".to_string()))
+    i64::try_from(value).map_err(|_| MetadataError::Other("value exceeds i64 range".to_string()))
 }
 
 fn to_micros(value: chrono::NaiveDateTime) -> i64 {

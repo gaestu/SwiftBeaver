@@ -7,12 +7,7 @@ use opencl3::context::Context;
 use opencl3::device::{Device, CL_DEVICE_TYPE_GPU};
 use opencl3::kernel::Kernel;
 use opencl3::memory::{
-    Buffer,
-    ClMem,
-    CL_MEM_COPY_HOST_PTR,
-    CL_MEM_READ_ONLY,
-    CL_MEM_READ_WRITE,
-    CL_MEM_WRITE_ONLY,
+    Buffer, ClMem, CL_MEM_COPY_HOST_PTR, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY,
 };
 use opencl3::platform::get_platforms;
 use opencl3::program::Program;
@@ -132,10 +127,7 @@ impl OpenClScanner {
         }
         .map_err(|err| anyhow!(err))?;
 
-        let max_hits = cfg
-            .gpu_max_hits_per_chunk
-            .min(u32::MAX as usize)
-            .max(1) as u32;
+        let max_hits = cfg.gpu_max_hits_per_chunk.min(u32::MAX as usize).max(1) as u32;
 
         Ok(Self {
             context,
@@ -284,7 +276,10 @@ impl SignatureScanner for OpenClScanner {
 
         let mut count = zero[0] as usize;
         if count > self.max_hits_per_chunk as usize {
-            warn!("opencl hits overflow: count={} max={}", count, self.max_hits_per_chunk);
+            warn!(
+                "opencl hits overflow: count={} max={}",
+                count, self.max_hits_per_chunk
+            );
             count = self.max_hits_per_chunk as usize;
         }
 
@@ -294,13 +289,8 @@ impl SignatureScanner for OpenClScanner {
 
         let mut hit_offsets = vec![0u32; self.max_hits_per_chunk as usize];
         if let Err(err) = unsafe {
-            self.queue.enqueue_read_buffer(
-                &hits_buffer,
-                CL_BLOCKING,
-                0,
-                &mut hit_offsets,
-                &[],
-            )
+            self.queue
+                .enqueue_read_buffer(&hits_buffer, CL_BLOCKING, 0, &mut hit_offsets, &[])
         } {
             warn!("opencl read hits failed: {err}; using cpu fallback");
             return self.cpu_fallback.scan_chunk(chunk, data);
@@ -356,9 +346,7 @@ fn parse_patterns(cfg: &Config) -> Result<Vec<Pattern>> {
     Ok(patterns)
 }
 
-fn build_pattern_buffers(
-    patterns: &[Pattern],
-) -> Result<(Vec<u8>, Vec<cl_uint>, Vec<cl_uint>)> {
+fn build_pattern_buffers(patterns: &[Pattern]) -> Result<(Vec<u8>, Vec<cl_uint>, Vec<cl_uint>)> {
     let mut flat = Vec::new();
     let mut offsets = Vec::with_capacity(patterns.len());
     let mut lengths = Vec::with_capacity(patterns.len());
@@ -387,7 +375,9 @@ fn select_device(cfg: &Config) -> Result<(Device, Context)> {
         return Err(anyhow!("no OpenCL platforms available"));
     }
 
-    if let (Some(platform_idx), Some(device_idx)) = (cfg.opencl_platform_index, cfg.opencl_device_index) {
+    if let (Some(platform_idx), Some(device_idx)) =
+        (cfg.opencl_platform_index, cfg.opencl_device_index)
+    {
         if platform_idx >= platforms.len() {
             return Err(anyhow!("opencl platform index out of range"));
         }

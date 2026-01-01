@@ -86,7 +86,7 @@ impl CudaScanner {
         // Compile the kernel
         let ptx = cudarc::nvrtc::compile_ptx(KERNEL_SRC)
             .map_err(|e| anyhow!("CUDA kernel compilation failed: {e}"))?;
-        
+
         device
             .load_ptx(ptx, "scanner", &["scan_patterns"])
             .map_err(|e| anyhow!("CUDA PTX load failed: {e}"))?;
@@ -103,10 +103,7 @@ impl CudaScanner {
             .htod_copy(pattern_lengths)
             .map_err(|e| anyhow!("CUDA pattern lengths copy failed: {e}"))?;
 
-        let max_hits = cfg
-            .gpu_max_hits_per_chunk
-            .min(u32::MAX as usize)
-            .max(1) as u32;
+        let max_hits = cfg.gpu_max_hits_per_chunk.min(u32::MAX as usize).max(1) as u32;
 
         Ok(Self {
             device: Mutex::new(device),
@@ -329,13 +326,14 @@ mod tests {
         let msg = err.to_string();
         // CUDA_ERROR_NO_DEVICE (code 100) produces "no CUDA-capable device"
         // cudarc formats this as "CUDA_ERROR_NO_DEVICE" or "no CUDA-capable device"
-        msg.contains("CUDA_ERROR_NO_DEVICE")
-            || msg.contains("no CUDA-capable device")
+        msg.contains("CUDA_ERROR_NO_DEVICE") || msg.contains("no CUDA-capable device")
     }
 
     /// Check if tests should fail on any CUDA error (set FASTCARVE_REQUIRE_CUDA=1)
     fn require_cuda() -> bool {
-        std::env::var("FASTCARVE_REQUIRE_CUDA").map(|v| v == "1").unwrap_or(false)
+        std::env::var("FASTCARVE_REQUIRE_CUDA")
+            .map(|v| v == "1")
+            .unwrap_or(false)
     }
 
     #[test]

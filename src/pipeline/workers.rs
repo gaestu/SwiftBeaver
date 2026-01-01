@@ -182,7 +182,9 @@ pub fn spawn_scan_workers(
                         );
                         for region in regions {
                             if let Err(err) = meta_tx.send(MetadataEvent::Entropy(region)) {
-                                warn!("metadata channel closed while sending entropy region: {err}");
+                                warn!(
+                                    "metadata channel closed while sending entropy region: {err}"
+                                );
                                 break;
                             }
                         }
@@ -297,15 +299,15 @@ fn process_sqlite_artifacts(
     sqlite_errors: &Arc<AtomicU64>,
 ) {
     // Extract browser history
-    let mut records = match crate::parsers::sqlite_db::extract_browser_history(path, run_id, rel_path)
-    {
-        Ok(records) => records,
-        Err(err) => {
-            sqlite_errors.fetch_add(1, Ordering::Relaxed);
-            warn!("sqlite parse failed for {}: {err}", path.display());
-            Vec::new()
-        }
-    };
+    let mut records =
+        match crate::parsers::sqlite_db::extract_browser_history(path, run_id, rel_path) {
+            Ok(records) => records,
+            Err(err) => {
+                sqlite_errors.fetch_add(1, Ordering::Relaxed);
+                warn!("sqlite parse failed for {}: {err}", path.display());
+                Vec::new()
+            }
+        };
 
     // Try page-level recovery if no records found
     if records.is_empty() && enable_page_recovery {

@@ -1,6 +1,8 @@
 use std::fs::File;
 
-use crate::carve::{output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const GIF87A: &[u8] = b"GIF87a";
@@ -36,7 +38,12 @@ impl CarveHandler for GifCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
-        let (full_path, rel_path) = output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
+        let (full_path, rel_path) = output_path(
+            ctx.output_root,
+            self.file_type(),
+            &self.extension,
+            hit.global_offset,
+        )?;
         let file = File::create(&full_path)?;
         let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
 

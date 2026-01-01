@@ -1,16 +1,16 @@
+pub mod bmp;
+pub mod footer;
 pub mod gif;
 pub mod jpeg;
-pub mod footer;
-pub mod png;
-pub mod sqlite;
-pub mod pdf;
-pub mod webp;
-pub mod zip;
-pub mod bmp;
-pub mod tiff;
 pub mod mp4;
+pub mod pdf;
+pub mod png;
 pub mod rar;
 pub mod sevenz;
+pub mod sqlite;
+pub mod tiff;
+pub mod webp;
+pub mod zip;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -97,7 +97,11 @@ pub enum CarveError {
 pub trait CarveHandler: Send + Sync {
     fn file_type(&self) -> &str;
     fn extension(&self) -> &str;
-    fn process_hit(&self, hit: &NormalizedHit, ctx: &ExtractionContext) -> Result<Option<CarvedFile>, CarveError>;
+    fn process_hit(
+        &self,
+        hit: &NormalizedHit,
+        ctx: &ExtractionContext,
+    ) -> Result<Option<CarvedFile>, CarveError>;
 }
 
 pub struct CarveRegistry {
@@ -323,14 +327,14 @@ pub(crate) fn write_range(
 
 #[cfg(test)]
 mod tests {
-    use super::{output_path, sanitize_extension, sanitize_component};
+    use super::{output_path, sanitize_component, sanitize_extension};
     use tempfile::tempdir;
 
     #[test]
     fn sanitizes_output_path_components() {
         let dir = tempdir().expect("tempdir");
-        let (full, rel) = output_path(dir.path(), "../weird", "../JPG", 0x1234)
-            .expect("output path");
+        let (full, rel) =
+            output_path(dir.path(), "../weird", "../JPG", 0x1234).expect("output path");
         assert!(full.starts_with(dir.path()));
         assert!(!rel.contains(".."));
         assert!(sanitize_component("../weird").contains("weird"));

@@ -5,11 +5,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use std::collections::HashSet;
 
-use crate::parsers::browser::{
-    BrowserCookieRecord,
-    BrowserDownloadRecord,
-    BrowserHistoryRecord,
-};
+use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::parsers::time::{unix_micro_to_datetime, webkit_timestamp_to_datetime};
 
 pub fn extract_browser_history(
@@ -123,7 +119,11 @@ fn pick_col<'a>(columns: &HashSet<String>, candidates: &'a [&'a str]) -> Option<
     None
 }
 
-fn select_col<'a>(columns: &HashSet<String>, candidates: &'a [&'a str], fallback: &'a str) -> &'a str {
+fn select_col<'a>(
+    columns: &HashSet<String>,
+    candidates: &'a [&'a str],
+    fallback: &'a str,
+) -> &'a str {
     pick_col(columns, candidates).unwrap_or(fallback)
 }
 
@@ -136,7 +136,11 @@ fn extract_chrome_history(
     let columns = table_columns(conn, "urls")?;
     let title_col = select_col(&columns, &["title"], "NULL");
     let visit_col = select_col(&columns, &["last_visit_time"], "NULL");
-    let query = format!("SELECT url, {title}, {visit} FROM urls", title = title_col, visit = visit_col);
+    let query = format!(
+        "SELECT url, {title}, {visit} FROM urls",
+        title = title_col,
+        visit = visit_col
+    );
     let mut stmt = conn.prepare(&query)?;
     let rows = stmt.query_map([], |row| {
         let url: String = row.get(0)?;
@@ -189,7 +193,9 @@ fn extract_chrome_visits(
     for row in rows {
         let (url, title, visit_time, transition) = row?;
         let visit_time = visit_time.and_then(webkit_timestamp_to_datetime);
-        let visit_source = transition.map(chrome_transition_label).map(|s| s.to_string());
+        let visit_source = transition
+            .map(chrome_transition_label)
+            .map(|s| s.to_string());
         out.push(BrowserHistoryRecord {
             run_id: run_id.to_string(),
             browser: "chrome".to_string(),
@@ -291,7 +297,11 @@ fn extract_chrome_cookies(
     let last_access_col = select_col(&columns, &["last_access_utc"], "NULL");
     let creation_col = select_col(&columns, &["creation_utc"], "NULL");
     let is_secure_col = select_col(&columns, &["is_secure", "secure"], "NULL");
-    let is_http_only_col = select_col(&columns, &["is_httponly", "is_http_only", "httponly"], "NULL");
+    let is_http_only_col = select_col(
+        &columns,
+        &["is_httponly", "is_http_only", "httponly"],
+        "NULL",
+    );
 
     let query = format!(
         "SELECT {host}, {name}, {value}, {path}, {expires}, {last_access}, {creation}, {is_secure}, {is_http_only} FROM cookies",
@@ -399,8 +409,8 @@ fn extract_firefox_cookies(
     for row in rows {
         let (host, name, value, path, expiry, last_accessed, creation, is_secure, is_http_only) =
             row?;
-        let expires_utc = expiry
-            .and_then(|secs| unix_micro_to_datetime(secs.saturating_mul(1_000_000)));
+        let expires_utc =
+            expiry.and_then(|secs| unix_micro_to_datetime(secs.saturating_mul(1_000_000)));
         out.push(BrowserCookieRecord {
             run_id: run_id.to_string(),
             browser: "firefox".to_string(),
@@ -441,7 +451,11 @@ fn extract_chrome_downloads(
     );
     let total_col = format!(
         "d.{}",
-        select_col(&columns, &["total_bytes", "totalBytes", "totalbytes"], "NULL")
+        select_col(
+            &columns,
+            &["total_bytes", "totalBytes", "totalbytes"],
+            "NULL"
+        )
     );
     let state_col = format!("d.{}", select_col(&columns, &["state"], "NULL"));
 
@@ -449,8 +463,13 @@ fn extract_chrome_downloads(
     let mut join_clause = String::new();
     if has_table(conn, "downloads_url_chains")? {
         let chain_cols = table_columns(conn, "downloads_url_chains")?;
-        if chain_cols.contains("id") && chain_cols.contains("url") && chain_cols.contains("chain_index") {
-            join_clause = " LEFT JOIN downloads_url_chains uc ON d.id = uc.id AND uc.chain_index = 0".to_string();
+        if chain_cols.contains("id")
+            && chain_cols.contains("url")
+            && chain_cols.contains("chain_index")
+        {
+            join_clause =
+                " LEFT JOIN downloads_url_chains uc ON d.id = uc.id AND uc.chain_index = 0"
+                    .to_string();
             url_candidates.push("uc.url");
         }
     }
@@ -556,7 +575,11 @@ fn extract_firefox_downloads(
     } else {
         "NULL"
     };
-    let state_col = if columns.contains("state") { "state" } else { "NULL" };
+    let state_col = if columns.contains("state") {
+        "state"
+    } else {
+        "NULL"
+    };
 
     let query = format!(
         "SELECT {source}, {target}, {start}, {end}, {total}, {state} FROM moz_downloads",
@@ -651,7 +674,8 @@ mod tests {
         .expect("insert");
         drop(conn);
 
-        let records = extract_browser_history(&path, "run1", "sqlite/history.sqlite").expect("history");
+        let records =
+            extract_browser_history(&path, "run1", "sqlite/history.sqlite").expect("history");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].browser, "chrome");
         assert_eq!(records[0].url, "https://example.com");
@@ -684,7 +708,8 @@ mod tests {
         .expect("insert visit");
         drop(conn);
 
-        let records = extract_browser_history(&path, "run1", "sqlite/history.sqlite").expect("history");
+        let records =
+            extract_browser_history(&path, "run1", "sqlite/history.sqlite").expect("history");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].browser, "chrome");
         assert_eq!(records[0].visit_source.as_deref(), Some("typed"));
@@ -717,7 +742,8 @@ mod tests {
         .expect("insert visit");
         drop(conn);
 
-        let records = extract_browser_history(&path, "run1", "sqlite/history.sqlite").expect("history");
+        let records =
+            extract_browser_history(&path, "run1", "sqlite/history.sqlite").expect("history");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].browser, "firefox");
         assert_eq!(records[0].visit_source.as_deref(), Some("typed"));
@@ -776,7 +802,8 @@ mod tests {
         .expect("insert cookie");
         drop(conn);
 
-        let records = extract_browser_cookies(&path, "run1", "sqlite/cookies.sqlite").expect("cookies");
+        let records =
+            extract_browser_cookies(&path, "run1", "sqlite/cookies.sqlite").expect("cookies");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].browser, "firefox");
         assert_eq!(records[0].host, "example.com");
@@ -808,10 +835,14 @@ mod tests {
         .expect("insert download");
         drop(conn);
 
-        let records = extract_browser_downloads(&path, "run1", "sqlite/History").expect("downloads");
+        let records =
+            extract_browser_downloads(&path, "run1", "sqlite/History").expect("downloads");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].browser, "chrome");
-        assert_eq!(records[0].url.as_deref(), Some("https://example.com/file.zip"));
+        assert_eq!(
+            records[0].url.as_deref(),
+            Some("https://example.com/file.zip")
+        );
     }
 
     #[test]
@@ -848,7 +879,8 @@ mod tests {
         .expect("insert chain");
         drop(conn);
 
-        let records = extract_browser_downloads(&path, "run1", "sqlite/History").expect("downloads");
+        let records =
+            extract_browser_downloads(&path, "run1", "sqlite/History").expect("downloads");
         assert_eq!(records.len(), 1);
         assert_eq!(
             records[0].url.as_deref(),
@@ -885,6 +917,9 @@ mod tests {
             extract_browser_downloads(&path, "run1", "sqlite/downloads.sqlite").expect("downloads");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].browser, "firefox");
-        assert_eq!(records[0].url.as_deref(), Some("https://example.com/file.zip"));
+        assert_eq!(
+            records[0].url.as_deref(),
+            Some("https://example.com/file.zip")
+        );
     }
 }

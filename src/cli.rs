@@ -167,8 +167,9 @@ mod tests {
 
     #[test]
     fn parses_disable_zip_flag() {
-        let opts = CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--disable-zip"])
-            .expect("parse");
+        let opts =
+            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--disable-zip"])
+                .expect("parse");
         assert!(opts.disable_zip);
     }
 
@@ -224,13 +225,9 @@ mod tests {
 
     #[test]
     fn parses_sqlite_page_flag() {
-        let opts = CliOptions::try_parse_from([
-            "fastcarve",
-            "--input",
-            "image.dd",
-            "--scan-sqlite-pages",
-        ])
-        .expect("parse");
+        let opts =
+            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--scan-sqlite-pages"])
+                .expect("parse");
         assert!(opts.scan_sqlite_pages);
     }
 
@@ -278,14 +275,9 @@ mod tests {
 
     #[test]
     fn parses_max_files() {
-        let opts = CliOptions::try_parse_from([
-            "fastcarve",
-            "--input",
-            "image.dd",
-            "--max-files",
-            "25",
-        ])
-        .expect("parse");
+        let opts =
+            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--max-files", "25"])
+                .expect("parse");
         assert_eq!(opts.max_files, Some(25));
     }
 

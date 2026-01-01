@@ -6,17 +6,8 @@ use anyhow::{bail, Context, Result};
 use tracing::{info, warn};
 
 use fastcarve::{
-    checkpoint,
-    cli,
-    config,
-    constants::MIB,
-    evidence,
-    logging,
-    metadata,
-    pipeline,
-    scanner,
-    strings,
-    util,
+    checkpoint, cli, config, constants::MIB, evidence, logging, metadata, pipeline, scanner,
+    strings, util,
 };
 
 struct LoggingProgressReporter;
@@ -52,7 +43,7 @@ fn main() -> Result<()> {
 
     // Apply CLI overrides to config
     cfg.merge_cli(&cli_opts);
-    
+
     // Apply file type filters
     let unknown_types =
         util::filter_file_types(&mut cfg, cli_opts.types.as_deref(), cli_opts.disable_zip);
@@ -124,7 +115,10 @@ fn main() -> Result<()> {
     let sig_scanner = Arc::from(sig_scanner);
 
     let string_scanner = if cfg.enable_string_scan {
-        Some(Arc::from(strings::build_string_scanner(&cfg, cli_opts.gpu)?))
+        Some(Arc::from(strings::build_string_scanner(
+            &cfg,
+            cli_opts.gpu,
+        )?))
     } else {
         None
     };

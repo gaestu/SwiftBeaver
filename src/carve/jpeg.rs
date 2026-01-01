@@ -36,7 +36,12 @@ impl CarveHandler for JpegCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
-        let (full_path, rel_path) = output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
+        let (full_path, rel_path) = output_path(
+            ctx.output_root,
+            self.file_type(),
+            &self.extension,
+            hit.global_offset,
+        )?;
         let file = File::create(&full_path)?;
         let mut writer = BufWriter::new(file);
         let mut md5 = md5::Context::new();

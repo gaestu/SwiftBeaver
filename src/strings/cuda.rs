@@ -103,7 +103,7 @@ impl CudaStringScanner {
         // Compile the kernel
         let ptx = cudarc::nvrtc::compile_ptx(KERNEL_SRC)
             .map_err(|e| anyhow!("CUDA kernel compilation failed: {e}"))?;
-        
+
         device
             .load_ptx(ptx, "strings", &["scan_ascii_spans"])
             .map_err(|e| anyhow!("CUDA PTX load failed: {e}"))?;
@@ -257,10 +257,7 @@ impl StringScanner for CudaStringScanner {
         };
         let mut count = count_host[0] as usize;
         if count > span_capacity {
-            warn!(
-                "CUDA span overflow: count={} max={}",
-                count, span_capacity
-            );
+            warn!("CUDA span overflow: count={} max={}", count, span_capacity);
             count = span_capacity;
         }
 
@@ -296,21 +293,11 @@ impl StringScanner for CudaStringScanner {
             });
         }
         let mut spans = extend_long_ascii_spans(chunk, data, spans, self.min_len, self.max_len);
-        let mut utf8 = crate::strings::cpu::scan_utf8_runs(
-            data,
-            chunk,
-            self.min_len,
-            self.max_len,
-        );
+        let mut utf8 = crate::strings::cpu::scan_utf8_runs(data, chunk, self.min_len, self.max_len);
         spans.append(&mut utf8);
         if self.scan_utf16 {
-            let mut utf16 = crate::strings::cpu::scan_utf16_runs(
-                data,
-                chunk,
-                self.min_len,
-                self.max_len,
-                true,
-            );
+            let mut utf16 =
+                crate::strings::cpu::scan_utf16_runs(data, chunk, self.min_len, self.max_len, true);
             spans.append(&mut utf16);
             let mut utf16 = crate::strings::cpu::scan_utf16_runs(
                 data,
@@ -387,13 +374,14 @@ mod tests {
         let msg = err.to_string();
         // CUDA_ERROR_NO_DEVICE (code 100) produces "no CUDA-capable device"
         // cudarc formats this as "CUDA_ERROR_NO_DEVICE" or "no CUDA-capable device"
-        msg.contains("CUDA_ERROR_NO_DEVICE")
-            || msg.contains("no CUDA-capable device")
+        msg.contains("CUDA_ERROR_NO_DEVICE") || msg.contains("no CUDA-capable device")
     }
 
     /// Check if tests should fail on any CUDA error (set FASTCARVE_REQUIRE_CUDA=1)
     fn require_cuda() -> bool {
-        std::env::var("FASTCARVE_REQUIRE_CUDA").map(|v| v == "1").unwrap_or(false)
+        std::env::var("FASTCARVE_REQUIRE_CUDA")
+            .map(|v| v == "1")
+            .unwrap_or(false)
     }
 
     #[test]

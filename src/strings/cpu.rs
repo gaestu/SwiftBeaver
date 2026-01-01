@@ -1,5 +1,5 @@
 use crate::chunk::ScanChunk;
-use crate::strings::{flags, StringSpan, StringScanner};
+use crate::strings::{flags, StringScanner, StringSpan};
 
 pub struct CpuStringScanner {
     min_len: usize,
@@ -25,21 +25,9 @@ impl StringScanner for CpuStringScanner {
         spans.append(&mut utf8_spans);
 
         if self.scan_utf16 {
-            let mut utf16_spans = scan_utf16_runs(
-                data,
-                chunk,
-                self.min_len,
-                self.max_len,
-                true,
-            );
+            let mut utf16_spans = scan_utf16_runs(data, chunk, self.min_len, self.max_len, true);
             spans.append(&mut utf16_spans);
-            let mut utf16_spans = scan_utf16_runs(
-                data,
-                chunk,
-                self.min_len,
-                self.max_len,
-                false,
-            );
+            let mut utf16_spans = scan_utf16_runs(data, chunk, self.min_len, self.max_len, false);
             spans.append(&mut utf16_spans);
         }
 
@@ -202,7 +190,11 @@ pub(crate) fn scan_utf16_runs(
 
             if len >= min_len {
                 let mut span_flags = span_flags_ascii(&ascii_bytes);
-                span_flags |= if little_endian { flags::UTF16_LE } else { flags::UTF16_BE };
+                span_flags |= if little_endian {
+                    flags::UTF16_LE
+                } else {
+                    flags::UTF16_BE
+                };
                 spans.push(StringSpan {
                     chunk_id: chunk.id,
                     local_start: run_start as u64,
@@ -293,9 +285,7 @@ fn decode_utf8_at(data: &[u8], idx: usize) -> Option<(char, usize)> {
         if b0 == 0xED && b1 >= 0xA0 {
             return None;
         }
-        let code = ((b0 & 0x0F) as u32) << 12
-            | ((b1 & 0x3F) as u32) << 6
-            | ((b2 & 0x3F) as u32);
+        let code = ((b0 & 0x0F) as u32) << 12 | ((b1 & 0x3F) as u32) << 6 | ((b2 & 0x3F) as u32);
         return std::char::from_u32(code).map(|ch| (ch, 3));
     }
     if b0 <= 0xF4 {

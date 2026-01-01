@@ -1,8 +1,8 @@
 pub mod cpu;
-#[cfg(feature = "gpu-opencl")]
-pub mod opencl;
 #[cfg(feature = "gpu-cuda")]
 pub mod cuda;
+#[cfg(feature = "gpu-opencl")]
+pub mod opencl;
 
 use crate::chunk::ScanChunk;
 

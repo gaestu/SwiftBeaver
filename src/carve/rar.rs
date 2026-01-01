@@ -3,7 +3,9 @@ use std::io::Write;
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const RAR4_MAGIC: [u8; 7] = [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00];
@@ -64,8 +66,14 @@ impl CarveHandler for RarCarveHandler {
         let mut sha256 = Sha256::new();
 
         let total_end = hit.global_offset + estimate.end;
-        let (written, eof_truncated) =
-            write_range(ctx, hit.global_offset, total_end, &mut file, &mut md5, &mut sha256)?;
+        let (written, eof_truncated) = write_range(
+            ctx,
+            hit.global_offset,
+            total_end,
+            &mut file,
+            &mut md5,
+            &mut sha256,
+        )?;
         let truncated = estimate.truncated || eof_truncated;
         if eof_truncated {
             errors.push("eof before RAR end".to_string());
@@ -181,7 +189,9 @@ fn parse_rar4(
             let mut pack_size_full = pack_size;
             if flags & 0x0100 != 0 {
                 if head_size < 7 + 25 + 4 {
-                    return Err(CarveError::Invalid("rar header missing high pack size".to_string()));
+                    return Err(CarveError::Invalid(
+                        "rar header missing high pack size".to_string(),
+                    ));
                 }
                 let high = match read_exact_at(ctx, offset + 7 + 25, 4) {
                     Some(buf) => u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as u64,
@@ -194,7 +204,9 @@ fn parse_rar4(
                 pack_size_full |= high << 32;
             }
 
-            offset = offset.saturating_add(head_size).saturating_add(pack_size_full);
+            offset = offset
+                .saturating_add(head_size)
+                .saturating_add(pack_size_full);
         } else {
             offset = offset.saturating_add(head_size);
         }
@@ -244,22 +256,21 @@ fn parse_rar5(
             return Err(CarveError::Invalid("rar5 header size invalid".to_string()));
         }
 
-        let header_buf = match read_exact_at(ctx, offset + 4 + size_len as u64, header_size as usize) {
-            Some(buf) => buf,
-            None => {
-                truncated = true;
-                errors.push("eof while reading RAR header".to_string());
-                break;
-            }
-        };
+        let header_buf =
+            match read_exact_at(ctx, offset + 4 + size_len as u64, header_size as usize) {
+                Some(buf) => buf,
+                None => {
+                    truncated = true;
+                    errors.push("eof while reading RAR header".to_string());
+                    break;
+                }
+            };
 
         let mut idx = 0usize;
-        let header_type = read_varint_buf(&header_buf, &mut idx).ok_or_else(|| {
-            CarveError::Invalid("rar5 header type missing".to_string())
-        })?;
-        let flags = read_varint_buf(&header_buf, &mut idx).ok_or_else(|| {
-            CarveError::Invalid("rar5 header flags missing".to_string())
-        })?;
+        let header_type = read_varint_buf(&header_buf, &mut idx)
+            .ok_or_else(|| CarveError::Invalid("rar5 header type missing".to_string()))?;
+        let flags = read_varint_buf(&header_buf, &mut idx)
+            .ok_or_else(|| CarveError::Invalid("rar5 header flags missing".to_string()))?;
 
         if flags & 0x01 != 0 {
             let _ = read_varint_buf(&header_buf, &mut idx);

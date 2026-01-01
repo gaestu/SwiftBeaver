@@ -1,6 +1,8 @@
 use std::fs::File;
 
-use crate::carve::{output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
@@ -35,7 +37,12 @@ impl CarveHandler for SqliteCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
-        let (full_path, rel_path) = output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
+        let (full_path, rel_path) = output_path(
+            ctx.output_root,
+            self.file_type(),
+            &self.extension,
+            hit.global_offset,
+        )?;
         let file = File::create(&full_path)?;
         let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
 
@@ -50,18 +57,30 @@ impl CarveHandler for SqliteCarveHandler {
             }
 
             let page_size_raw = u16::from_be_bytes([header[16], header[17]]);
-            let page_size = if page_size_raw == 1 { 65536 } else { page_size_raw as u32 };
+            let page_size = if page_size_raw == 1 {
+                65536
+            } else {
+                page_size_raw as u32
+            };
             if !is_valid_page_size(page_size) {
                 return Err(CarveError::Invalid("sqlite page size invalid".to_string()));
             }
 
             let page_count = u32::from_be_bytes([header[28], header[29], header[30], header[31]]);
-            let mut total_size = if page_count == 0 { page_size as u64 } else { page_size as u64 * page_count as u64 };
+            let mut total_size = if page_count == 0 {
+                page_size as u64
+            } else {
+                page_size as u64 * page_count as u64
+            };
             if total_size < 100 {
                 total_size = 100;
             }
 
-            let max_size = if self.max_size > 0 { self.max_size } else { total_size };
+            let max_size = if self.max_size > 0 {
+                self.max_size
+            } else {
+                total_size
+            };
             let target_size = total_size.min(max_size);
 
             let remaining = target_size.saturating_sub(100);

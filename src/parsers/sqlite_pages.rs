@@ -66,8 +66,8 @@ pub fn extract_history_from_pages(
             continue;
         }
 
-        let cell_count = u16::from_be_bytes([page[header_offset + 3], page[header_offset + 4]])
-            as usize;
+        let cell_count =
+            u16::from_be_bytes([page[header_offset + 3], page[header_offset + 4]]) as usize;
         let cell_ptr_start = header_offset + 8;
         if cell_ptr_start >= page.len() {
             continue;
@@ -78,12 +78,13 @@ pub fn extract_history_from_pages(
             if ptr_offset + 1 >= page.len() {
                 break;
             }
-            let cell_offset =
-                u16::from_be_bytes([page[ptr_offset], page[ptr_offset + 1]]) as usize;
+            let cell_offset = u16::from_be_bytes([page[ptr_offset], page[ptr_offset + 1]]) as usize;
             if cell_offset >= page.len() {
                 continue;
             }
-            if let Some(payload) = extract_payload(&mut file, &page, cell_offset, page_size, usable_size) {
+            if let Some(payload) =
+                extract_payload(&mut file, &page, cell_offset, page_size, usable_size)
+            {
                 let record = parse_record_fields(&payload);
                 if record.texts.is_empty() {
                     continue;
@@ -315,8 +316,8 @@ fn extract_visit_time(values: &[i64]) -> Option<chrono::NaiveDateTime> {
 }
 
 fn is_plausible_time(dt: &chrono::NaiveDateTime) -> bool {
-    let min = chrono::NaiveDateTime::parse_from_str("1990-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
-        .ok();
+    let min =
+        chrono::NaiveDateTime::parse_from_str("1990-01-01 00:00:00", "%Y-%m-%d %H:%M:%S").ok();
     let max = chrono::Utc::now().naive_utc() + chrono::Duration::days(2);
     match min {
         Some(min) => *dt >= min && *dt <= max,
@@ -404,8 +405,8 @@ mod tests {
         .expect("insert");
         drop(conn);
 
-        let records = extract_history_from_pages(&path, "run1", "sqlite/history.sqlite")
-            .expect("pages");
+        let records =
+            extract_history_from_pages(&path, "run1", "sqlite/history.sqlite").expect("pages");
         let record = records
             .iter()
             .find(|r| r.url == "https://example.com")
@@ -432,8 +433,8 @@ mod tests {
         .expect("insert");
         drop(conn);
 
-        let records = extract_history_from_pages(&path, "run1", "sqlite/history.sqlite")
-            .expect("pages");
+        let records =
+            extract_history_from_pages(&path, "run1", "sqlite/history.sqlite").expect("pages");
         assert!(records
             .iter()
             .any(|r| r.url == "https://overflow.example.com"));

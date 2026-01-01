@@ -7,7 +7,9 @@ use serde::Serialize;
 
 use crate::carve::CarvedFile;
 use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
-use crate::parsers::browser::{BrowserCookieRecord as CookieRecord, BrowserDownloadRecord as DownloadRecord};
+use crate::parsers::browser::{
+    BrowserCookieRecord as CookieRecord, BrowserDownloadRecord as DownloadRecord,
+};
 use crate::strings::artifacts::StringArtefact;
 
 pub struct JsonlSink {
@@ -144,7 +146,9 @@ impl MetadataSink for JsonlSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.files_writer.lock()
+        let mut guard = self
+            .files_writer
+            .lock()
             .map_err(|_| MetadataError::Other("files writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
@@ -159,14 +163,19 @@ impl MetadataSink for JsonlSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.strings_writer.lock()
+        let mut guard = self
+            .strings_writer
+            .lock()
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
         Ok(())
     }
 
-    fn record_history(&self, record: &crate::parsers::browser::BrowserHistoryRecord) -> Result<(), MetadataError> {
+    fn record_history(
+        &self,
+        record: &crate::parsers::browser::BrowserHistoryRecord,
+    ) -> Result<(), MetadataError> {
         let record = BrowserHistoryRecord {
             record,
             tool_version: &self.tool_version,
@@ -174,7 +183,9 @@ impl MetadataSink for JsonlSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.history_writer.lock()
+        let mut guard = self
+            .history_writer
+            .lock()
             .map_err(|_| MetadataError::Other("history writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
@@ -189,7 +200,9 @@ impl MetadataSink for JsonlSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.cookies_writer.lock()
+        let mut guard = self
+            .cookies_writer
+            .lock()
             .map_err(|_| MetadataError::Other("cookies writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
@@ -204,7 +217,9 @@ impl MetadataSink for JsonlSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.downloads_writer.lock()
+        let mut guard = self
+            .downloads_writer
+            .lock()
             .map_err(|_| MetadataError::Other("downloads writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
@@ -219,7 +234,9 @@ impl MetadataSink for JsonlSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.run_writer.lock()
+        let mut guard = self
+            .run_writer
+            .lock()
             .map_err(|_| MetadataError::Other("run writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
@@ -234,7 +251,9 @@ impl MetadataSink for JsonlSink {
             evidence_path: &self.evidence_path,
             evidence_sha256: &self.evidence_sha256,
         };
-        let mut guard = self.entropy_writer.lock()
+        let mut guard = self
+            .entropy_writer
+            .lock()
             .map_err(|_| MetadataError::Other("entropy writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
@@ -242,19 +261,33 @@ impl MetadataSink for JsonlSink {
     }
 
     fn flush(&self) -> Result<(), MetadataError> {
-        let mut files = self.files_writer.lock()
+        let mut files = self
+            .files_writer
+            .lock()
             .map_err(|_| MetadataError::Other("files writer lock poisoned".into()))?;
-        let mut strings = self.strings_writer.lock()
+        let mut strings = self
+            .strings_writer
+            .lock()
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
-        let mut history = self.history_writer.lock()
+        let mut history = self
+            .history_writer
+            .lock()
             .map_err(|_| MetadataError::Other("history writer lock poisoned".into()))?;
-        let mut cookies = self.cookies_writer.lock()
+        let mut cookies = self
+            .cookies_writer
+            .lock()
             .map_err(|_| MetadataError::Other("cookies writer lock poisoned".into()))?;
-        let mut downloads = self.downloads_writer.lock()
+        let mut downloads = self
+            .downloads_writer
+            .lock()
             .map_err(|_| MetadataError::Other("downloads writer lock poisoned".into()))?;
-        let mut run = self.run_writer.lock()
+        let mut run = self
+            .run_writer
+            .lock()
             .map_err(|_| MetadataError::Other("run writer lock poisoned".into()))?;
-        let mut entropy = self.entropy_writer.lock()
+        let mut entropy = self
+            .entropy_writer
+            .lock()
             .map_err(|_| MetadataError::Other("entropy writer lock poisoned".into()))?;
         files.flush()?;
         strings.flush()?;

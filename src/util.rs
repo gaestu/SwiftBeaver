@@ -8,9 +8,9 @@ use std::fs::OpenOptions;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use tracing::{debug, warn};
 #[cfg(unix)]
 use tracing::info;
+use tracing::{debug, warn};
 
 use crate::carve::{self, CarveRegistry};
 use crate::config::Config;
@@ -30,7 +30,10 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
     if path.exists() {
         let metadata = std::fs::metadata(path)?;
         if !metadata.is_dir() {
-            return Err(anyhow!("output path is not a directory: {}", path.display()));
+            return Err(anyhow!(
+                "output path is not a directory: {}",
+                path.display()
+            ));
         }
     } else {
         std::fs::create_dir_all(path)?;
@@ -38,7 +41,11 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
     let metadata = std::fs::metadata(path)?;
 
     let probe_path = path.join(".fastcarve_write_probe");
-    match OpenOptions::new().write(true).create(true).open(&probe_path) {
+    match OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&probe_path)
+    {
         Ok(_) => {
             let _ = std::fs::remove_file(&probe_path);
         }
@@ -64,7 +71,10 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
 }
 
 /// Apply optional resource limits for this process.
-pub fn apply_resource_limits(max_memory_mib: Option<u64>, max_open_files: Option<u64>) -> Result<()> {
+pub fn apply_resource_limits(
+    max_memory_mib: Option<u64>,
+    max_open_files: Option<u64>,
+) -> Result<()> {
     #[cfg(unix)]
     {
         if let Some(mem_mib) = max_memory_mib {

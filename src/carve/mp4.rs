@@ -3,7 +3,9 @@ use std::io::Write;
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const BOX_HEADER_LEN: usize = 8;
@@ -58,7 +60,10 @@ impl CarveHandler for Mp4CarveHandler {
                 Some(buf) => buf,
                 None => {
                     let evidence_len = ctx.evidence.len();
-                    if seen_ftyp && seen_moov && offset.saturating_add(BOX_HEADER_LEN as u64) > evidence_len {
+                    if seen_ftyp
+                        && seen_moov
+                        && offset.saturating_add(BOX_HEADER_LEN as u64) > evidence_len
+                    {
                         break;
                     }
                     truncated = true;
@@ -146,8 +151,14 @@ impl CarveHandler for Mp4CarveHandler {
             total_end = hit.global_offset + self.max_size;
         }
 
-        let (written, eof_truncated) =
-            write_range(ctx, hit.global_offset, total_end, &mut file, &mut md5, &mut sha256)?;
+        let (written, eof_truncated) = write_range(
+            ctx,
+            hit.global_offset,
+            total_end,
+            &mut file,
+            &mut md5,
+            &mut sha256,
+        )?;
         if eof_truncated {
             truncated = true;
             errors.push("eof before MP4 end".to_string());

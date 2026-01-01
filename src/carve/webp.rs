@@ -1,6 +1,8 @@
 use std::fs::File;
 
-use crate::carve::{output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const RIFF: &[u8; 4] = b"RIFF";
@@ -36,7 +38,12 @@ impl CarveHandler for WebpCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
-        let (full_path, rel_path) = output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
+        let (full_path, rel_path) = output_path(
+            ctx.output_root,
+            self.file_type(),
+            &self.extension,
+            hit.global_offset,
+        )?;
         let file = File::create(&full_path)?;
         let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
 
@@ -54,7 +61,11 @@ impl CarveHandler for WebpCarveHandler {
             if total_size < 12 {
                 return Err(CarveError::Invalid("webp size invalid".to_string()));
             }
-            let max_size = if self.max_size > 0 { self.max_size } else { total_size };
+            let max_size = if self.max_size > 0 {
+                self.max_size
+            } else {
+                total_size
+            };
             let target_size = total_size.min(max_size);
             let remaining = target_size.saturating_sub(12);
             if remaining > 0 {

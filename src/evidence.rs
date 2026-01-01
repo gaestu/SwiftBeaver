@@ -182,7 +182,10 @@ mod ewf {
     extern "C" {
         fn libewf_get_access_flags_read() -> c_int;
 
-        fn libewf_check_file_signature(filename: *const c_char, error: *mut *mut LibEwfError) -> c_int;
+        fn libewf_check_file_signature(
+            filename: *const c_char,
+            error: *mut *mut LibEwfError,
+        ) -> c_int;
         fn libewf_glob(
             filename: *const c_char,
             filename_length: size_t,
@@ -197,9 +200,14 @@ mod ewf {
             error: *mut *mut LibEwfError,
         ) -> c_int;
 
-        fn libewf_handle_initialize(handle: *mut *mut LibEwfHandle, error: *mut *mut LibEwfError)
-            -> c_int;
-        fn libewf_handle_free(handle: *mut *mut LibEwfHandle, error: *mut *mut LibEwfError) -> c_int;
+        fn libewf_handle_initialize(
+            handle: *mut *mut LibEwfHandle,
+            error: *mut *mut LibEwfError,
+        ) -> c_int;
+        fn libewf_handle_free(
+            handle: *mut *mut LibEwfHandle,
+            error: *mut *mut LibEwfError,
+        ) -> c_int;
         fn libewf_handle_open(
             handle: *mut LibEwfHandle,
             filenames: *mut *mut c_char,
@@ -221,7 +229,8 @@ mod ewf {
             error: *mut *mut LibEwfError,
         ) -> ssize_t;
 
-        fn libewf_error_sprint(error: *mut LibEwfError, string: *mut c_char, size: size_t) -> c_int;
+        fn libewf_error_sprint(error: *mut LibEwfError, string: *mut c_char, size: size_t)
+            -> c_int;
         fn libewf_error_free(error: *mut *mut LibEwfError);
     }
 
@@ -279,7 +288,13 @@ mod ewf {
                 }
 
                 let access_flags = libewf_get_access_flags_read();
-                let rc = libewf_handle_open(handle, filenames, number_of_filenames, access_flags, &mut error);
+                let rc = libewf_handle_open(
+                    handle,
+                    filenames,
+                    number_of_filenames,
+                    access_flags,
+                    &mut error,
+                );
                 let _ = libewf_glob_free(filenames, number_of_filenames, &mut error);
                 if rc != 1 {
                     let _ = libewf_handle_free(&mut handle, &mut error);
@@ -313,12 +328,13 @@ mod ewf {
                 )));
             }
 
-            let guard = self
-                .handle
-                .lock()
-                .map_err(|_| EvidenceError::Unsupported("libewf handle lock poisoned".to_string()))?;
+            let guard = self.handle.lock().map_err(|_| {
+                EvidenceError::Unsupported("libewf handle lock poisoned".to_string())
+            })?;
             if guard.handle.is_null() {
-                return Err(EvidenceError::Unsupported("libewf handle closed".to_string()));
+                return Err(EvidenceError::Unsupported(
+                    "libewf handle closed".to_string(),
+                ));
             }
 
             unsafe {

@@ -3,7 +3,9 @@ use std::io::Write;
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const SEVENZ_MAGIC: [u8; 6] = [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C];
@@ -86,8 +88,14 @@ impl CarveHandler for SevenZCarveHandler {
         let mut sha256 = Sha256::new();
 
         let total_end = hit.global_offset + total_size;
-        let (written, eof_truncated) =
-            write_range(ctx, hit.global_offset, total_end, &mut file, &mut md5, &mut sha256)?;
+        let (written, eof_truncated) = write_range(
+            ctx,
+            hit.global_offset,
+            total_end,
+            &mut file,
+            &mut md5,
+            &mut sha256,
+        )?;
         if eof_truncated {
             truncated = true;
             errors.push("eof before 7z end".to_string());

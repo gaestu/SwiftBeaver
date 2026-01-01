@@ -4,7 +4,9 @@ use std::io::Write;
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const TIFF_HEADER_LEN: usize = 8;
@@ -84,8 +86,14 @@ impl CarveHandler for TiffCarveHandler {
             errors.push("max_size reached before TIFF end".to_string());
         }
 
-        let (written, eof_truncated) =
-            write_range(ctx, hit.global_offset, total_end, &mut file, &mut md5, &mut sha256)?;
+        let (written, eof_truncated) = write_range(
+            ctx,
+            hit.global_offset,
+            total_end,
+            &mut file,
+            &mut md5,
+            &mut sha256,
+        )?;
         if eof_truncated {
             truncated = true;
             errors.push("eof before TIFF end".to_string());
@@ -188,7 +196,9 @@ fn parse_ifd(
     let count_buf = read_exact_at(ctx, base, 2).ok_or(CarveError::Eof)?;
     let count = read_u16(&count_buf, endian);
     if count > MAX_IFD_ENTRIES {
-        return Err(CarveError::Invalid("tiff IFD entry count too large".to_string()));
+        return Err(CarveError::Invalid(
+            "tiff IFD entry count too large".to_string(),
+        ));
     }
     let entries_len = count as usize * 12;
     let total_len = 2 + entries_len + 4;
@@ -233,17 +243,45 @@ fn parse_ifd(
         }
 
         if tag == TAG_STRIP_OFFSETS {
-            strip_offsets =
-                Some(read_u32_array(ctx, start, endian, typ, value_count, value_bytes, data_len)?);
+            strip_offsets = Some(read_u32_array(
+                ctx,
+                start,
+                endian,
+                typ,
+                value_count,
+                value_bytes,
+                data_len,
+            )?);
         } else if tag == TAG_STRIP_BYTE_COUNTS {
-            strip_counts =
-                Some(read_u32_array(ctx, start, endian, typ, value_count, value_bytes, data_len)?);
+            strip_counts = Some(read_u32_array(
+                ctx,
+                start,
+                endian,
+                typ,
+                value_count,
+                value_bytes,
+                data_len,
+            )?);
         } else if tag == TAG_TILE_OFFSETS {
-            tile_offsets =
-                Some(read_u32_array(ctx, start, endian, typ, value_count, value_bytes, data_len)?);
+            tile_offsets = Some(read_u32_array(
+                ctx,
+                start,
+                endian,
+                typ,
+                value_count,
+                value_bytes,
+                data_len,
+            )?);
         } else if tag == TAG_TILE_BYTE_COUNTS {
-            tile_counts =
-                Some(read_u32_array(ctx, start, endian, typ, value_count, value_bytes, data_len)?);
+            tile_counts = Some(read_u32_array(
+                ctx,
+                start,
+                endian,
+                typ,
+                value_count,
+                value_bytes,
+                data_len,
+            )?);
         }
     }
 

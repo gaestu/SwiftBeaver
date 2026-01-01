@@ -6,7 +6,9 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use fastcarve::carve::CarvedFile;
 use fastcarve::config;
 use fastcarve::metadata::{self, EntropyRegion, MetadataBackendKind, RunSummary};
-use fastcarve::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
+use fastcarve::parsers::browser::{
+    BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord,
+};
 use fastcarve::strings::artifacts::{ArtefactKind, StringArtefact};
 
 #[test]

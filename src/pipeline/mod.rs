@@ -232,7 +232,9 @@ fn run_pipeline_inner(
     );
 
     // Create channels
-    let channel_cap = workers.saturating_mul(CHANNEL_CAPACITY_MULTIPLIER).max(MIN_CHANNEL_CAPACITY);
+    let channel_cap = workers
+        .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
+        .max(MIN_CHANNEL_CAPACITY);
     let (scan_tx, scan_rx) = bounded::<ScanJob>(channel_cap);
     let (hit_tx, hit_rx) = bounded(channel_cap * 2);
     let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 2);
@@ -420,7 +422,9 @@ fn run_pipeline_inner(
     }
 
     // Send run summary
-    let bytes_scanned_total = bytes_scanned.load(Ordering::Relaxed).saturating_add(resume_offset);
+    let bytes_scanned_total = bytes_scanned
+        .load(Ordering::Relaxed)
+        .saturating_add(resume_offset);
     let chunks_processed_total = chunks_processed
         .load(Ordering::Relaxed)
         .saturating_add(resume_chunks);

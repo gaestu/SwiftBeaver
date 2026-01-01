@@ -98,7 +98,10 @@ fn file_spans_chunk_boundary() {
         .iter()
         .find(|r| r.get("file_type").and_then(|v| v.as_str()) == Some("jpeg"))
         .expect("jpeg record");
-    assert_eq!(jpeg_rec.get("validated").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        jpeg_rec.get("validated").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 }
 
 #[test]

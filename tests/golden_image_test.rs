@@ -213,7 +213,10 @@ fn golden_carves_from_raw() {
     let carved_meta = run_output_dir.join("metadata").join("carved_files.jsonl");
     let carved_content = fs::read_to_string(&carved_meta).expect("read carved metadata");
     let mut matched = 0usize;
-    for line in carved_content.lines().filter(|line| !line.trim().is_empty()) {
+    for line in carved_content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+    {
         let record: serde_json::Value = serde_json::from_str(line).expect("parse carved record");
         if let Some(hash) = record.get("sha256").and_then(|v| v.as_str()) {
             if manifest_hashes.contains(hash) {
@@ -222,7 +225,10 @@ fn golden_carves_from_raw() {
         }
     }
 
-    assert!(matched > 0, "expected carved outputs to match manifest samples");
+    assert!(
+        matched > 0,
+        "expected carved outputs to match manifest samples"
+    );
 }
 
 #[cfg(feature = "ewf")]
@@ -288,7 +294,9 @@ fn golden_carves_from_e01_with_strings() {
 
     assert!(stats.files_carved > 0, "expected carved files from E01");
 
-    let strings_file = run_output_dir.join("metadata").join("string_artefacts.jsonl");
+    let strings_file = run_output_dir
+        .join("metadata")
+        .join("string_artefacts.jsonl");
     let content = fs::read_to_string(&strings_file).expect("read strings");
     let has_urls = content.contains("http://") || content.contains("https://");
     let has_emails = content.contains('@');
@@ -374,8 +382,7 @@ fn golden_manifest_integrity() {
     }
 
     assert_eq!(
-        verified as u64,
-        manifest.summary.total_files,
+        verified as u64, manifest.summary.total_files,
         "verified count should match manifest total"
     );
 }

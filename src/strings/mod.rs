@@ -1,8 +1,8 @@
 pub mod cpu;
-#[cfg(feature = "gpu-opencl")]
-pub mod opencl;
 #[cfg(feature = "gpu-cuda")]
 pub mod cuda;
+#[cfg(feature = "gpu-opencl")]
+pub mod opencl;
 
 use crate::chunk::ScanChunk;
 
@@ -114,15 +114,13 @@ pub mod artifacts {
         pub global_end: u64,
     }
 
-    static URL_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r#"(?i)\b(?:https?://|www\.)[^\s"'<>]+"#).expect("url regex")
-    });
+    static URL_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r#"(?i)\b(?:https?://|www\.)[^\s"'<>]+"#).expect("url regex"));
     static EMAIL_RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b").expect("email regex")
     });
-    static PHONE_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"\b\+?\d[\d\s().-]{6,}\d\b").expect("phone regex")
-    });
+    static PHONE_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\b\+?\d[\d\s().-]{6,}\d\b").expect("phone regex"));
 
     pub fn extract_artefacts(
         run_id: &str,
@@ -217,7 +215,11 @@ pub mod artifacts {
         global_start: u64,
     ) -> StringArtefact {
         let len = content.as_bytes().len() as u64;
-        let global_end = if len == 0 { global_start } else { global_start + len - 1 };
+        let global_end = if len == 0 {
+            global_start
+        } else {
+            global_start + len - 1
+        };
         StringArtefact {
             run_id: run_id.to_string(),
             artefact_kind: kind,
@@ -326,8 +328,12 @@ pub mod artifacts {
         fn extracts_basic_artefacts() {
             let data = b"visit https://example.com and mail test@example.com";
             let out = extract_artefacts("run1", 100, 0, 0, data, ArtefactScanConfig::all());
-            assert!(out.iter().any(|a| matches!(a.artefact_kind, ArtefactKind::Url)));
-            assert!(out.iter().any(|a| matches!(a.artefact_kind, ArtefactKind::Email)));
+            assert!(out
+                .iter()
+                .any(|a| matches!(a.artefact_kind, ArtefactKind::Url)));
+            assert!(out
+                .iter()
+                .any(|a| matches!(a.artefact_kind, ArtefactKind::Email)));
         }
 
         #[test]
@@ -417,7 +423,9 @@ pub mod artifacts {
                     phones: false,
                 },
             );
-            assert!(out.iter().all(|a| matches!(a.artefact_kind, ArtefactKind::Email)));
+            assert!(out
+                .iter()
+                .all(|a| matches!(a.artefact_kind, ArtefactKind::Email)));
         }
     }
 }

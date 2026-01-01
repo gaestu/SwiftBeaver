@@ -3,7 +3,9 @@ use std::io::Write;
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const BMP_HEADER_LEN: usize = 14;
@@ -52,9 +54,12 @@ impl CarveHandler for BmpCarveHandler {
         }
 
         let file_size = u32::from_le_bytes([header[2], header[3], header[4], header[5]]) as u64;
-        let pixel_offset = u32::from_le_bytes([header[10], header[11], header[12], header[13]]) as u64;
+        let pixel_offset =
+            u32::from_le_bytes([header[10], header[11], header[12], header[13]]) as u64;
 
-        if file_size < BMP_HEADER_LEN as u64 || pixel_offset < BMP_HEADER_LEN as u64 || pixel_offset > file_size
+        if file_size < BMP_HEADER_LEN as u64
+            || pixel_offset < BMP_HEADER_LEN as u64
+            || pixel_offset > file_size
         {
             return Ok(None);
         }
@@ -79,8 +84,14 @@ impl CarveHandler for BmpCarveHandler {
             errors.push("max_size reached before BMP end".to_string());
         }
 
-        let (written, eof_truncated) =
-            write_range(ctx, hit.global_offset, total_end, &mut file, &mut md5, &mut sha256)?;
+        let (written, eof_truncated) = write_range(
+            ctx,
+            hit.global_offset,
+            total_end,
+            &mut file,
+            &mut md5,
+            &mut sha256,
+        )?;
         if eof_truncated {
             truncated = true;
             errors.push("eof before BMP end".to_string());
@@ -122,8 +133,8 @@ impl CarveHandler for BmpCarveHandler {
 mod tests {
     use super::BmpCarveHandler;
     use crate::carve::{CarveHandler, ExtractionContext};
-    use crate::scanner::NormalizedHit;
     use crate::evidence::RawFileSource;
+    use crate::scanner::NormalizedHit;
 
     #[test]
     fn carves_minimal_bmp() {

@@ -5,7 +5,9 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext};
+use crate::carve::{
+    output_path, write_range, CarveError, CarveHandler, CarvedFile, ExtractionContext,
+};
 use crate::scanner::NormalizedHit;
 
 const ZIP_HEADER: &[u8] = b"PK\x03\x04";
@@ -64,7 +66,8 @@ impl CarveHandler for ZipCarveHandler {
         let mut bytes_written = 0u64;
 
         let (full_path, mut rel_path) = if self.require_eocd {
-            let Some((eocd_offset, parsed)) = find_eocd(ctx, hit.global_offset, self.max_size)? else {
+            let Some((eocd_offset, parsed)) = find_eocd(ctx, hit.global_offset, self.max_size)?
+            else {
                 return Ok(None);
             };
             let comment_len = parsed.comment_len;
@@ -81,14 +84,24 @@ impl CarveHandler for ZipCarveHandler {
                 }
             }
 
-            let (mut full_path, mut rel_path) =
-                output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?;
+            let (mut full_path, mut rel_path) = output_path(
+                ctx.output_root,
+                self.file_type(),
+                &self.extension,
+                hit.global_offset,
+            )?;
             let mut file = File::create(&full_path)?;
             let mut md5 = md5::Context::new();
             let mut sha256 = Sha256::new();
 
-            let (written, eof_truncated) =
-                write_range(ctx, hit.global_offset, total_end, &mut file, &mut md5, &mut sha256)?;
+            let (written, eof_truncated) = write_range(
+                ctx,
+                hit.global_offset,
+                total_end,
+                &mut file,
+                &mut md5,
+                &mut sha256,
+            )?;
             bytes_written = written;
             if eof_truncated {
                 truncated = true;
@@ -117,12 +130,9 @@ impl CarveHandler for ZipCarveHandler {
                     file_type = kind.file_type().to_string();
                     extension = kind.extension().to_string();
                     if file_type != self.file_type() {
-                        if let Ok((new_path, new_rel)) = output_path(
-                            ctx.output_root,
-                            &file_type,
-                            &extension,
-                            hit.global_offset,
-                        ) {
+                        if let Ok((new_path, new_rel)) =
+                            output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                        {
                             if std::fs::rename(&full_path, &new_path).is_ok() {
                                 rel_path = new_rel;
                                 full_path = new_path;
@@ -155,7 +165,12 @@ impl CarveHandler for ZipCarveHandler {
                 pattern_id: Some(hit.pattern_id.clone()),
             }));
         } else {
-            output_path(ctx.output_root, self.file_type(), &self.extension, hit.global_offset)?
+            output_path(
+                ctx.output_root,
+                self.file_type(),
+                &self.extension,
+                hit.global_offset,
+            )?
         };
 
         let mut file = File::create(&full_path)?;
@@ -302,12 +317,9 @@ impl CarveHandler for ZipCarveHandler {
                     file_type = kind.file_type().to_string();
                     extension = kind.extension().to_string();
                     if file_type != self.file_type() {
-                        if let Ok((new_path, new_rel)) = output_path(
-                            ctx.output_root,
-                            &file_type,
-                            &extension,
-                            hit.global_offset,
-                        ) {
+                        if let Ok((new_path, new_rel)) =
+                            output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                        {
                             if std::fs::rename(&full_path, &new_path).is_ok() {
                                 rel_path = new_rel;
                             }
@@ -411,7 +423,9 @@ fn read_eocd(ctx: &ExtractionContext, offset: u64) -> Result<ZipEocd, CarveError
         return Err(CarveError::Eof);
     }
     if &buf[0..4] != ZIP_EOCD {
-        return Err(CarveError::Invalid("zip eocd signature mismatch".to_string()));
+        return Err(CarveError::Invalid(
+            "zip eocd signature mismatch".to_string(),
+        ));
     }
     let cd_size = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as u64;
     let cd_offset = u32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]) as u64;
@@ -588,7 +602,8 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let evidence_path = dir.path().join("evidence.bin");
         let mut file = File::create(&evidence_path).expect("create");
-        file.write_all(b"PK\x03\x04\x00\x00\x00\x00\x00\x00").expect("write");
+        file.write_all(b"PK\x03\x04\x00\x00\x00\x00\x00\x00")
+            .expect("write");
         drop(file);
 
         let evidence = RawFileSource::open(&evidence_path).expect("evidence");

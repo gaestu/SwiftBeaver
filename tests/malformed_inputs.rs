@@ -123,13 +123,25 @@ fn malformed_inputs_are_handled() {
         .iter()
         .find(|r| r.get("file_type").and_then(|v| v.as_str()) == Some("jpeg"))
         .expect("jpeg record");
-    assert_eq!(jpeg_rec.get("validated").and_then(|v| v.as_bool()), Some(false));
-    assert_eq!(jpeg_rec.get("truncated").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        jpeg_rec.get("validated").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        jpeg_rec.get("truncated").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 
     let png_rec = records
         .iter()
         .find(|r| r.get("file_type").and_then(|v| v.as_str()) == Some("png"))
         .expect("png record");
-    assert_eq!(png_rec.get("validated").and_then(|v| v.as_bool()), Some(false));
-    assert_eq!(png_rec.get("truncated").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        png_rec.get("validated").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        png_rec.get("truncated").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 }

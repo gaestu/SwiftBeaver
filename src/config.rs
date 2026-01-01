@@ -87,7 +87,10 @@ pub fn load_config(path: Option<&Path>) -> Result<LoadedConfig> {
 
     let config_hash = hash_bytes(&bytes);
 
-    Ok(LoadedConfig { config, config_hash })
+    Ok(LoadedConfig {
+        config,
+        config_hash,
+    })
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
@@ -197,9 +200,7 @@ impl Config {
         }
 
         // Entropy detection
-        if cli.scan_entropy
-            || cli.entropy_window_bytes.is_some()
-            || cli.entropy_threshold.is_some()
+        if cli.scan_entropy || cli.entropy_window_bytes.is_some() || cli.entropy_threshold.is_some()
         {
             self.enable_entropy_detection = true;
         }
