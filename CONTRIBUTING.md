@@ -17,7 +17,7 @@ Optional GPU dependencies:
 
 ```bash
 git clone <repo>
-cd fast_carver
+cd SwiftBeaver
 cargo build
 ```
 
