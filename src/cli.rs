@@ -168,14 +168,14 @@ mod tests {
     #[test]
     fn parses_disable_zip_flag() {
         let opts =
-            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--disable-zip"])
+            CliOptions::try_parse_from(["SwiftBeaver", "--input", "image.dd", "--disable-zip"])
                 .expect("parse");
         assert!(opts.disable_zip);
     }
 
     #[test]
     fn parses_utf16_flag() {
-        let opts = CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--scan-utf16"])
+        let opts = CliOptions::try_parse_from(["SwiftBeaver", "--input", "image.dd", "--scan-utf16"])
             .expect("parse");
         assert!(opts.scan_utf16);
     }
@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn parses_types_list() {
         let opts = CliOptions::try_parse_from([
-            "fastcarve",
+            "SwiftBeaver",
             "--input",
             "image.dd",
             "--types",
@@ -196,11 +196,11 @@ mod tests {
 
     #[test]
     fn parses_scan_url_flags() {
-        let opts = CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--scan-urls"])
+        let opts = CliOptions::try_parse_from(["SwiftBeaver", "--input", "image.dd", "--scan-urls"])
             .expect("parse");
         assert!(opts.scan_urls);
         let opts =
-            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--no-scan-urls"])
+            CliOptions::try_parse_from(["SwiftBeaver", "--input", "image.dd", "--no-scan-urls"])
                 .expect("parse");
         assert!(opts.no_scan_urls);
     }
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn parses_entropy_flags() {
         let opts = CliOptions::try_parse_from([
-            "fastcarve",
+            "SwiftBeaver",
             "--input",
             "image.dd",
             "--scan-entropy",
@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn parses_sqlite_page_flag() {
         let opts =
-            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--scan-sqlite-pages"])
+            CliOptions::try_parse_from(["SwiftBeaver", "--input", "image.dd", "--scan-sqlite-pages"])
                 .expect("parse");
         assert!(opts.scan_sqlite_pages);
     }
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn parses_limits() {
         let opts = CliOptions::try_parse_from([
-            "fastcarve",
+            "SwiftBeaver",
             "--input",
             "image.dd",
             "--max-bytes",
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn parses_log_format() {
         let opts = CliOptions::try_parse_from([
-            "fastcarve",
+            "SwiftBeaver",
             "--input",
             "image.dd",
             "--log-format",
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn parses_progress_interval() {
         let opts = CliOptions::try_parse_from([
-            "fastcarve",
+            "SwiftBeaver",
             "--input",
             "image.dd",
             "--progress-interval-secs",
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn parses_max_files() {
         let opts =
-            CliOptions::try_parse_from(["fastcarve", "--input", "image.dd", "--max-files", "25"])
+            CliOptions::try_parse_from(["SwiftBeaver", "--input", "image.dd", "--max-files", "25"])
                 .expect("parse");
         assert_eq!(opts.max_files, Some(25));
     }
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn parses_resource_limits() {
         let opts = CliOptions::try_parse_from([
-            "fastcarve",
+            "SwiftBeaver",
             "--input",
             "image.dd",
             "--max-memory-mib",
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn parses_checkpoint_paths() {
         let opts = CliOptions::try_parse_from([
-            "fastcarve",
+            "SwiftBeaver",
             "--input",
             "image.dd",
             "--checkpoint-path",

@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use tracing::{info, warn};
 
-use fastcarve::{
+use swiftbeaver::{
     checkpoint, cli, config, constants::MIB, evidence, logging, metadata, pipeline, scanner,
     strings, util,
 };
@@ -180,6 +180,6 @@ fn main() -> Result<()> {
         checkpoint_cfg,
     )?;
 
-    info!("fastcarve run finished");
+    info!("SwiftBeaver run finished");
     Ok(())
 }

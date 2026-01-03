@@ -147,7 +147,7 @@ dd if=/dev/zero of="$OUTPUT_RAW" bs=$ALIGNMENT count=1 2>/dev/null
 
 cat > "$MANIFEST" << EOF
 {
-  "description": "Golden test image - ALL sample files for fastcarve testing",
+  "description": "Golden test image - ALL sample files for SwiftBeaver testing",
   "generated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "alignment": $ALIGNMENT,
   "sample_dir": "$(basename "$SAMPLES_DIR")",
@@ -250,7 +250,7 @@ elif command -v ewfacquire >/dev/null 2>&1; then
                -c best \
                -S 0 \
                -C "golden_test" \
-               -D "Golden test image - all fastcarve samples" \
+               -D "Golden test image - all SwiftBeaver samples" \
                -e "automated" \
                -E "golden_001" \
                "$OUTPUT_RAW"

@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use fastcarve::checkpoint;
-use fastcarve::config;
-use fastcarve::evidence::RawFileSource;
-use fastcarve::metadata::{self, MetadataBackendKind};
-use fastcarve::pipeline;
-use fastcarve::scanner;
-use fastcarve::util;
+use swiftbeaver::checkpoint;
+use swiftbeaver::config;
+use swiftbeaver::evidence::RawFileSource;
+use swiftbeaver::metadata::{self, MetadataBackendKind};
+use swiftbeaver::pipeline;
+use swiftbeaver::scanner;
+use swiftbeaver::util;
 
 fn insert_bytes(target: &mut Vec<u8>, offset: usize, data: &[u8]) {
     let end = offset + data.len();
@@ -56,7 +56,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
     let checkpoint_path = temp_dir.path().join("checkpoint.json");
 
     let evidence = RawFileSource::open(&input_path).expect("evidence");
-    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
     let run_output_dir = temp_dir.path().join("run1");
     fs::create_dir_all(&run_output_dir).expect("output dir");
 
@@ -73,7 +73,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
     .expect("metadata sink");
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
-    let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
 
     let checkpoint_cfg = Some(pipeline::CheckpointConfig {
@@ -106,7 +106,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
     let resume_state = checkpoint::load_checkpoint(&checkpoint_path).expect("load checkpoint");
 
     let evidence = RawFileSource::open(&input_path).expect("evidence");
-    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
     let run_output_dir = temp_dir.path().join("run2");
     fs::create_dir_all(&run_output_dir).expect("output dir");
 
@@ -123,7 +123,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
     .expect("metadata sink");
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
-    let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
 
     let checkpoint_cfg = Some(pipeline::CheckpointConfig {

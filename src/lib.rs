@@ -1,4 +1,4 @@
-//! # fastcarve
+//! # SwiftBeaver
 //!
 //! High-speed forensic file and artefact carver with optional GPU acceleration.
 //!

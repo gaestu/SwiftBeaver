@@ -1,6 +1,6 @@
 # agents.md
 
-Guidelines for AI Coding Agents Working on `fastcarve`
+Guidelines for AI Coding Agents Working on `SwiftBeaver`
 
 This document defines how AI coding agents should work on this repository: how to structure code, keep tests and documentation in sync, and maintain planning artefacts.  
 **Follow this document strictly.** If something is unclear, prefer conservative changes and keep behaviour backward compatible.

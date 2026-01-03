@@ -8,7 +8,7 @@
 
 ## Problem Statement
 
-`fastcarve` currently supports three metadata backends: JSONL, CSV, and Parquet. While Parquet is excellent for large-scale analytics, many forensic analysts prefer to query results immediately using SQL without needing specialized tools.
+`SwiftBeaver` currently supports three metadata backends: JSONL, CSV, and Parquet. While Parquet is excellent for large-scale analytics, many forensic analysts prefer to query results immediately using SQL without needing specialized tools.
 
 SQLite offers:
 - **Zero-setup querying** — any SQLite client works (sqlite3 CLI, DB Browser, Python sqlite3)
@@ -49,7 +49,7 @@ SQLite offers:
 
 ### Out of Scope
 
-- Query interface within fastcarve
+- Query interface within SwiftBeaver
 - Database migration tooling
 - Remote database support (PostgreSQL, MySQL)
 

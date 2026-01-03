@@ -1,6 +1,6 @@
 //! # Constants Module
 //!
-//! Centralized constants used throughout the fastcarve crate.
+//! Centralized constants used throughout the SwiftBeaver crate.
 //! This avoids magic numbers scattered across the codebase.
 
 /// Default I/O buffer size for reading/writing file data (64 KiB)

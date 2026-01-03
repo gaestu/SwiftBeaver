@@ -7,13 +7,13 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use fastcarve::cli::{CliOptions, MetadataBackend};
-use fastcarve::config;
-use fastcarve::evidence::RawFileSource;
-use fastcarve::metadata::{self, MetadataBackendKind};
-use fastcarve::pipeline;
-use fastcarve::scanner;
-use fastcarve::util;
+use swiftbeaver::cli::{CliOptions, MetadataBackend};
+use swiftbeaver::config;
+use swiftbeaver::evidence::RawFileSource;
+use swiftbeaver::metadata::{self, MetadataBackendKind};
+use swiftbeaver::pipeline;
+use swiftbeaver::scanner;
+use swiftbeaver::util;
 
 #[derive(Debug, Deserialize)]
 struct Manifest {
@@ -110,7 +110,7 @@ fn cli_opts_for_input(path: PathBuf) -> CliOptions {
         chunk_size_mib: 64,
         overlap_kib: None,
         metadata_backend: MetadataBackend::Jsonl,
-        log_format: fastcarve::cli::LogFormat::Text,
+        log_format: swiftbeaver::cli::LogFormat::Text,
         progress_interval_secs: 0,
         scan_strings: false,
         scan_utf16: false,
@@ -188,7 +188,7 @@ fn golden_carves_from_raw() {
     cfg.run_id = "golden_raw_test".to_string();
 
     let evidence = RawFileSource::open(&raw_path).expect("open raw");
-    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
 
     let run_output_dir = temp_dir.path().join(&cfg.run_id);
     fs::create_dir_all(&run_output_dir).expect("output dir");
@@ -206,7 +206,7 @@ fn golden_carves_from_raw() {
     .expect("metadata sink");
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
-    let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
 
     let stats = pipeline::run_pipeline(
@@ -285,8 +285,8 @@ fn golden_carves_from_e01_with_strings() {
     cfg.string_scan_utf16 = true;
 
     let opts = cli_opts_for_input(e01_path.clone());
-    let evidence = fastcarve::evidence::open_source(&opts).expect("open E01");
-    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::from(evidence);
+    let evidence = swiftbeaver::evidence::open_source(&opts).expect("open E01");
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::from(evidence);
 
     let run_output_dir = temp_dir.path().join(&cfg.run_id);
     fs::create_dir_all(&run_output_dir).expect("output dir");
@@ -304,10 +304,10 @@ fn golden_carves_from_e01_with_strings() {
     .expect("metadata sink");
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
-    let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
 
     let string_scanner = Some(Arc::from(
-        fastcarve::strings::build_string_scanner(&cfg, false).expect("string scanner"),
+        swiftbeaver::strings::build_string_scanner(&cfg, false).expect("string scanner"),
     ));
 
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
@@ -347,7 +347,7 @@ fn golden_e01_size_matches_raw() {
 
     let raw_size = fs::metadata(&raw_path).expect("raw metadata").len();
     let opts = cli_opts_for_input(e01_path);
-    let e01 = fastcarve::evidence::open_source(&opts).expect("open E01");
+    let e01 = swiftbeaver::evidence::open_source(&opts).expect("open E01");
 
     assert_eq!(e01.len(), raw_size, "E01 media size should match raw");
 }

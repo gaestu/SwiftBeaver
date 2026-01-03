@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use fastcarve::config;
-use fastcarve::evidence::RawFileSource;
-use fastcarve::metadata::{self, MetadataBackendKind};
-use fastcarve::pipeline;
-use fastcarve::scanner;
-use fastcarve::util;
+use swiftbeaver::config;
+use swiftbeaver::evidence::RawFileSource;
+use swiftbeaver::metadata::{self, MetadataBackendKind};
+use swiftbeaver::pipeline;
+use swiftbeaver::scanner;
+use swiftbeaver::util;
 
 // ============================================================================
 // Data Structures
@@ -105,7 +105,7 @@ pub fn run_carver_for_types(types: &[&str]) -> CarveResult {
     cfg.file_types.retain(|ft| types.contains(&ft.id.as_str()));
 
     let evidence = RawFileSource::open(&raw_path).expect("open raw");
-    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
 
     let run_output_dir = temp_dir.path().join(&cfg.run_id);
     fs::create_dir_all(&run_output_dir).expect("output dir");
@@ -123,7 +123,7 @@ pub fn run_carver_for_types(types: &[&str]) -> CarveResult {
     .expect("metadata sink");
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
-    let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
 
     let _stats = pipeline::run_pipeline(

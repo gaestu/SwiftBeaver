@@ -16,9 +16,9 @@ pub enum EvidenceError {
 ///
 /// # Example
 /// ```rust
-/// use fastcarve::evidence::{EvidenceSource, RawFileSource};
+/// use swiftbeaver::evidence::{EvidenceSource, RawFileSource};
 ///
-/// let path = std::env::temp_dir().join("fastcarve_evidence_example.bin");
+/// let path = std::env::temp_dir().join("SwiftBeaver_evidence_example.bin");
 /// std::fs::write(&path, b"hello").unwrap();
 /// let source = RawFileSource::open(&path).unwrap();
 /// let mut buf = [0u8; 5];

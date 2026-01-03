@@ -53,12 +53,12 @@ pub enum MetadataError {
 ///
 /// # Example
 /// ```rust
-/// use fastcarve::config;
-/// use fastcarve::metadata::{self, MetadataBackendKind, MetadataSink, RunSummary};
+/// use swiftbeaver::config;
+/// use swiftbeaver::metadata::{self, MetadataBackendKind, MetadataSink, RunSummary};
 /// use std::path::PathBuf;
 ///
 /// let loaded = config::load_config(None).unwrap();
-/// let run_output_dir = std::env::temp_dir().join("fastcarve_meta_example");
+/// let run_output_dir = std::env::temp_dir().join("SwiftBeaver_meta_example");
 /// std::fs::create_dir_all(&run_output_dir).unwrap();
 ///
 /// let sink = metadata::build_sink(

@@ -4,7 +4,7 @@ This document tracks sample files for the golden test image.
 
 **Source:** Most files from [file-examples.com](https://file-examples.com) (free for testing)
 
-**Scope:** fastcarve currently carves jpeg/png/gif/pdf/zip/webp/sqlite/bmp/tiff/mp4/rar/7z; docx/xlsx/pptx are classified from ZIP content. Other formats below are optional/future.
+**Scope:** SwiftBeaver currently carves jpeg/png/gif/pdf/zip/webp/sqlite/bmp/tiff/mp4/rar/7z; docx/xlsx/pptx are classified from ZIP content. Other formats below are optional/future.
 
 **Placement:** the files should be placed in tests/golden_image in the according folders.
 
@@ -310,7 +310,7 @@ echo "This is a test PDF document for carving tests." | enscript -B -o - | ps2pd
 cat > test_doc.tex << 'EOF'
 \documentclass{article}
 \begin{document}
-Test PDF document for fastcarve testing.
+Test PDF document for SwiftBeaver testing.
 \end{document}
 EOF
 pdflatex test_doc.tex

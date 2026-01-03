@@ -2,13 +2,13 @@ use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::sync::Arc;
 
-use fastcarve::chunk::build_chunks;
-use fastcarve::config;
-use fastcarve::evidence::RawFileSource;
-use fastcarve::metadata::{self, MetadataBackendKind};
-use fastcarve::pipeline;
-use fastcarve::scanner;
-use fastcarve::util;
+use swiftbeaver::chunk::build_chunks;
+use swiftbeaver::config;
+use swiftbeaver::evidence::RawFileSource;
+use swiftbeaver::metadata::{self, MetadataBackendKind};
+use swiftbeaver::pipeline;
+use swiftbeaver::scanner;
+use swiftbeaver::util;
 
 fn env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
@@ -39,7 +39,7 @@ fn run_pipeline(
     cfg.max_files = max_files;
 
     let evidence = RawFileSource::open(input_path).expect("evidence");
-    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
 
     let run_output_dir = temp_dir.path().join("run");
     fs::create_dir_all(&run_output_dir).expect("output dir");
@@ -57,7 +57,7 @@ fn run_pipeline(
     .expect("metadata sink");
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
-    let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
 
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
 
@@ -81,7 +81,7 @@ fn run_pipeline(
 #[test]
 #[ignore = "stress test"]
 fn stress_large_image_scan() {
-    let size = env_u64("FASTCARVE_STRESS_BYTES", 64 * 1024 * 1024);
+    let size = env_u64("SWIFTBEAVER_STRESS_BYTES", 64 * 1024 * 1024);
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let input_path = temp_dir.path().join("large.bin");
     let file = File::create(&input_path).expect("create");
@@ -101,8 +101,8 @@ fn stress_large_image_scan() {
 #[test]
 #[ignore = "stress test"]
 fn stress_high_hit_density() {
-    let hits = env_u64("FASTCARVE_STRESS_HITS", 1_000);
-    let max_files = env_u64("FASTCARVE_STRESS_MAX_FILES", 200);
+    let hits = env_u64("SWIFTBEAVER_STRESS_HITS", 1_000);
+    let max_files = env_u64("SWIFTBEAVER_STRESS_MAX_FILES", 200);
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let input_path = temp_dir.path().join("dense.bin");
     let mut file = File::create(&input_path).expect("create");

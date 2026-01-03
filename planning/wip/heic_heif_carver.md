@@ -10,7 +10,7 @@
 
 HEIC (High Efficiency Image Container) and HEIF (High Efficiency Image Format) are the default photo formats on modern iOS devices (iPhone 7+, iOS 11+) and increasingly on Android. When analyzing mobile device images or cloud backups, HEIC/HEIF files are extremely common.
 
-Currently, `fastcarve` cannot carve these files, leaving a significant gap in mobile forensics capabilities.
+Currently, `SwiftBeaver` cannot carve these files, leaving a significant gap in mobile forensics capabilities.
 
 ---
 

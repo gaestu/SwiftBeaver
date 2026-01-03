@@ -1,6 +1,6 @@
 //! # Error Module
 //!
-//! Unified error handling for the fastcarve crate.
+//! Unified error handling for the SwiftBeaver crate.
 //! Provides a central error type that wraps domain-specific errors.
 
 use thiserror::Error;
@@ -9,9 +9,9 @@ use crate::carve::CarveError;
 use crate::evidence::EvidenceError;
 use crate::metadata::MetadataError;
 
-/// Central error type for fastcarve operations.
+/// Central error type for SwiftBeaver operations.
 #[derive(Debug, Error)]
-pub enum FastCarveError {
+pub enum SwiftBeaverError {
     /// Error during file carving operations
     #[error("carve error: {0}")]
     Carve(#[from] CarveError),
@@ -45,7 +45,7 @@ pub enum FastCarveError {
     Other(String),
 }
 
-impl FastCarveError {
+impl SwiftBeaverError {
     /// Create a lock poisoned error with context
     pub fn lock_poisoned(context: &str) -> Self {
         Self::LockPoisoned(context.to_string())
@@ -62,17 +62,17 @@ impl FastCarveError {
     }
 }
 
-/// Result type alias using FastCarveError
-pub type Result<T> = std::result::Result<T, FastCarveError>;
+/// Result type alias using SwiftBeaverError
+pub type Result<T> = std::result::Result<T, SwiftBeaverError>;
 
-/// Extension trait for converting PoisonError to FastCarveError
+/// Extension trait for converting PoisonError to SwiftBeaverError
 pub trait LockResultExt<T> {
-    /// Convert a lock result to FastCarveError
-    fn map_lock_err(self, context: &str) -> std::result::Result<T, FastCarveError>;
+    /// Convert a lock result to SwiftBeaverError
+    fn map_lock_err(self, context: &str) -> std::result::Result<T, SwiftBeaverError>;
 }
 
 impl<T, G> LockResultExt<T> for std::result::Result<T, std::sync::PoisonError<G>> {
-    fn map_lock_err(self, context: &str) -> std::result::Result<T, FastCarveError> {
-        self.map_err(|_| FastCarveError::lock_poisoned(context))
+    fn map_lock_err(self, context: &str) -> std::result::Result<T, SwiftBeaverError> {
+        self.map_err(|_| SwiftBeaverError::lock_poisoned(context))
     }
 }

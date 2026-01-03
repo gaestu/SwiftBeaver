@@ -11,7 +11,7 @@ Implemented in version: 0.2.1
 
 ## Problem Statement
 
-The golden image contains audio files (MP3, WAV, OGG) that are currently not carved by fastcarve. These formats are commonly encountered in forensic investigations and should be supported.
+The golden image contains audio files (MP3, WAV, OGG) that are currently not carved by SwiftBeaver. These formats are commonly encountered in forensic investigations and should be supported.
 
 ## Scope
 

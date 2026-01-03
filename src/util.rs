@@ -1,6 +1,6 @@
 //! # Utility Module
 //!
-//! Utility functions for the fastcarve crate, including file type filtering
+//! Utility functions for the SwiftBeaver crate, including file type filtering
 //! and carve registry building.
 
 use std::collections::HashMap;
@@ -40,7 +40,7 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
     }
     let metadata = std::fs::metadata(path)?;
 
-    let probe_path = path.join(".fastcarve_write_probe");
+    let probe_path = path.join(".swiftbeaver_write_probe");
     match OpenOptions::new()
         .write(true)
         .create(true)

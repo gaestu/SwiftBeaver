@@ -48,7 +48,7 @@ use crate::scanner::NormalizedHit;
 ///
 /// # Example
 /// ```rust
-/// use fastcarve::carve::CarvedFile;
+/// use swiftbeaver::carve::CarvedFile;
 ///
 /// let file = CarvedFile {
 ///     run_id: "example_run".to_string(),

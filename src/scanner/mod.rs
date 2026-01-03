@@ -25,9 +25,9 @@ pub struct NormalizedHit {
 ///
 /// # Example
 /// ```rust
-/// use fastcarve::chunk::ScanChunk;
-/// use fastcarve::config;
-/// use fastcarve::scanner::{build_signature_scanner, SignatureScanner};
+/// use swiftbeaver::chunk::ScanChunk;
+/// use swiftbeaver::config;
+/// use swiftbeaver::scanner::{build_signature_scanner, SignatureScanner};
 ///
 /// let loaded = config::load_config(None).unwrap();
 /// let scanner = build_signature_scanner(&loaded.config, false).unwrap();

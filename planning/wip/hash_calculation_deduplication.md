@@ -8,7 +8,7 @@
 
 ## Problem Statement
 
-Currently, `fastcarve` extracts files from evidence images but does not compute cryptographic hashes for carved files. Forensic workflows require:
+Currently, `SwiftBeaver` extracts files from evidence images but does not compute cryptographic hashes for carved files. Forensic workflows require:
 
 1. **Integrity verification** — Hashes prove a carved file hasn't been modified post-extraction.
 2. **Deduplication** — Large images often contain duplicate files; identifying them saves analysis time.

@@ -5,7 +5,7 @@ Implemented in version: 0.2.0
 
 ## Problem Statement
 
-fastcarve is functionally complete but lacks production-grade infrastructure for CI/CD, robustness, and operational reliability. This document tracks the remaining work to make the tool production-ready.
+SwiftBeaver is functionally complete but lacks production-grade infrastructure for CI/CD, robustness, and operational reliability. This document tracks the remaining work to make the tool production-ready.
 
 ## Scope
 

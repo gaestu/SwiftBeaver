@@ -537,7 +537,7 @@ This keeps the rest of the system pure Rust and simple.
 ### 7.1 Directory Layout
 
 ```text
-fastcarve/
+SwiftBeaver/
 ├─ Cargo.toml
 ├─ README.md
 ├─ LICENSE
@@ -587,7 +587,7 @@ fastcarve/
 
 ```toml
 [package]
-name = "fastcarve"
+name = "SwiftBeaver"
 version = "0.1.0"
 edition = "2021"
 authors = ["<your name>"]
@@ -642,7 +642,7 @@ fn main() -> Result<()> {
     let cli_opts = cli::parse();
     let cfg = config::load_config(cli_opts.config_path.as_deref())?;
 
-    info!("Starting fastcarve run_id={} input={}",
+    info!("Starting SwiftBeaver run_id={} input={}",
         cfg.run_id,
         cli_opts.input.display()
     );
@@ -666,7 +666,7 @@ fn main() -> Result<()> {
     // 4. Run pipeline (reader + workers)
     util::run_pipeline(&cfg, &*evidence, sig_scanner, string_scanner, meta_sink)?;
 
-    info!("fastcarve run finished");
+    info!("SwiftBeaver run finished");
     Ok(())
 }
 ```

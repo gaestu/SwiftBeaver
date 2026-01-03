@@ -1,6 +1,6 @@
 # Architecture
 
-fastcarve currently includes SQLite carving, string scanning, browser history extraction,
+SwiftBeaver currently includes SQLite carving, string scanning, browser history extraction,
 PDF/ZIP/WEBP carving (with ZIP classification for docx/xlsx/pptx/odt/ods/odp/epub),
 BMP/TIFF/MP4/MOV/RAR/7z carving, WAV/AVI/OGG audio-video carving,
 MP3 audio carving with ID3v2 support, TAR/GZIP/BZIP2/XZ archive carving,

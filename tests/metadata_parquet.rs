@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 use parquet::file::reader::{FileReader, SerializedFileReader};
 
-use fastcarve::carve::CarvedFile;
-use fastcarve::config;
-use fastcarve::metadata::{self, EntropyRegion, MetadataBackendKind, RunSummary};
-use fastcarve::parsers::browser::{
+use swiftbeaver::carve::CarvedFile;
+use swiftbeaver::config;
+use swiftbeaver::metadata::{self, EntropyRegion, MetadataBackendKind, RunSummary};
+use swiftbeaver::parsers::browser::{
     BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord,
 };
-use fastcarve::strings::artifacts::{ArtefactKind, StringArtefact};
+use swiftbeaver::strings::artifacts::{ArtefactKind, StringArtefact};
 
 #[test]
 fn parquet_writes_expected_files() {

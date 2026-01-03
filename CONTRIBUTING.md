@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to fastcarve. This guide covers local setup, tests, and style.
+Thanks for contributing to SwiftBeaver. This guide covers local setup, tests, and style.
 
 ## Requirements
 
@@ -42,8 +42,8 @@ Stress tests (ignored by default):
 
 ```bash
 cargo test stress_ -- --ignored
-FASTCARVE_STRESS_BYTES=1073741824 cargo test stress_large_image_scan -- --ignored
-FASTCARVE_STRESS_HITS=5000 FASTCARVE_STRESS_MAX_FILES=1000 cargo test stress_high_hit_density -- --ignored
+SWIFTBEAVER_STRESS_BYTES=1073741824 cargo test stress_large_image_scan -- --ignored
+SWIFTBEAVER_STRESS_HITS=5000 SWIFTBEAVER_STRESS_MAX_FILES=1000 cargo test stress_high_hit_density -- --ignored
 ```
 
 GPU build verification (no GPU required):

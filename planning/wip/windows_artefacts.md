@@ -8,7 +8,7 @@
 
 ## Problem Statement
 
-Windows systems contain numerous forensic artefacts that provide critical evidence about system activity, user behavior, and program execution. Currently, `fastcarve` focuses on generic file types but lacks support for Windows-specific artefacts that are essential for incident response and forensic investigations.
+Windows systems contain numerous forensic artefacts that provide critical evidence about system activity, user behavior, and program execution. Currently, `SwiftBeaver` focuses on generic file types but lacks support for Windows-specific artefacts that are essential for incident response and forensic investigations.
 
 Key Windows artefacts include:
 - **LNK files** — Shortcut files that reveal accessed files, network paths, and timestamps

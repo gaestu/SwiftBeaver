@@ -377,9 +377,9 @@ mod tests {
         msg.contains("CUDA_ERROR_NO_DEVICE") || msg.contains("no CUDA-capable device")
     }
 
-    /// Check if tests should fail on any CUDA error (set FASTCARVE_REQUIRE_CUDA=1)
+    /// Check if tests should fail on any CUDA error (set SWIFTBEAVER_REQUIRE_CUDA=1)
     fn require_cuda() -> bool {
-        std::env::var("FASTCARVE_REQUIRE_CUDA")
+        std::env::var("SWIFTBEAVER_REQUIRE_CUDA")
             .map(|v| v == "1")
             .unwrap_or(false)
     }

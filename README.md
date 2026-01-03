@@ -1,4 +1,4 @@
-# fastcarve
+# SwiftBeaver
 
 High-speed, forensic-grade file and artefact carver (Phase 2: CPU-only core with SQLite, strings, and expanded file types).
 
@@ -159,7 +159,7 @@ cargo test --features gpu-cuda   # with CUDA backend
 CUDA tests skip automatically on machines without a CUDA device. To force CUDA tests to fail on any error (useful for CI on CUDA-capable hosts):
 
 ```bash
-FASTCARVE_REQUIRE_CUDA=1 cargo test --features gpu-cuda
+SWIFTBEAVER_REQUIRE_CUDA=1 cargo test --features gpu-cuda
 ```
 
 ### Golden Image Tests

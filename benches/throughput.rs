@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
-use fastcarve::config;
-use fastcarve::evidence::RawFileSource;
-use fastcarve::metadata::{self, MetadataBackendKind};
-use fastcarve::pipeline;
-use fastcarve::scanner;
-use fastcarve::util;
+use swiftbeaver::config;
+use swiftbeaver::evidence::RawFileSource;
+use swiftbeaver::metadata::{self, MetadataBackendKind};
+use swiftbeaver::pipeline;
+use swiftbeaver::scanner;
+use swiftbeaver::util;
 
 fn minimal_jpeg() -> Vec<u8> {
     let mut jpeg = vec![0u8; 32];
@@ -27,7 +27,7 @@ fn run_pipeline(input_path: &std::path::Path, max_files: Option<u64>) -> pipelin
     cfg.max_files = max_files;
 
     let evidence = RawFileSource::open(input_path).expect("evidence");
-    let evidence: Arc<dyn fastcarve::evidence::EvidenceSource> = Arc::new(evidence);
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
 
     let run_output_dir = temp_dir.path().join("run");
     std::fs::create_dir_all(&run_output_dir).expect("output dir");
@@ -45,7 +45,7 @@ fn run_pipeline(input_path: &std::path::Path, max_files: Option<u64>) -> pipelin
     .expect("metadata sink");
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
-    let sig_scanner: Arc<dyn fastcarve::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
 
     let carve_registry = Arc::new(util::build_carve_registry(&cfg).expect("registry"));
 
