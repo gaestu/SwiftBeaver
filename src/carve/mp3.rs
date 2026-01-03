@@ -49,6 +49,10 @@ const SAMPLES_PER_FRAME: [[u32; 4]; 4] = [
     [0, 1152, 1152, 384], // MPEG 1
 ];
 
+/// Minimum number of consecutive valid frames required for sync-word based detection.
+/// This helps reduce false positives from random 0xFFFB/0xFFFA bytes.
+const MIN_FRAMES_FOR_SYNC_VALIDATION: u32 = 3;
+
 pub struct Mp3CarveHandler {
     extension: String,
     min_size: u64,
@@ -199,6 +203,8 @@ impl CarveHandler for Mp3CarveHandler {
         let mut validated = false;
         let mut truncated = false;
         let mut errors = Vec::new();
+        // Track if we started with ID3 tag (more reliable) vs sync word (needs more validation)
+        let mut started_with_id3 = false;
 
         let result: Result<u64, CarveError> = (|| {
             // Read initial header to check for ID3v2
@@ -214,6 +220,7 @@ impl CarveHandler for Mp3CarveHandler {
                     stream.read_exact(remaining_id3 as usize)?;
                 }
                 audio_start = id3_size;
+                started_with_id3 = true;
             } else {
                 // No ID3v2, check if this starts with audio frame
                 if header[0] != 0xFF || (header[1] & 0xE0) != 0xE0 {
@@ -277,7 +284,13 @@ impl CarveHandler for Mp3CarveHandler {
                 }
             }
 
-            if frame_count > 0 || audio_start > 0 {
+            // Validation requirements:
+            // - ID3v2 tag: valid even with 0 frames (metadata-only is rare but possible)
+            // - Sync word only: require MIN_FRAMES_FOR_SYNC_VALIDATION consecutive valid frames
+            //   to avoid false positives from random 0xFFFB/0xFFFA occurrences
+            if started_with_id3 {
+                validated = true;
+            } else if frame_count >= MIN_FRAMES_FOR_SYNC_VALIDATION {
                 validated = true;
             }
 
@@ -296,6 +309,12 @@ impl CarveHandler for Mp3CarveHandler {
                 }
                 other => return Err(other),
             }
+        }
+
+        // If not validated (e.g., sync word with fewer than MIN_FRAMES), reject
+        if !validated && !truncated {
+            let _ = std::fs::remove_file(&full_path);
+            return Ok(None);
         }
 
         let (size, md5_hex, sha256_hex) = stream.finish()?;
@@ -497,5 +516,67 @@ mod tests {
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn rejects_sync_word_with_too_few_frames() {
+        // Create only 1-2 valid frames - should be rejected for sync-word based detection
+        let mut mp3_data = Vec::new();
+        mp3_data.extend_from_slice(&create_mp3_frame(9, 0, false)); // Just 1 frame
+        mp3_data.extend_from_slice(&[0x00; 100]); // Garbage after
+
+        let evidence = SliceEvidence {
+            data: mp3_data.clone(),
+        };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "mp3".to_string(),
+            pattern_id: "mp3_sync".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(
+            result.is_none(),
+            "Should reject sync-word hit with only 1 valid frame"
+        );
+    }
+
+    #[test]
+    fn accepts_sync_word_with_enough_frames() {
+        // Create exactly MIN_FRAMES_FOR_SYNC_VALIDATION frames
+        let mut mp3_data = Vec::new();
+        for _ in 0..MIN_FRAMES_FOR_SYNC_VALIDATION {
+            mp3_data.extend_from_slice(&create_mp3_frame(9, 0, false));
+        }
+
+        let evidence = SliceEvidence {
+            data: mp3_data.clone(),
+        };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "mp3".to_string(),
+            pattern_id: "mp3_sync".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(
+            result.is_some(),
+            "Should accept sync-word hit with {} valid frames",
+            MIN_FRAMES_FOR_SYNC_VALIDATION
+        );
     }
 }
