@@ -33,6 +33,13 @@ fn run_pipeline_with_bytes(
     cfg.run_id = "boundary_test".to_string();
     cfg.max_files = max_files;
 
+    // Override min_size for image formats to allow smaller test files
+    for ft in cfg.file_types.iter_mut() {
+        if ft.id == "gif" || ft.id == "jpeg" || ft.id == "png" || ft.id == "bmp" {
+            ft.min_size = 16;
+        }
+    }
+
     let evidence = RawFileSource::open(&input_path).expect("evidence");
     let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
 

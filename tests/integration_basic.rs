@@ -250,6 +250,13 @@ fn integration_carves_basic_formats() {
     let mut cfg = loaded.config;
     cfg.run_id = "test_run".to_string();
 
+    // Override min_size for image formats to allow smaller test files
+    for ft in cfg.file_types.iter_mut() {
+        if ft.id == "jpeg" || ft.id == "gif" || ft.id == "png" || ft.id == "bmp" {
+            ft.min_size = 16;
+        }
+    }
+
     let evidence = RawFileSource::open(&input_path).expect("evidence");
     let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
 

@@ -290,10 +290,11 @@ impl StringScanner for OpenClStringScanner {
         let mut count = count[0] as usize;
         if count > span_capacity {
             warn!(
-                "opencl span overflow: count={} max={}",
+                "opencl span overflow: count={} max={}; falling back to cpu for accurate results",
                 count, span_capacity
             );
-            count = span_capacity;
+            // Fall back to CPU scanner to capture all spans accurately
+            return self.cpu_fallback.scan_chunk(chunk, data);
         }
 
         let mut starts = vec![0u32; span_capacity];

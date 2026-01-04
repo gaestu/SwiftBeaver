@@ -200,8 +200,10 @@ pub mod artifacts {
         if digits.is_empty() {
             return false;
         }
-        let first = digits[0];
-        if digits.iter().all(|d| *d == first) {
+        // Require at least 4 unique digits to filter low-entropy false positives
+        // (e.g., "7676766773" has only 3 unique digits: 7, 6, 3)
+        let unique: std::collections::HashSet<_> = digits.iter().collect();
+        if unique.len() < 4 {
             return false;
         }
         true

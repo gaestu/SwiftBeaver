@@ -53,6 +53,13 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
     let mut cfg = loaded.config;
     cfg.run_id = "checkpoint_test".to_string();
 
+    // Override min_size for image formats to allow smaller test files
+    for ft in cfg.file_types.iter_mut() {
+        if ft.id == "jpeg" || ft.id == "gif" || ft.id == "png" || ft.id == "bmp" {
+            ft.min_size = 16;
+        }
+    }
+
     let checkpoint_path = temp_dir.path().join("checkpoint.json");
 
     let evidence = RawFileSource::open(&input_path).expect("evidence");

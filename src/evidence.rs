@@ -544,6 +544,10 @@ mod tests {
             compute_evidence_sha256: false,
             disable_zip: false,
             types: None,
+            enable_types: None,
+            dry_run: false,
+            validate_carved: false,
+            remove_invalid: false,
         };
 
         let result = super::open_source(&opts);

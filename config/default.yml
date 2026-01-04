@@ -30,7 +30,7 @@ file_types:
         hex: "FFD8FF"
     footer_patterns: []
     max_size: 104857600
-    min_size: 16
+    min_size: 500
     validator: "jpeg"
   - id: "png"
     extensions: ["png"]
@@ -39,7 +39,7 @@ file_types:
         hex: "89504E470D0A1A0A"
     footer_patterns: []
     max_size: 104857600
-    min_size: 16
+    min_size: 100
     validator: "png"
   - id: "gif"
     extensions: ["gif"]
@@ -50,7 +50,7 @@ file_types:
         hex: "474946383961"
     footer_patterns: []
     max_size: 104857600
-    min_size: 16
+    min_size: 100
     validator: "gif"
   - id: "sqlite"
     extensions: ["sqlite"]
@@ -96,7 +96,7 @@ file_types:
         hex: "424D"
     footer_patterns: []
     max_size: 104857600
-    min_size: 54
+    min_size: 200
     validator: "bmp"
   - id: "tiff"
     extensions: ["tiff", "tif"]
