@@ -33,7 +33,7 @@ const BITRATES_V2_L3: [u16; 16] = [
     0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
 ];
 
-/// Sample rate table [version][index] in Hz
+/// Sample rate table `[version][index]` in Hz
 const SAMPLE_RATES: [[u32; 4]; 4] = [
     [11025, 12000, 8000, 0],  // MPEG 2.5
     [0, 0, 0, 0],             // Reserved
@@ -41,7 +41,7 @@ const SAMPLE_RATES: [[u32; 4]; 4] = [
     [44100, 48000, 32000, 0], // MPEG 1
 ];
 
-/// Samples per frame [version][layer]
+/// Samples per frame `[version][layer]`
 const SAMPLES_PER_FRAME: [[u32; 4]; 4] = [
     [0, 576, 1152, 384],  // MPEG 2.5
     [0, 0, 0, 0],         // Reserved

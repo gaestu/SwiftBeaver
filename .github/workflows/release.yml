@@ -47,10 +47,18 @@ jobs:
       - name: Install CUDA dependencies
         if: matrix.variant.name == 'cuda'
         uses: Jimver/cuda-toolkit@v0.2.19
+        id: cuda-toolkit
         with:
           cuda: '12.4.0'
           method: 'network'
           sub-packages: '["nvcc", "cudart"]'
+
+      - name: Set CUDA environment
+        if: matrix.variant.name == 'cuda'
+        run: |
+          echo "CUDA_PATH=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> $GITHUB_ENV
+          echo "CUDA_ROOT=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> $GITHUB_ENV
+          echo "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}/bin" >> $GITHUB_PATH
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
