@@ -16,8 +16,9 @@ env:
 jobs:
   build-linux:
     name: Build Linux Binaries
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.variant.name == 'cuda' && 'ubuntu-22.04' || 'ubuntu-latest' }}
     strategy:
+      fail-fast: false
       matrix:
         variant:
           - name: cpu
@@ -45,7 +46,7 @@ jobs:
 
       - name: Install CUDA dependencies
         if: matrix.variant.name == 'cuda'
-        uses: Jimver/cuda-toolkit@v0.2.16
+        uses: Jimver/cuda-toolkit@v0.2.19
         with:
           cuda: '12.4.0'
           method: 'network'
