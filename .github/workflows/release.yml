@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -12,9 +14,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build Release Artifact
+  build-linux:
+    name: Build Linux Binaries
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant:
+          - name: cpu
+            features: ""
+            suffix: "cpu-only"
+          - name: opencl
+            features: "--features gpu-opencl"
+            suffix: "opencl"
+          - name: cuda
+            features: "--features gpu-cuda"
+            suffix: "cuda"
+    
     steps:
       - uses: actions/checkout@v4
 
@@ -23,21 +38,166 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libewf-dev
 
+      - name: Install OpenCL dependencies
+        if: matrix.variant.name == 'opencl'
+        run: |
+          sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+
+      - name: Install CUDA dependencies
+        if: matrix.variant.name == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.16
+        with:
+          cuda: '12.4.0'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart"]'
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release ${{ matrix.variant.features }}
+
+      - name: Strip binary
+        run: strip target/release/swiftbeaver
 
       - name: Package artifact
         run: |
           mkdir -p dist
-          tar -czf dist/fastcarve-linux-x86_64.tar.gz -C target/release fastcarve
+          cp target/release/swiftbeaver dist/swiftbeaver
+          tar -czf dist/swiftbeaver-linux-x86_64-${{ matrix.variant.suffix }}.tar.gz -C dist swiftbeaver
+          rm dist/swiftbeaver
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiftbeaver-linux-${{ matrix.variant.suffix }}
+          path: dist/swiftbeaver-linux-x86_64-${{ matrix.variant.suffix }}.tar.gz
+
+  create-release:
+    name: Create Release
+    needs: build-linux
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/fastcarve-linux-x86_64.tar.gz
+          files: |
+            release/*.tar.gz
+            release/SHA256SUMS
+          body: |
+            ## SwiftBeaver Release ${{ github.ref_name }}
+            
+            ### Available Builds
+            
+            - **swiftbeaver-linux-x86_64-cpu-only.tar.gz** - CPU-only build, no GPU support
+              - Works on any Linux system
+              - No GPU dependencies required
+              - Best for compatibility
+            
+            - **swiftbeaver-linux-x86_64-opencl.tar.gz** - OpenCL GPU support
+              - Supports NVIDIA, AMD, and Intel GPUs
+              - Requires OpenCL runtime (install `ocl-icd-opencl-dev`)
+              - Use with `--gpu` flag
+            
+            - **swiftbeaver-linux-x86_64-cuda.tar.gz** - CUDA GPU support
+              - NVIDIA GPUs only
+              - Requires CUDA runtime (version 12.x)
+              - Best performance on NVIDIA hardware
+              - Use with `--gpu` flag
+            
+            ### Installation
+            
+            ```bash
+            # Download and extract (choose your variant)
+            tar -xzf swiftbeaver-linux-x86_64-<variant>.tar.gz
+            
+            # Move to PATH
+            sudo mv swiftbeaver /usr/local/bin/
+            
+            # Verify installation
+            swiftbeaver --version
+            ```
+            
+            ### Verify Checksums
+            
+            ```bash
+            sha256sum -c SHA256SUMS
+            ```
+            
+            See [documentation](https://github.com/${{ github.repository }}/tree/main/docs) for full usage instructions.
+
+  build-latest:
+    name: Build Latest Binaries (Main Branch)
+    needs: build-linux
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p latest
+          find artifacts -name "*.tar.gz" -exec cp {} latest/ \;
+          ls -lh latest/
+
+      - name: Generate checksums
+        run: |
+          cd latest
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Update latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build (main branch)
+          prerelease: true
+          files: |
+            latest/*.tar.gz
+            latest/SHA256SUMS
+          body: |
+            ## Latest Development Build
+            
+            **⚠️ Development builds from main branch - may be unstable**
+            
+            Auto-generated from latest commit on main branch.
+            
+            Commit: ${{ github.sha }}
+            
+            ### Available Builds
+            
+            - **swiftbeaver-linux-x86_64-cpu-only.tar.gz** - CPU-only
+            - **swiftbeaver-linux-x86_64-opencl.tar.gz** - OpenCL GPU
+            - **swiftbeaver-linux-x86_64-cuda.tar.gz** - CUDA GPU
+            
+            See release notes for variant details and installation instructions.
 

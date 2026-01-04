@@ -2,6 +2,76 @@
 
 This guide will help you install, configure, and run your first forensic file carving scan with SwiftBeaver.
 
+## Installation
+
+### Option 1: Download Pre-Built Binaries (Recommended)
+
+Download the latest release from [GitHub Releases](https://github.com/gaestu/SwiftBeaver/releases).
+
+**Three variants are available:**
+
+1. **CPU-only** (`swiftbeaver-linux-x86_64-cpu-only.tar.gz`)
+   - No GPU support
+   - Works on any Linux system
+   - No additional dependencies
+
+2. **OpenCL** (`swiftbeaver-linux-x86_64-opencl.tar.gz`)
+   - GPU support for NVIDIA, AMD, Intel
+   - Requires OpenCL runtime
+   - Use with `--gpu` flag
+
+3. **CUDA** (`swiftbeaver-linux-x86_64-cuda.tar.gz`)
+   - NVIDIA GPUs only
+   - Requires CUDA runtime (12.x)
+   - Best performance on NVIDIA hardware
+
+**Installation steps:**
+
+```bash
+# Download your chosen variant
+wget https://github.com/gaestu/SwiftBeaver/releases/latest/download/swiftbeaver-linux-x86_64-opencl.tar.gz
+
+# Verify checksum (optional but recommended)
+wget https://github.com/gaestu/SwiftBeaver/releases/latest/download/SHA256SUMS
+sha256sum -c SHA256SUMS 2>&1 | grep OK
+
+# Extract
+tar -xzf swiftbeaver-linux-x86_64-opencl.tar.gz
+
+# Install to system PATH
+sudo mv swiftbeaver /usr/local/bin/
+
+# Verify installation
+swiftbeaver --version
+```
+
+**For OpenCL variant, install runtime dependencies:**
+
+```bash
+# Fedora/RHEL
+sudo dnf install ocl-icd
+
+# Ubuntu/Debian
+sudo apt-get install ocl-icd-opencl-dev
+
+# Verify GPU detection
+clinfo
+```
+
+**For CUDA variant, install CUDA runtime:**
+
+```bash
+# Follow NVIDIA instructions for your distribution
+# https://developer.nvidia.com/cuda-downloads
+
+# Verify CUDA
+nvidia-smi
+```
+
+### Option 2: Build from Source
+
+For development or custom configurations:
+
 ## Prerequisites
 
 ### System Requirements
