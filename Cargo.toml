@@ -4,7 +4,7 @@ version = "0.3.0"
 edition = "2024"
 authors = ["gaestu"]
 description = "High-speed forensic file and artefact carver with optional GPU acceleration."
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1"

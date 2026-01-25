@@ -198,4 +198,6 @@ cargo test golden --features ewf
 
 ## License
 
-MIT (see `LICENSE`).
+Apache-2.0 (see [LICENSE](LICENSE)).
+
+Third-party licenses and notices: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
