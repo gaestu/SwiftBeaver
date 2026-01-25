@@ -443,5 +443,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 - **[README.md](../README.md)** - Project overview
 - **[CHANGELOG.md](../CHANGELOG.md)** - Version history
-- **[LICENSE](../LICENSE)** - MIT License
+- **[LICENSE](../LICENSE)** - Apache License 2.0
 - **[CONTRIBUTING.md](../CONTRIBUTING.md)** - Contribution guidelines
