@@ -82,7 +82,7 @@ CLI overrides:
 - `--scan-sqlite-pages`: enable SQLite page-level URL recovery for damaged DBs
 - `--max-bytes`: stop after scanning this many bytes
 - `--max-chunks`: stop after scanning this many chunks
-- `--max-files`: stop after carving this many files
+- `--max-files`: strict cap on carved files; pipeline stops once the limit is reached
 - `--max-memory-mib`: limit address space in MiB (Unix only)
 - `--max-open-files`: limit max open file descriptors (Unix only)
 - `--evidence-sha256`: record a known evidence SHA-256

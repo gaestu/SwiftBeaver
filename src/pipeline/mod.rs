@@ -4,6 +4,7 @@
 //! This module handles multi-threaded processing of evidence sources.
 
 pub mod events;
+mod limiter;
 pub mod workers;
 
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ use tracing::{info, warn};
 
 use crate::carve::CarveRegistry;
 use crate::checkpoint::{CheckpointState, save_checkpoint};
-use crate::chunk::{ScanChunk, build_chunks};
+use crate::chunk::{ChunkIter, ScanChunk, chunk_count};
 use crate::config::Config;
 use crate::constants::{CHANNEL_CAPACITY_MULTIPLIER, MIN_CHANNEL_CAPACITY};
 use crate::evidence::EvidenceSource;
@@ -27,6 +28,7 @@ use crate::strings::StringScanner;
 use crate::strings::artifacts::ArtefactScanConfig;
 
 use events::MetadataEvent;
+use limiter::CarveLimiter;
 use workers::{ScanJob, StringJob};
 
 /// Configuration for entropy detection during scanning
@@ -165,6 +167,596 @@ pub fn run_pipeline_with_cancel(
     )
 }
 
+struct PipelineChannels {
+    scan_tx: crossbeam_channel::Sender<ScanJob>,
+    scan_rx: crossbeam_channel::Receiver<ScanJob>,
+    hit_tx: crossbeam_channel::Sender<crate::scanner::NormalizedHit>,
+    hit_rx: crossbeam_channel::Receiver<crate::scanner::NormalizedHit>,
+    meta_tx: crossbeam_channel::Sender<MetadataEvent>,
+    meta_rx: crossbeam_channel::Receiver<MetadataEvent>,
+    string_tx: Option<crossbeam_channel::Sender<StringJob>>,
+    string_rx: Option<crossbeam_channel::Receiver<StringJob>>,
+    sqlite_tx: Option<crossbeam_channel::Sender<workers::SqliteJob>>,
+    sqlite_rx: Option<crossbeam_channel::Receiver<workers::SqliteJob>>,
+}
+
+struct PipelineCounters {
+    bytes_scanned: Arc<AtomicU64>,
+    chunks_processed: Arc<AtomicU64>,
+    hits_found: Arc<AtomicU64>,
+    string_spans: Arc<AtomicU64>,
+    artefacts_found: Arc<AtomicU64>,
+    carve_errors: Arc<AtomicU64>,
+    metadata_errors: Arc<AtomicU64>,
+    sqlite_errors: Arc<AtomicU64>,
+    carve_limiter: Arc<CarveLimiter>,
+}
+
+impl PipelineCounters {
+    fn new(max_files: Option<u64>) -> Self {
+        Self {
+            bytes_scanned: Arc::new(AtomicU64::new(0)),
+            chunks_processed: Arc::new(AtomicU64::new(0)),
+            hits_found: Arc::new(AtomicU64::new(0)),
+            string_spans: Arc::new(AtomicU64::new(0)),
+            artefacts_found: Arc::new(AtomicU64::new(0)),
+            carve_errors: Arc::new(AtomicU64::new(0)),
+            metadata_errors: Arc::new(AtomicU64::new(0)),
+            sqlite_errors: Arc::new(AtomicU64::new(0)),
+            carve_limiter: Arc::new(CarveLimiter::new(max_files)),
+        }
+    }
+}
+
+struct WorkerHandles {
+    meta_handle: std::thread::JoinHandle<()>,
+    scan_handles: Vec<std::thread::JoinHandle<()>>,
+    carve_handles: Vec<std::thread::JoinHandle<()>>,
+    string_handles: Vec<std::thread::JoinHandle<()>>,
+    sqlite_handles: Vec<std::thread::JoinHandle<()>>,
+}
+
+struct ScanOutcome {
+    hit_max_bytes: bool,
+    hit_max_chunks: bool,
+    hit_max_files: bool,
+    cancelled: bool,
+    start_time: Instant,
+    next_offset: u64,
+}
+
+struct PipelineRunner<'a> {
+    cfg: &'a Config,
+    evidence: Arc<dyn EvidenceSource>,
+    sig_scanner: Arc<dyn SignatureScanner>,
+    string_scanner: Option<Arc<dyn StringScanner>>,
+    meta_sink: Option<Box<dyn MetadataSink>>,
+    run_output_dir: PathBuf,
+    workers: usize,
+    chunk_size: u64,
+    overlap: u64,
+    max_bytes: Option<u64>,
+    max_chunks: Option<u64>,
+    carve_registry: Arc<CarveRegistry>,
+    cancel_flag: Option<Arc<AtomicBool>>,
+    progress: Option<ProgressConfig>,
+    checkpoint: Option<CheckpointConfig>,
+}
+
+impl<'a> PipelineRunner<'a> {
+    fn new(
+        cfg: &'a Config,
+        evidence: Arc<dyn EvidenceSource>,
+        sig_scanner: Arc<dyn SignatureScanner>,
+        string_scanner: Option<Arc<dyn StringScanner>>,
+        meta_sink: Box<dyn MetadataSink>,
+        run_output_dir: &Path,
+        workers: usize,
+        chunk_size: u64,
+        overlap: u64,
+        max_bytes: Option<u64>,
+        max_chunks: Option<u64>,
+        carve_registry: Arc<CarveRegistry>,
+        cancel_flag: Option<Arc<AtomicBool>>,
+        progress: Option<ProgressConfig>,
+        checkpoint: Option<CheckpointConfig>,
+    ) -> Self {
+        Self {
+            cfg,
+            evidence,
+            sig_scanner,
+            string_scanner,
+            meta_sink: Some(meta_sink),
+            run_output_dir: run_output_dir.to_path_buf(),
+            workers,
+            chunk_size,
+            overlap,
+            max_bytes,
+            max_chunks,
+            carve_registry,
+            cancel_flag,
+            progress,
+            checkpoint,
+        }
+    }
+
+    fn run(mut self) -> Result<PipelineStats> {
+        let total_bytes = self.evidence.len();
+        let (checkpoint_path, resume_offset, resume_chunks) =
+            self.validate_checkpoint(total_bytes)?;
+        let total_chunks = chunk_count(total_bytes, self.chunk_size);
+        info!(
+            "chunk_count={} chunk_size={} overlap={}",
+            total_chunks, self.chunk_size, self.overlap
+        );
+
+        let sqlite_enabled = self.sqlite_enabled();
+        let channels = self.setup_channels(self.string_scanner.is_some(), sqlite_enabled);
+        let counters = PipelineCounters::new(self.cfg.max_files);
+
+        let meta_sink = self.meta_sink.take().expect("metadata sink already taken");
+        let entropy_cfg = self.entropy_config();
+        let handles =
+            self.spawn_workers(meta_sink, &channels, &counters, entropy_cfg, sqlite_enabled);
+
+        let outcome = self.scan_loop(
+            total_bytes,
+            resume_offset,
+            resume_chunks,
+            &channels,
+            &counters,
+        )?;
+
+        self.finalize(
+            total_bytes,
+            resume_offset,
+            resume_chunks,
+            channels,
+            handles,
+            counters,
+            outcome,
+            checkpoint_path,
+        )
+    }
+
+    fn validate_checkpoint(&self, total_bytes: u64) -> Result<(Option<PathBuf>, u64, u64)> {
+        let (resume_state, checkpoint_path) = match &self.checkpoint {
+            Some(cfg) => (cfg.resume.clone(), Some(cfg.path.clone())),
+            None => (None, None),
+        };
+
+        if let Some(state) = &resume_state {
+            if state.chunk_size != self.chunk_size {
+                return Err(anyhow::anyhow!(
+                    "checkpoint chunk_size {} does not match requested {}",
+                    state.chunk_size,
+                    self.chunk_size
+                ));
+            }
+            if state.overlap != self.overlap {
+                return Err(anyhow::anyhow!(
+                    "checkpoint overlap {} does not match requested {}",
+                    state.overlap,
+                    self.overlap
+                ));
+            }
+            if state.evidence_len != total_bytes {
+                return Err(anyhow::anyhow!(
+                    "checkpoint evidence size {} does not match evidence length {}",
+                    state.evidence_len,
+                    total_bytes
+                ));
+            }
+            if state.next_offset >= total_bytes {
+                return Err(anyhow::anyhow!(
+                    "checkpoint offset {} is beyond evidence size {}",
+                    state.next_offset,
+                    total_bytes
+                ));
+            }
+            if state.run_id != self.cfg.run_id {
+                warn!(
+                    "checkpoint run_id={} does not match config run_id={}",
+                    state.run_id, self.cfg.run_id
+                );
+            }
+        }
+
+        let resume_offset = resume_state.as_ref().map(|s| s.next_offset).unwrap_or(0);
+        let resume_chunks = if self.chunk_size > 0 {
+            resume_offset / self.chunk_size
+        } else {
+            0
+        };
+        Ok((checkpoint_path, resume_offset, resume_chunks))
+    }
+
+    fn sqlite_enabled(&self) -> bool {
+        self.cfg.file_types.iter().any(|file_type| {
+            file_type.id.eq_ignore_ascii_case("sqlite")
+                || file_type.validator.trim().eq_ignore_ascii_case("sqlite")
+        })
+    }
+
+    fn entropy_config(&self) -> Option<EntropyConfig> {
+        if self.cfg.enable_entropy_detection && self.cfg.entropy_window_size > 0 {
+            Some(EntropyConfig {
+                window_size: self.cfg.entropy_window_size,
+                threshold: self.cfg.entropy_threshold,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn setup_channels(&self, string_enabled: bool, sqlite_enabled: bool) -> PipelineChannels {
+        let channel_cap = self
+            .workers
+            .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
+            .max(MIN_CHANNEL_CAPACITY);
+        let (scan_tx, scan_rx) = bounded::<ScanJob>(channel_cap);
+        let (hit_tx, hit_rx) = bounded(channel_cap * 2);
+        let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 2);
+
+        let (string_tx, string_rx) = if string_enabled {
+            let (tx, rx) = bounded::<StringJob>(channel_cap);
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        let (sqlite_tx, sqlite_rx) = if sqlite_enabled {
+            let (tx, rx) = bounded::<workers::SqliteJob>(channel_cap);
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        PipelineChannels {
+            scan_tx,
+            scan_rx,
+            hit_tx,
+            hit_rx,
+            meta_tx,
+            meta_rx,
+            string_tx,
+            string_rx,
+            sqlite_tx,
+            sqlite_rx,
+        }
+    }
+
+    fn spawn_workers(
+        &self,
+        meta_sink: Box<dyn MetadataSink>,
+        channels: &PipelineChannels,
+        counters: &PipelineCounters,
+        entropy_cfg: Option<EntropyConfig>,
+        sqlite_enabled: bool,
+    ) -> WorkerHandles {
+        let meta_handle = workers::spawn_metadata_thread(
+            meta_sink,
+            channels.meta_rx.clone(),
+            counters.metadata_errors.clone(),
+        );
+
+        let scan_handles = workers::spawn_scan_workers(
+            self.workers,
+            self.sig_scanner.clone(),
+            self.string_scanner.clone(),
+            channels.scan_rx.clone(),
+            channels.hit_tx.clone(),
+            channels.string_tx.clone(),
+            channels.meta_tx.clone(),
+            self.cfg.run_id.clone(),
+            entropy_cfg,
+            counters.hits_found.clone(),
+            counters.string_spans.clone(),
+        );
+
+        let carve_handles = workers::spawn_carve_workers(
+            self.workers,
+            self.carve_registry.clone(),
+            self.evidence.clone(),
+            self.cfg.run_id.clone(),
+            self.run_output_dir.clone(),
+            channels.hit_rx.clone(),
+            channels.meta_tx.clone(),
+            counters.carve_limiter.clone(),
+            channels.sqlite_tx.clone(),
+            self.cfg.enable_sqlite_page_recovery,
+            counters.carve_errors.clone(),
+        );
+
+        let string_handles = if let Some(rx) = &channels.string_rx {
+            let scan_cfg = ArtefactScanConfig {
+                urls: self.cfg.enable_url_scan,
+                emails: self.cfg.enable_email_scan,
+                phones: self.cfg.enable_phone_scan,
+            };
+            workers::spawn_string_workers(
+                self.workers,
+                self.cfg.run_id.clone(),
+                rx.clone(),
+                channels.meta_tx.clone(),
+                counters.artefacts_found.clone(),
+                scan_cfg,
+            )
+        } else {
+            Vec::new()
+        };
+
+        let sqlite_handles = if sqlite_enabled {
+            if let Some(rx) = &channels.sqlite_rx {
+                workers::spawn_sqlite_workers(
+                    self.workers,
+                    rx.clone(),
+                    channels.meta_tx.clone(),
+                    counters.sqlite_errors.clone(),
+                )
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        WorkerHandles {
+            meta_handle,
+            scan_handles,
+            carve_handles,
+            string_handles,
+            sqlite_handles,
+        }
+    }
+
+    fn scan_loop(
+        &self,
+        total_bytes: u64,
+        resume_offset: u64,
+        resume_chunks: u64,
+        channels: &PipelineChannels,
+        counters: &PipelineCounters,
+    ) -> Result<ScanOutcome> {
+        let max_bytes = self.max_bytes.unwrap_or(u64::MAX);
+        let max_chunks = self.max_chunks.unwrap_or(u64::MAX);
+        let mut chunks_seen = 0u64;
+        let mut hit_max_bytes = resume_offset >= max_bytes;
+        let mut hit_max_chunks = resume_chunks >= max_chunks;
+        let mut hit_max_files = false;
+        let mut cancelled = false;
+        let start_time = Instant::now();
+        let mut last_progress = Instant::now();
+        let mut next_offset = resume_offset;
+
+        for chunk in ChunkIter::new(total_bytes, self.chunk_size, self.overlap) {
+            if hit_max_bytes || hit_max_chunks {
+                break;
+            }
+            if chunk.start < resume_offset {
+                continue;
+            }
+            if counters.carve_limiter.should_stop() {
+                hit_max_files = true;
+                break;
+            }
+            if let Some(flag) = &self.cancel_flag {
+                if flag.load(Ordering::Relaxed) {
+                    cancelled = true;
+                    break;
+                }
+            }
+            let chunks_seen_total = chunks_seen.saturating_add(resume_chunks);
+            if chunks_seen_total >= max_chunks {
+                hit_max_chunks = true;
+                break;
+            }
+            let scanned_total = counters
+                .bytes_scanned
+                .load(Ordering::Relaxed)
+                .saturating_add(resume_offset);
+            if scanned_total >= max_bytes {
+                hit_max_bytes = true;
+                break;
+            }
+            let remaining = (max_bytes - scanned_total).min(chunk.length) as usize;
+            let data = read_chunk_limited(self.evidence.as_ref(), &chunk, remaining)?;
+            if data.is_empty() {
+                break;
+            }
+            counters
+                .bytes_scanned
+                .fetch_add(data.len() as u64, Ordering::Relaxed);
+            counters.chunks_processed.fetch_add(1, Ordering::Relaxed);
+            chunks_seen += 1;
+            next_offset = chunk.start.saturating_add(self.chunk_size);
+            let chunk_id = chunk.id;
+            channels
+                .scan_tx
+                .send(ScanJob {
+                    chunk,
+                    data: Arc::new(data),
+                })
+                .with_context(|| format!("scan channel closed while sending chunk {chunk_id}"))?;
+            if let Some(progress) = &self.progress {
+                if progress.interval.is_zero() || last_progress.elapsed() >= progress.interval {
+                    let snapshot = build_progress_snapshot(
+                        total_bytes,
+                        resume_offset,
+                        &start_time,
+                        &counters.bytes_scanned,
+                        &counters.chunks_processed,
+                        &counters.hits_found,
+                        counters.carve_limiter.carved_counter(),
+                        &counters.string_spans,
+                        &counters.artefacts_found,
+                        &counters.carve_errors,
+                        &counters.metadata_errors,
+                        &counters.sqlite_errors,
+                    );
+                    progress.reporter.on_progress(&snapshot);
+                    last_progress = Instant::now();
+
+                    let _ = channels.meta_tx.send(MetadataEvent::Flush);
+                }
+            }
+            let scanned_total = counters
+                .bytes_scanned
+                .load(Ordering::Relaxed)
+                .saturating_add(resume_offset);
+            if scanned_total >= max_bytes {
+                hit_max_bytes = true;
+                break;
+            }
+        }
+
+        Ok(ScanOutcome {
+            hit_max_bytes,
+            hit_max_chunks,
+            hit_max_files,
+            cancelled,
+            start_time,
+            next_offset,
+        })
+    }
+
+    fn finalize(
+        &self,
+        total_bytes: u64,
+        resume_offset: u64,
+        resume_chunks: u64,
+        channels: PipelineChannels,
+        handles: WorkerHandles,
+        counters: PipelineCounters,
+        outcome: ScanOutcome,
+        checkpoint_path: Option<PathBuf>,
+    ) -> Result<PipelineStats> {
+        let PipelineChannels {
+            scan_tx,
+            hit_tx,
+            string_tx,
+            sqlite_tx,
+            meta_tx,
+            ..
+        } = channels;
+
+        drop(scan_tx);
+        drop(hit_tx);
+        drop(string_tx);
+        drop(sqlite_tx);
+
+        for handle in handles.scan_handles {
+            let _ = handle.join();
+        }
+        for handle in handles.carve_handles {
+            let _ = handle.join();
+        }
+        for handle in handles.string_handles {
+            let _ = handle.join();
+        }
+        for handle in handles.sqlite_handles {
+            let _ = handle.join();
+        }
+
+        let bytes_scanned_total = counters
+            .bytes_scanned
+            .load(Ordering::Relaxed)
+            .saturating_add(resume_offset);
+        let chunks_processed_total = counters
+            .chunks_processed
+            .load(Ordering::Relaxed)
+            .saturating_add(resume_chunks);
+        let summary = RunSummary {
+            run_id: self.cfg.run_id.clone(),
+            bytes_scanned: bytes_scanned_total,
+            chunks_processed: chunks_processed_total,
+            hits_found: counters.hits_found.load(Ordering::Relaxed),
+            files_carved: counters.carve_limiter.carved(),
+            string_spans: counters.string_spans.load(Ordering::Relaxed),
+            artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
+        };
+        if let Err(err) = meta_tx.send(MetadataEvent::RunSummary(summary)) {
+            warn!("metadata channel closed while sending run summary: {err}");
+        }
+
+        drop(meta_tx);
+        let _ = handles.meta_handle.join();
+
+        if let Some(progress) = &self.progress {
+            let snapshot = build_progress_snapshot(
+                total_bytes,
+                resume_offset,
+                &outcome.start_time,
+                &counters.bytes_scanned,
+                &counters.chunks_processed,
+                &counters.hits_found,
+                counters.carve_limiter.carved_counter(),
+                &counters.string_spans,
+                &counters.artefacts_found,
+                &counters.carve_errors,
+                &counters.metadata_errors,
+                &counters.sqlite_errors,
+            );
+            progress.reporter.on_progress(&snapshot);
+        }
+
+        if outcome.cancelled {
+            info!("shutdown requested; stopping early");
+        }
+        if outcome.hit_max_files {
+            info!("max_files limit reached; stopping early");
+        }
+        if outcome.hit_max_bytes {
+            info!("max_bytes limit reached; stopping early");
+        }
+        if outcome.hit_max_chunks {
+            info!("max_chunks limit reached; stopping early");
+        }
+
+        let stats = PipelineStats {
+            bytes_scanned: bytes_scanned_total,
+            chunks_processed: chunks_processed_total,
+            hits_found: counters.hits_found.load(Ordering::Relaxed),
+            files_carved: counters.carve_limiter.carved(),
+            string_spans: counters.string_spans.load(Ordering::Relaxed),
+            artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
+        };
+
+        info!(
+            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} string_spans={} artefacts_extracted={}",
+            stats.bytes_scanned,
+            stats.chunks_processed,
+            stats.hits_found,
+            stats.files_carved,
+            stats.string_spans,
+            stats.artefacts_extracted
+        );
+
+        if outcome.cancelled
+            || outcome.hit_max_bytes
+            || outcome.hit_max_chunks
+            || outcome.hit_max_files
+        {
+            if let Some(path) = checkpoint_path {
+                let state = CheckpointState::new(
+                    &self.cfg.run_id,
+                    self.chunk_size,
+                    self.overlap,
+                    outcome.next_offset.min(total_bytes),
+                    total_bytes,
+                );
+                if let Err(err) = save_checkpoint(&path, &state) {
+                    warn!("failed to write checkpoint {}: {err}", path.display());
+                } else {
+                    info!("checkpoint saved to {}", path.display());
+                }
+            }
+        }
+
+        Ok(stats)
+    }
+}
+
 fn run_pipeline_inner(
     cfg: &Config,
     evidence: Arc<dyn EvidenceSource>,
@@ -182,345 +774,24 @@ fn run_pipeline_inner(
     progress: Option<ProgressConfig>,
     checkpoint: Option<CheckpointConfig>,
 ) -> Result<PipelineStats> {
-    let total_bytes = evidence.len();
-    let (resume_state, checkpoint_path) = match &checkpoint {
-        Some(cfg) => (cfg.resume.clone(), Some(cfg.path.clone())),
-        None => (None, None),
-    };
-    if let Some(state) = &resume_state {
-        if state.chunk_size != chunk_size {
-            return Err(anyhow::anyhow!(
-                "checkpoint chunk_size {} does not match requested {}",
-                state.chunk_size,
-                chunk_size
-            ));
-        }
-        if state.overlap != overlap {
-            return Err(anyhow::anyhow!(
-                "checkpoint overlap {} does not match requested {}",
-                state.overlap,
-                overlap
-            ));
-        }
-        if state.evidence_len != total_bytes {
-            return Err(anyhow::anyhow!(
-                "checkpoint evidence size {} does not match evidence length {}",
-                state.evidence_len,
-                total_bytes
-            ));
-        }
-        if state.next_offset >= total_bytes {
-            return Err(anyhow::anyhow!(
-                "checkpoint offset {} is beyond evidence size {}",
-                state.next_offset,
-                total_bytes
-            ));
-        }
-        if state.run_id != cfg.run_id {
-            warn!(
-                "checkpoint run_id={} does not match config run_id={}",
-                state.run_id, cfg.run_id
-            );
-        }
-    }
-    let resume_offset = resume_state.as_ref().map(|s| s.next_offset).unwrap_or(0);
-    let resume_chunks = if chunk_size > 0 {
-        resume_offset / chunk_size
-    } else {
-        0
-    };
-    let chunks = build_chunks(total_bytes, chunk_size, overlap);
-    info!(
-        "chunk_count={} chunk_size={} overlap={}",
-        chunks.len(),
-        chunk_size,
-        overlap
-    );
-
-    // Create channels
-    let channel_cap = workers
-        .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
-        .max(MIN_CHANNEL_CAPACITY);
-    let (scan_tx, scan_rx) = bounded::<ScanJob>(channel_cap);
-    let (hit_tx, hit_rx) = bounded(channel_cap * 2);
-    let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 2);
-
-    let (string_tx, string_rx) = if string_scanner.is_some() {
-        let (tx, rx) = bounded::<StringJob>(channel_cap);
-        (Some(tx), Some(rx))
-    } else {
-        (None, None)
-    };
-
-    // Atomic counters for statistics
-    let bytes_scanned = Arc::new(AtomicU64::new(0));
-    let chunks_processed = Arc::new(AtomicU64::new(0));
-    let hits_found = Arc::new(AtomicU64::new(0));
-    let files_carved = Arc::new(AtomicU64::new(0));
-    let string_spans = Arc::new(AtomicU64::new(0));
-    let artefacts_found = Arc::new(AtomicU64::new(0));
-    let carve_errors = Arc::new(AtomicU64::new(0));
-    let metadata_errors = Arc::new(AtomicU64::new(0));
-    let sqlite_errors = Arc::new(AtomicU64::new(0));
-
-    // Start metadata recording thread
-    let meta_handle = workers::spawn_metadata_thread(meta_sink, meta_rx, metadata_errors.clone());
-
-    // Build entropy config if enabled
-    let entropy_cfg = if cfg.enable_entropy_detection && cfg.entropy_window_size > 0 {
-        Some(EntropyConfig {
-            window_size: cfg.entropy_window_size,
-            threshold: cfg.entropy_threshold,
-        })
-    } else {
-        None
-    };
-
-    // Spawn worker threads
-    let scan_handles = workers::spawn_scan_workers(
-        workers,
+    PipelineRunner::new(
+        cfg,
+        evidence,
         sig_scanner,
-        string_scanner.clone(),
-        scan_rx,
-        hit_tx.clone(),
-        string_tx.clone(),
-        meta_tx.clone(),
-        cfg.run_id.clone(),
-        entropy_cfg,
-        hits_found.clone(),
-        string_spans.clone(),
-    );
-
-    let carve_handles = workers::spawn_carve_workers(
+        string_scanner,
+        meta_sink,
+        run_output_dir,
         workers,
+        chunk_size,
+        overlap,
+        max_bytes,
+        max_chunks,
         carve_registry,
-        evidence.clone(),
-        cfg.run_id.clone(),
-        run_output_dir.to_path_buf(),
-        hit_rx,
-        meta_tx.clone(),
-        files_carved.clone(),
-        cfg.enable_sqlite_page_recovery,
-        cfg.max_files,
-        carve_errors.clone(),
-        sqlite_errors.clone(),
-    );
-
-    let string_handles = if let Some(rx) = string_rx {
-        let scan_cfg = ArtefactScanConfig {
-            urls: cfg.enable_url_scan,
-            emails: cfg.enable_email_scan,
-            phones: cfg.enable_phone_scan,
-        };
-        workers::spawn_string_workers(
-            workers,
-            cfg.run_id.clone(),
-            rx,
-            meta_tx.clone(),
-            artefacts_found.clone(),
-            scan_cfg,
-        )
-    } else {
-        Vec::new()
-    };
-
-    // Process chunks
-    let max_bytes = max_bytes.unwrap_or(u64::MAX);
-    let max_chunks = max_chunks.unwrap_or(u64::MAX);
-    let mut chunks_seen = 0u64;
-    let mut hit_max_bytes = resume_offset >= max_bytes;
-    let mut hit_max_chunks = resume_chunks >= max_chunks;
-    let mut hit_max_files = false;
-    let mut cancelled = false;
-    let start_time = Instant::now();
-    let mut last_progress = Instant::now();
-    let mut next_offset = resume_offset;
-
-    for chunk in chunks {
-        if hit_max_bytes || hit_max_chunks {
-            break;
-        }
-        if chunk.start < resume_offset {
-            continue;
-        }
-        if let Some(limit) = cfg.max_files {
-            if files_carved.load(Ordering::Relaxed) >= limit {
-                hit_max_files = true;
-                break;
-            }
-        }
-        if let Some(flag) = &cancel_flag {
-            if flag.load(Ordering::Relaxed) {
-                cancelled = true;
-                break;
-            }
-        }
-        let chunks_seen_total = chunks_seen.saturating_add(resume_chunks);
-        if chunks_seen_total >= max_chunks {
-            hit_max_chunks = true;
-            break;
-        }
-        let scanned_total = bytes_scanned
-            .load(Ordering::Relaxed)
-            .saturating_add(resume_offset);
-        if scanned_total >= max_bytes {
-            hit_max_bytes = true;
-            break;
-        }
-        let remaining = (max_bytes - scanned_total).min(chunk.length) as usize;
-        let data = read_chunk_limited(evidence.as_ref(), &chunk, remaining)?;
-        if data.is_empty() {
-            break;
-        }
-        bytes_scanned.fetch_add(data.len() as u64, Ordering::Relaxed);
-        chunks_processed.fetch_add(1, Ordering::Relaxed);
-        chunks_seen += 1;
-        next_offset = chunk.start.saturating_add(chunk_size);
-        let chunk_id = chunk.id;
-        scan_tx
-            .send(ScanJob {
-                chunk,
-                data: Arc::new(data),
-            })
-            .with_context(|| format!("scan channel closed while sending chunk {chunk_id}"))?;
-        if let Some(progress) = &progress {
-            if progress.interval.is_zero() || last_progress.elapsed() >= progress.interval {
-                let snapshot = build_progress_snapshot(
-                    total_bytes,
-                    resume_offset,
-                    &start_time,
-                    &bytes_scanned,
-                    &chunks_processed,
-                    &hits_found,
-                    &files_carved,
-                    &string_spans,
-                    &artefacts_found,
-                    &carve_errors,
-                    &metadata_errors,
-                    &sqlite_errors,
-                );
-                progress.reporter.on_progress(&snapshot);
-                last_progress = Instant::now();
-
-                // Periodic flush to ensure data is persisted
-                let _ = meta_tx.send(MetadataEvent::Flush);
-            }
-        }
-        let scanned_total = bytes_scanned
-            .load(Ordering::Relaxed)
-            .saturating_add(resume_offset);
-        if scanned_total >= max_bytes {
-            hit_max_bytes = true;
-            break;
-        }
-    }
-
-    // Close channels and wait for workers
-    drop(scan_tx);
-    drop(hit_tx);
-    drop(string_tx);
-
-    for handle in scan_handles {
-        let _ = handle.join();
-    }
-    for handle in carve_handles {
-        let _ = handle.join();
-    }
-    for handle in string_handles {
-        let _ = handle.join();
-    }
-
-    // Send run summary
-    let bytes_scanned_total = bytes_scanned
-        .load(Ordering::Relaxed)
-        .saturating_add(resume_offset);
-    let chunks_processed_total = chunks_processed
-        .load(Ordering::Relaxed)
-        .saturating_add(resume_chunks);
-    let summary = RunSummary {
-        run_id: cfg.run_id.clone(),
-        bytes_scanned: bytes_scanned_total,
-        chunks_processed: chunks_processed_total,
-        hits_found: hits_found.load(Ordering::Relaxed),
-        files_carved: files_carved.load(Ordering::Relaxed),
-        string_spans: string_spans.load(Ordering::Relaxed),
-        artefacts_extracted: artefacts_found.load(Ordering::Relaxed),
-    };
-    if let Err(err) = meta_tx.send(MetadataEvent::RunSummary(summary)) {
-        warn!("metadata channel closed while sending run summary: {err}");
-    }
-
-    drop(meta_tx);
-    let _ = meta_handle.join();
-
-    if let Some(progress) = &progress {
-        let snapshot = build_progress_snapshot(
-            total_bytes,
-            resume_offset,
-            &start_time,
-            &bytes_scanned,
-            &chunks_processed,
-            &hits_found,
-            &files_carved,
-            &string_spans,
-            &artefacts_found,
-            &carve_errors,
-            &metadata_errors,
-            &sqlite_errors,
-        );
-        progress.reporter.on_progress(&snapshot);
-    }
-
-    if cancelled {
-        info!("shutdown requested; stopping early");
-    }
-    if hit_max_files {
-        info!("max_files limit reached; stopping early");
-    }
-    if hit_max_bytes {
-        info!("max_bytes limit reached; stopping early");
-    }
-    if hit_max_chunks {
-        info!("max_chunks limit reached; stopping early");
-    }
-
-    let stats = PipelineStats {
-        bytes_scanned: bytes_scanned_total,
-        chunks_processed: chunks_processed_total,
-        hits_found: hits_found.load(Ordering::Relaxed),
-        files_carved: files_carved.load(Ordering::Relaxed),
-        string_spans: string_spans.load(Ordering::Relaxed),
-        artefacts_extracted: artefacts_found.load(Ordering::Relaxed),
-    };
-
-    info!(
-        "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} string_spans={} artefacts_extracted={}",
-        stats.bytes_scanned,
-        stats.chunks_processed,
-        stats.hits_found,
-        stats.files_carved,
-        stats.string_spans,
-        stats.artefacts_extracted
-    );
-
-    if cancelled || hit_max_bytes || hit_max_chunks || hit_max_files {
-        if let Some(path) = checkpoint_path {
-            let state = CheckpointState::new(
-                &cfg.run_id,
-                chunk_size,
-                overlap,
-                next_offset.min(total_bytes),
-                total_bytes,
-            );
-            if let Err(err) = save_checkpoint(&path, &state) {
-                warn!("failed to write checkpoint {}: {err}", path.display());
-            } else {
-                info!("checkpoint saved to {}", path.display());
-            }
-        }
-    }
-
-    Ok(stats)
+        cancel_flag,
+        progress,
+        checkpoint,
+    )
+    .run()
 }
 
 fn build_progress_snapshot(

@@ -74,6 +74,7 @@ pub fn golden_image_available() -> bool {
 }
 
 /// Check if manifest is available
+#[allow(dead_code)]
 pub fn manifest_available() -> bool {
     golden_image_dir().join("manifest.json").exists()
 }

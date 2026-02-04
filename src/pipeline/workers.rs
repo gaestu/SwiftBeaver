@@ -21,6 +21,7 @@ use crate::strings::{self, StringScanner, StringSpan};
 
 use super::EntropyConfig;
 use super::events::MetadataEvent;
+use super::limiter::CarveLimiter;
 
 /// Job containing a chunk of data to scan
 pub struct ScanJob {
@@ -33,6 +34,14 @@ pub struct StringJob {
     pub chunk: ScanChunk,
     pub data: Arc<Vec<u8>>,
     pub spans: Vec<StringSpan>,
+}
+
+/// Job containing a SQLite file to parse for browser artefacts
+pub struct SqliteJob {
+    pub path: PathBuf,
+    pub run_id: String,
+    pub rel_path: String,
+    pub enable_page_recovery: bool,
 }
 
 /// Spawn the metadata recording thread
@@ -213,11 +222,10 @@ pub fn spawn_carve_workers(
     run_output_dir: PathBuf,
     rx: Receiver<NormalizedHit>,
     meta_tx: Sender<MetadataEvent>,
-    files_carved: Arc<AtomicU64>,
+    carve_limiter: Arc<CarveLimiter>,
+    sqlite_tx: Option<Sender<SqliteJob>>,
     enable_sqlite_page_recovery: bool,
-    max_files: Option<u64>,
     carve_errors: Arc<AtomicU64>,
-    sqlite_errors: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -229,10 +237,9 @@ pub fn spawn_carve_workers(
         let run_output_dir = run_output_dir.clone();
         let rx = rx.clone();
         let meta_tx = meta_tx.clone();
-        let files_carved = files_carved.clone();
-        let max_files = max_files;
+        let carve_limiter = carve_limiter.clone();
+        let sqlite_tx = sqlite_tx.clone();
         let carve_errors = carve_errors.clone();
-        let sqlite_errors = sqlite_errors.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -243,11 +250,6 @@ pub fn spawn_carve_workers(
             };
 
             for hit in rx {
-                if let Some(limit) = max_files {
-                    if files_carved.load(Ordering::Relaxed) >= limit {
-                        break;
-                    }
-                }
                 let handler = match registry.get(&hit.file_type_id) {
                     Some(handler) => handler,
                     None => {
@@ -256,9 +258,13 @@ pub fn spawn_carve_workers(
                     }
                 };
 
+                if !carve_limiter.try_reserve() {
+                    continue;
+                }
+
                 match handler.process_hit(&hit, &ctx) {
                     Ok(Some(file)) => {
-                        let new_total = files_carved.fetch_add(1, Ordering::Relaxed) + 1;
+                        carve_limiter.commit();
                         let path = carved_root.join(&file.path);
                         let file_type = file.file_type.clone();
                         let rel_path = file.path.clone();
@@ -266,25 +272,25 @@ pub fn spawn_carve_workers(
                             warn!("metadata channel closed while sending carved file: {err}");
                         }
 
-                        // Process SQLite files for browser artifacts
                         if file_type == "sqlite" {
-                            process_sqlite_artifacts(
-                                &path,
-                                &run_id,
-                                &rel_path,
-                                &meta_tx,
-                                enable_sqlite_page_recovery,
-                                &sqlite_errors,
-                            );
-                        }
-                        if let Some(limit) = max_files {
-                            if new_total >= limit {
-                                break;
+                            if let Some(tx) = &sqlite_tx {
+                                let job = SqliteJob {
+                                    path,
+                                    run_id: run_id.clone(),
+                                    rel_path,
+                                    enable_page_recovery: enable_sqlite_page_recovery,
+                                };
+                                if let Err(err) = tx.send(job) {
+                                    warn!("sqlite channel closed while sending job: {err}");
+                                }
                             }
                         }
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        carve_limiter.release();
+                    }
                     Err(err) => {
+                        carve_limiter.release();
                         carve_errors.fetch_add(1, Ordering::Relaxed);
                         warn!("carve error at offset {}: {err}", hit.global_offset);
                     }
@@ -364,6 +370,93 @@ fn process_sqlite_artifacts(
             sqlite_errors.fetch_add(1, Ordering::Relaxed);
             warn!("sqlite download parse failed for {}: {err}", path.display());
         }
+    }
+}
+
+/// Spawn SQLite artefact extraction worker threads
+pub fn spawn_sqlite_workers(
+    workers: usize,
+    rx: Receiver<SqliteJob>,
+    meta_tx: Sender<MetadataEvent>,
+    sqlite_errors: Arc<AtomicU64>,
+) -> Vec<thread::JoinHandle<()>> {
+    let mut handles = Vec::new();
+    let worker_count = workers.max(1);
+
+    for _ in 0..worker_count {
+        let rx = rx.clone();
+        let meta_tx = meta_tx.clone();
+        let sqlite_errors = sqlite_errors.clone();
+
+        handles.push(thread::spawn(move || {
+            for job in rx {
+                process_sqlite_artifacts(
+                    &job.path,
+                    &job.run_id,
+                    &job.rel_path,
+                    &meta_tx,
+                    job.enable_page_recovery,
+                    &sqlite_errors,
+                );
+            }
+        }));
+    }
+
+    handles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::bounded;
+    use rusqlite::Connection;
+    use tempfile::tempdir;
+
+    #[test]
+    fn sqlite_workers_emit_history_events() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("History");
+        let conn = Connection::open(&path).expect("conn");
+        conn.execute(
+            "CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT, last_visit_time INTEGER)",
+            [],
+        )
+        .expect("create");
+        conn.execute(
+            "INSERT INTO urls (url, title, last_visit_time) VALUES (?1, ?2, ?3)",
+            ("https://example.com", "Example", 13_303_449_600_000_000i64),
+        )
+        .expect("insert");
+        drop(conn);
+
+        let (tx, rx) = bounded::<SqliteJob>(1);
+        let (meta_tx, meta_rx) = bounded::<MetadataEvent>(16);
+        let sqlite_errors = Arc::new(AtomicU64::new(0));
+
+        let handles = spawn_sqlite_workers(1, rx, meta_tx.clone(), sqlite_errors.clone());
+        tx.send(SqliteJob {
+            path,
+            run_id: "run1".to_string(),
+            rel_path: "sqlite/history.sqlite".to_string(),
+            enable_page_recovery: false,
+        })
+        .expect("send job");
+        drop(tx);
+
+        for handle in handles {
+            let _ = handle.join();
+        }
+        drop(meta_tx);
+
+        let mut saw_history = false;
+        for event in meta_rx.try_iter() {
+            if matches!(event, MetadataEvent::History(_)) {
+                saw_history = true;
+                break;
+            }
+        }
+        assert!(saw_history);
+        assert_eq!(sqlite_errors.load(Ordering::Relaxed), 0);
     }
 }
 

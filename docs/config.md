@@ -6,7 +6,7 @@ The default config is `config/default.yml`.
 
 - `run_id` (string): optional; if empty, a timestamp-based ID is generated.
 - `overlap_bytes` (u64): overlap between chunks.
-- `max_files` (u64, optional): stop after carving this many files.
+- `max_files` (u64, optional): strict cap on carved files; the pipeline stops once the limit is reached.
 - `max_memory_mib` (u64, optional): limit address space in MiB (Unix only).
 - `max_open_files` (u64, optional): limit max open file descriptors (Unix only).
 - `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.

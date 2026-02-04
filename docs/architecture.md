@@ -27,11 +27,11 @@ Both backends compile kernels at scanner initialization and fall back to CPU if 
 ## Pipeline
 
 1. **EvidenceSource** reads a raw file (or E01 with default EWF support enabled, requires `libewf`) into a linear byte space.
-2. **Chunk scheduler** splits the image into overlapping chunks.
+2. **Chunk scheduler** streams the image into overlapping chunks.
 3. **CPU signature scanner** searches for file headers within each chunk.
 4. **CPU string scanner** (optional) extracts printable spans and artefacts.
 5. **Carve workers** validate and extract files from the evidence source.
-6. **SQLite parser** extracts browser history from carved SQLite databases.
+6. **SQLite workers** extract browser history, cookies, and downloads from carved SQLite databases.
 7. **Metadata sink** writes JSONL, CSV, or Parquet records.
 
 ## Concurrency model
@@ -39,12 +39,14 @@ Both backends compile kernels at scanner initialization and fall back to CPU if 
 - Reader thread: reads chunks and feeds scan jobs.
 - Scan workers: perform signature scanning and emit normalized hits.
 - Carve workers: validate/extract files and emit metadata.
+- SQLite workers: parse carved SQLite files and emit metadata.
 - Metadata writer: serializes JSONL/CSV/Parquet records.
 
 ## Modules
 
 - `src/evidence.rs` - raw file evidence source
 - `src/chunk.rs` - chunk scheduling
+- `src/pipeline/limiter.rs` - strict `max_files` limiter
 - `src/scanner/` - CPU signature scanner
 - `src/carve/` - file-type handlers
 - `src/strings/` - printable string scanning and artefact extraction
