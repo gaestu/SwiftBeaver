@@ -532,7 +532,6 @@ mod tests {
             scan_entropy: false,
             entropy_window_bytes: None,
             entropy_threshold: None,
-            scan_sqlite_pages: false,
             max_bytes: None,
             max_chunks: None,
             max_files: None,

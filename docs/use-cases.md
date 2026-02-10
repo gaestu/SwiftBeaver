@@ -7,7 +7,7 @@ This guide demonstrates real-world forensic scenarios and how to accomplish them
 1. [Basic File Recovery](#basic-file-recovery)
 2. [Deleted Photo Recovery](#deleted-photo-recovery)
 3. [Email Investigation](#email-investigation)
-4. [Browser Artifact Analysis](#browser-artifact-analysis)
+4. [Browser Database Carving](#browser-database-carving)
 5. [Document Discovery](#document-discovery)
 6. [Large-Scale Image Processing](#large-scale-image-processing)
 7. [Encrypted Container Analysis](#encrypted-container-analysis)
@@ -160,9 +160,9 @@ grep -ri "confidential\|secret\|internal" carved/eml/ > keyword_hits.txt
 
 ---
 
-## Browser Artifact Analysis
+## Browser Database Carving
 
-**Scenario**: Analyze browsing history from seized computer.
+**Scenario**: Recover browser SQLite databases, WAL files, and page fragments for offline analysis.
 
 ### Step 1: Comprehensive Scan
 
@@ -170,50 +170,31 @@ grep -ri "confidential\|secret\|internal" carved/eml/ > keyword_hits.txt
 swiftbeaver \
     --input suspect_disk.dd \
     --output ./browser_analysis \
-    --enable-types sqlite \
-    --scan-sqlite-pages  # Enhanced SQLite recovery
+    --enable-types sqlite,sqlite_wal,sqlite_page
 ```
 
-### Step 2: Review Browser History
+### Step 2: Review Carved SQLite Outputs
 
 ```bash
 cd browser_analysis/20250104T*/
 
-# View all browsing history
-cat metadata/browser_history.jsonl | jq -r '[.url, .title, .visit_time] | @csv'
+# Count carved sqlite artefacts by type
+cat metadata/carved_files.jsonl | \
+    jq -r '.file_type' | grep -E '^sqlite(_wal|_page)?$' | sort | uniq -c
 
-# Find visits to specific domains
-cat metadata/browser_history.jsonl | \
-    jq -r 'select(.url | contains("example.com")) | .'
+# List carved WAL outputs
+cat metadata/carved_files.jsonl | \
+    jq -r 'select(.file_type=="sqlite_wal") | [.path,.global_start,.size,.validated] | @tsv'
 
-# Timeline by hour
-cat metadata/browser_history.jsonl | \
-    jq -r '.visit_time' | cut -d'T' -f2 | cut -d':' -f1 | sort | uniq -c
+# List carved page fragments
+cat metadata/carved_files.jsonl | \
+    jq -r 'select(.file_type=="sqlite_page") | [.path,.global_start,.size,.validated] | @tsv'
 ```
 
-### Step 3: Analyze Cookies
+### Step 3: Handoff to External SQLite Tooling
 
-```bash
-# Extract authentication cookies
-cat metadata/browser_cookies.jsonl | \
-    jq 'select(.name | contains("auth") or contains("session"))'
-
-# Find tracking cookies
-cat metadata/browser_cookies.jsonl | \
-    jq 'select(.domain | contains("doubleclick") or contains("analytics"))'
-```
-
-### Step 4: Download History
-
-```bash
-# List all downloaded files
-cat metadata/browser_downloads.jsonl | \
-    jq -r '[.target_path, .total_bytes, .end_time] | @csv'
-
-# Find large downloads
-cat metadata/browser_downloads.jsonl | \
-    jq 'select(.total_bytes > 100000000)'  # > 100MB
-```
+Use your preferred SQLite/WAL/page parser against files in `carved/sqlite/`, `carved/sqlite_wal/`, and `carved/sqlite_page/`.
+See `docs/sqlite_carve_handoff.md` for a tool-agnostic workflow.
 
 ---
 
@@ -544,7 +525,6 @@ swiftbeaver \
     --scan-emails \
     --scan-phones \
     --scan-entropy \
-    --scan-sqlite-pages \
     --metadata-backend parquet
 ```
 

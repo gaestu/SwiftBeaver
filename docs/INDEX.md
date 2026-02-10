@@ -22,6 +22,7 @@ Complete documentation for SwiftBeaver forensic file carving tool.
 ### Advanced Topics
 - **[Carver Algorithms](carver/README.md)** - Detailed carver documentation
 - **[Golden Image Testing](golden_image.md)** - Testing framework
+- **[SQLite Carve Handoff](sqlite_carve_handoff.md)** - Carve-only workflow for external SQLite analysis
 
 ---
 
@@ -106,12 +107,12 @@ Complete documentation for SwiftBeaver forensic file carving tool.
 | **File Carving** | ✅ Production | [File Formats](file-formats.md), [Carvers](carver/README.md) |
 | **String Scanning** | ✅ Production | [Getting Started](getting-started.md#scan-with-string-extraction) |
 | **GPU Acceleration** | ✅ Production | [Getting Started](getting-started.md#gpu-support---opencl) |
-| **Browser Artifacts** | ✅ Production | [Use Cases](use-cases.md#browser-artifact-analysis) |
+| **Browser SQLite Carving** | ✅ Production | [Use Cases](use-cases.md#browser-database-carving) |
 | **E01 Support** | ✅ Production | [Getting Started](getting-started.md#scan-e01-image) |
 | **Checkpointing** | ✅ Production | [Use Cases](use-cases.md#use-checkpointing) |
 | **Metadata Backends** | ✅ Production | [JSONL](metadata_jsonl.md), [CSV](metadata_csv.md), [Parquet](metadata_parquet.md) |
 | **Entropy Detection** | ✅ Production | [Config Reference](config.md#entropy-detection) |
-| **SQLite Page Recovery** | ✅ Production | [Use Cases](use-cases.md#browser-artifact-analysis) |
+| **SQLite WAL/Page Carving** | ✅ Production | [SQLite Carve Handoff](sqlite_carve_handoff.md) |
 
 ### Supported Platforms
 
@@ -160,7 +161,6 @@ swiftbeaver \
     --scan-emails \
     --scan-phones \
     --scan-entropy \
-    --scan-sqlite-pages \
     --metadata-backend parquet
 ```
 
@@ -284,8 +284,7 @@ swiftbeaver \
     --overlap-kib 128 \
     --scan-strings \
     --scan-utf16 \
-    --scan-entropy \
-    --scan-sqlite-pages
+    --scan-entropy
 ```
 
 **For Large Images:**

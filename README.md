@@ -79,7 +79,6 @@ CLI overrides:
 - `--scan-entropy`: enable entropy region detection
 - `--entropy-window-bytes`: overrides `entropy_window_size` when set
 - `--entropy-threshold`: overrides `entropy_threshold` when set
-- `--scan-sqlite-pages`: enable SQLite page-level URL recovery for damaged DBs
 - `--max-bytes`: stop after scanning this many bytes
 - `--max-chunks`: stop after scanning this many chunks
 - `--max-files`: strict cap on carved files; pipeline stops once the limit is reached
@@ -107,6 +106,7 @@ QuickTime handling is configurable in `config/default.yml` with `quicktime_mode`
 Note: `--resume-from` requires the same chunk size and overlap used to create the checkpoint.
 
 See `docs/config.md` for the full schema.
+For carve-only SQLite/WAL/page handoff workflow guidance, see `docs/sqlite_carve_handoff.md`.
 
 ## Output metadata (JSONL)
 
@@ -118,6 +118,7 @@ Browser download records are recorded to `metadata/browser_downloads.jsonl`.
 Chromium-based browsers (Chrome/Edge/Brave) share a schema and may be labeled `chrome` in browser outputs.
 Run summaries are recorded to `metadata/run_summary.jsonl`.
 Entropy regions are recorded to `metadata/entropy_regions.jsonl`.
+In carve-only mode, browser metadata files are reserved outputs and may remain empty.
 
 See `docs/metadata_jsonl.md` for the schema.
 CSV output is also available with `--metadata-backend csv` (see `docs/metadata_csv.md`).

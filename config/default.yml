@@ -16,8 +16,7 @@ parquet_row_group_size: 10000
 enable_entropy_detection: false
 entropy_window_size: 4096
 entropy_threshold: 7.5
-enable_sqlite_page_recovery: false
-sqlite_page_max_hits_per_chunk: 4096
+sqlite_page_max_hits_per_chunk: 2048
 sqlite_wal_max_consecutive_checksum_failures: 2
 opencl_platform_index:
 opencl_device_index:

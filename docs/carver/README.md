@@ -70,6 +70,8 @@ Each carver document includes:
 | Carver | Documentation | Status | Description |
 |--------|--------------|--------|-------------|
 | [SQLite](sqlite.md) | ✅ Complete | Production | SQLite3 database files |
+| [SQLite WAL](sqlite_wal.md) | ✅ Complete | Production | SQLite Write-Ahead Log files |
+| [SQLite Page](sqlite_page.md) | ✅ Complete | Production | SQLite leaf page fragments |
 | ELF | ⏳ TBD | Production | Executable and Linkable Format |
 | MOBI | ⏳ TBD | Production | Mobipocket ebook format |
 | FB2 | ⏳ TBD | Production | FictionBook 2.0 ebook format |
@@ -108,6 +110,8 @@ FF FB / FF FA          → MP3 (MPEG frames)
 52 49 46 46 xx xx xx xx 41 56 49 20  → AVI
 
 53 51 4C 69 74 65     → SQLite
+37 7F 06 82 / 83      → SQLite WAL
+0D / 0A               → SQLite page fragment candidates
 7F 45 4C 46           → ELF
 ```
 

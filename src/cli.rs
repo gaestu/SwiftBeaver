@@ -106,10 +106,6 @@ pub struct CliOptions {
     #[arg(long)]
     pub entropy_threshold: Option<f64>,
 
-    /// Enable SQLite page-level URL recovery when DB parsing fails
-    #[arg(long)]
-    pub scan_sqlite_pages: bool,
-
     /// Stop after scanning this many bytes (approximate limit)
     #[arg(long)]
     pub max_bytes: Option<u64>,
@@ -244,18 +240,6 @@ mod tests {
         assert!(opts.scan_entropy);
         assert_eq!(opts.entropy_window_bytes, Some(2048));
         assert_eq!(opts.entropy_threshold, Some(7.2));
-    }
-
-    #[test]
-    fn parses_sqlite_page_flag() {
-        let opts = CliOptions::try_parse_from([
-            "SwiftBeaver",
-            "--input",
-            "image.dd",
-            "--scan-sqlite-pages",
-        ])
-        .expect("parse");
-        assert!(opts.scan_sqlite_pages);
     }
 
     #[test]

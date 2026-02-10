@@ -282,11 +282,6 @@ impl<'a> PipelineRunner<'a> {
         let (checkpoint_path, resume_offset, resume_chunks) =
             self.validate_checkpoint(total_bytes)?;
         let total_chunks = chunk_count(total_bytes, self.chunk_size);
-        if self.cfg.enable_sqlite_page_recovery {
-            warn!(
-                "sqlite artefact parsing is disabled in carve-only mode; enable_sqlite_page_recovery is ignored"
-            );
-        }
         info!(
             "chunk_count={} chunk_size={} overlap={}",
             total_chunks, self.chunk_size, self.overlap

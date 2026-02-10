@@ -1,6 +1,6 @@
 # Architecture
 
-SwiftBeaver currently includes SQLite carving, string scanning, browser history extraction,
+SwiftBeaver currently includes SQLite carving, string scanning,
 PDF/ZIP/WEBP carving (with ZIP classification for docx/xlsx/pptx/odt/ods/odp/epub),
 BMP/TIFF/MP4/MOV/RAR/7z carving, WAV/AVI/OGG audio-video carving,
 MP3 audio carving with ID3v2 support, TAR/GZIP/BZIP2/XZ archive carving,
@@ -31,15 +31,13 @@ Both backends compile kernels at scanner initialization and fall back to CPU if 
 3. **CPU signature scanner** searches for file headers within each chunk.
 4. **CPU string scanner** (optional) extracts printable spans and artefacts.
 5. **Carve workers** validate and extract files from the evidence source.
-6. **SQLite workers** extract browser history, cookies, and downloads from carved SQLite databases.
-7. **Metadata sink** writes JSONL, CSV, or Parquet records.
+6. **Metadata sink** writes JSONL, CSV, or Parquet records.
 
 ## Concurrency model
 
 - Reader thread: reads chunks and feeds scan jobs.
 - Scan workers: perform signature scanning and emit normalized hits.
 - Carve workers: validate/extract files and emit metadata.
-- SQLite workers: parse carved SQLite files and emit metadata.
 - Metadata writer: serializes JSONL/CSV/Parquet records.
 
 ## Modules

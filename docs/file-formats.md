@@ -166,7 +166,7 @@ Complete reference of all file formats supported by SwiftBeaver, organized by ca
 
 | Format | Extensions | Signature | Max Size (Default) | Validated | Notes |
 |--------|-----------|-----------|-------------------|-----------|-------|
-| **SQLite** | sqlite, db, sqlite3 | `53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00` | 1 GB | Yes | Browser history extraction, page-level recovery |
+| **SQLite** | sqlite, db, sqlite3 | `53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00` | 1 GB | Yes | Carves full SQLite DB byte ranges |
 | **SQLite WAL** | sqlite-wal | `37 7F 06 82` or `37 7F 06 83` | 512 MB | Yes | Walks WAL frames using page size from header |
 | **SQLite Page Fragment** | sqlite-page | `0D` / `0A` + page-structure checks | 64 KB | Yes | Carves one validated raw SQLite page per hit |
 | **ELF** | (none), bin | `7F 45 4C 46` | 100 MB | Yes | Linux executables, section-based structure |
@@ -178,8 +178,8 @@ Complete reference of all file formats supported by SwiftBeaver, organized by ca
 - Detection: 16-byte "SQLite format 3\0" header
 - Size Calculation: page_count × page_size (from header)
 - Validation: Parses header, validates page size and version
-- Browser Artifacts: Automatically extracts history, cookies, downloads from Chromium-based browsers
-- Page Recovery: Optional deep scan for individual pages when database is corrupted
+- Metadata: Recorded as carved file only (`sqlite`), no in-pipeline row parsing
+- Handoff: Use external SQLite tooling for record-level analysis
 - Edge Cases: Empty databases (page_count=0), WAL files, various page sizes (512-65536 bytes)
 
 **SQLite WAL**:
@@ -261,7 +261,7 @@ overlap_bytes: 131072  # Increase overlap
 enable_string_scan: true
 string_scan_utf16: true
 enable_entropy_detection: true
-enable_sqlite_page_recovery: true
+sqlite_page_max_hits_per_chunk: 4096
 
 file_types:
   - id: jpeg

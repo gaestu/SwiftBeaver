@@ -56,8 +56,9 @@ Columns:
 - `evidence_path`
 - `evidence_sha256`
 
-Page-level recovery emits `browser=sqlite_page` and `visit_source=page_scan` with best-effort `title` and `visit_time`.
 Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
+Note: `sqlite_page` and `sqlite_wal` are carve-only file outputs and do not emit browser row metadata.
 
 ## browser_cookies.csv
 

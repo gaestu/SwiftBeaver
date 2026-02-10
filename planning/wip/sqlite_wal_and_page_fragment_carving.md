@@ -1,6 +1,6 @@
 # SQLite WAL + Page Fragment Carving (Carve-Only)
 
-**Status:** In Progress  
+**Status:** Completed  
 **Priority:** High  
 **Effort:** Medium/High  
 **Scope Type:** Carving only (no parsing/extraction logic)
@@ -204,10 +204,34 @@ Extend existing golden tests to assert:
   - Phase 2 SQLite page handler + wiring + synthetic/golden fixtures + tests
   - Per-chunk `sqlite_page` hit cap and tuning knobs
   - WAL rolling checksum validation and configurable consecutive-failure stop threshold
+  - Phase 3 throughput/false-positive benchmarking on large image sample (`/home/urias/coding/images/Image_local/test_local_win11.E01` with `.E02` segment)
+  - Default `sqlite_page_max_hits_per_chunk` tuning from `4096` to `2048` based on benchmark tradeoffs
+  - Dedicated carve-only handoff documentation for external parsers (`docs/sqlite_carve_handoff.md`)
 - **Remaining**:
-  - Phase 3 throughput/false-positive benchmarking on large images
-  - Additional tuning based on benchmark results
-  - Dedicated carve-only handoff documentation for external parsers
+  - None for this carve-only scope
+
+### Phase 3 Benchmark Snapshot
+
+Command profile:
+
+- `--types sqlite_page,sqlite_wal`
+- `--chunk-size-mib 128`
+- `--max-chunks 32` (~4 GiB sampled)
+- `--progress-interval-secs 0`
+
+Results (same image window):
+
+| `sqlite_page_max_hits_per_chunk` | `hits_found` | `files_carved` | `sqlite_page` carved | `sqlite_wal` carved | elapsed |
+|---|---:|---:|---:|---:|---:|
+| 4096 | 131091 | 15 | 9 | 6 | 28.26s |
+| 2048 | 65555 | 10 | 4 | 6 | 16.46s |
+| 1024 | 32787 | 9 | 3 | 6 | 13.92s |
+| 512 | 16403 | 6 | 0 | 6 | 11.71s |
+| 256 | 8211 | 6 | 0 | 6 | 12.28s |
+
+Tuning decision:
+
+- `2048` was selected as the new default to cut scanner pressure substantially while still recovering `sqlite_page` outputs in this large-image sample.
 
 ---
 

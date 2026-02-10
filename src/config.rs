@@ -65,8 +65,6 @@ pub struct Config {
     pub entropy_window_size: usize,
     #[serde(default = "default_entropy_threshold")]
     pub entropy_threshold: f64,
-    #[serde(default)]
-    pub enable_sqlite_page_recovery: bool,
     #[serde(default = "default_sqlite_page_max_hits_per_chunk")]
     pub sqlite_page_max_hits_per_chunk: usize,
     #[serde(default = "default_sqlite_wal_max_consecutive_checksum_failures")]
@@ -162,7 +160,7 @@ fn default_entropy_threshold() -> f64 {
 }
 
 fn default_sqlite_page_max_hits_per_chunk() -> usize {
-    4096
+    2048
 }
 
 fn default_sqlite_wal_max_consecutive_checksum_failures() -> u32 {
@@ -236,11 +234,6 @@ impl Config {
         }
         if let Some(threshold) = cli.entropy_threshold {
             self.entropy_threshold = threshold;
-        }
-
-        // SQLite page recovery
-        if cli.scan_sqlite_pages {
-            self.enable_sqlite_page_recovery = true;
         }
     }
 }
