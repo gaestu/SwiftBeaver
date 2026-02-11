@@ -42,6 +42,8 @@ extern "C" __global__ void scan_ascii_spans(
     unsigned int window = 0;
     const unsigned int HTTP = 0x68747470;
     const unsigned int WWW = 0x7777772e;
+    const unsigned int FTP = 0x6674703a;
+    const unsigned int FTPS = 0x66747073;
 
     while ((gid + len) < data_len) {
         unsigned char c = data[gid + len];
@@ -53,7 +55,7 @@ extern "C" __global__ void scan_ascii_spans(
             lower = lower + 32;
         }
         window = (window << 8) | (unsigned int)lower;
-        if (window == HTTP || window == WWW) {
+        if (window == HTTP || window == WWW || window == FTP || window == FTPS) {
             flags |= 16;
         }
         if (c == '@') {

@@ -1650,9 +1650,18 @@ fn parse_url_parts(
     } else if let Some(stripped) = url.strip_prefix("https://") {
         scheme = "https".to_string();
         rest = stripped;
+    } else if let Some(stripped) = url.strip_prefix("ftp://") {
+        scheme = "ftp".to_string();
+        rest = stripped;
+    } else if let Some(stripped) = url.strip_prefix("ftps://") {
+        scheme = "ftps".to_string();
+        rest = stripped;
     } else if url.starts_with("www.") {
         scheme = "http".to_string();
         rest = url;
+    } else if let Some(stripped) = url.strip_prefix("//") {
+        scheme = "http".to_string();
+        rest = stripped;
     }
 
     let mut fragment = None;

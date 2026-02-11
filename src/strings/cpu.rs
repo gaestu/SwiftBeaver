@@ -217,7 +217,11 @@ pub(crate) fn scan_utf16_runs(
 
 pub(crate) fn span_flags_ascii(slice: &[u8]) -> u32 {
     let mut flags_out = 0u32;
-    if contains_case_insensitive(slice, b"http") || contains_case_insensitive(slice, b"www.") {
+    if contains_case_insensitive(slice, b"http")
+        || contains_case_insensitive(slice, b"www.")
+        || contains_case_insensitive(slice, b"ftp://")
+        || contains_case_insensitive(slice, b"ftps://")
+    {
         flags_out |= flags::URL_LIKE;
     }
     if slice.contains(&b'@') {
@@ -378,6 +382,13 @@ mod tests {
         assert!((flags & flags::URL_LIKE) != 0);
         assert!((flags & flags::EMAIL_LIKE) != 0);
         assert!((flags & flags::PHONE_LIKE) != 0);
+    }
+
+    #[test]
+    fn sets_url_hint_for_ftp_ascii() {
+        let data = b"mirror ftp://downloads.example.com/tool.zip";
+        let flags = span_flags_ascii(data);
+        assert!((flags & flags::URL_LIKE) != 0);
     }
 
     #[test]

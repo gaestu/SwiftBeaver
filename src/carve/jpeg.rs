@@ -6,6 +6,13 @@ use sha2::{Digest, Sha256};
 use crate::carve::{CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path};
 use crate::scanner::NormalizedHit;
 
+fn is_valid_first_marker(marker: u8) -> bool {
+    matches!(
+        marker,
+        0x01 | 0xC0..=0xCF | 0xDA..=0xDF | 0xE0..=0xEF | 0xFE
+    )
+}
+
 pub struct JpegCarveHandler {
     extension: String,
     min_size: u64,
@@ -36,6 +43,20 @@ impl CarveHandler for JpegCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
+        let mut sig = [0u8; 4];
+        let read = ctx
+            .evidence
+            .read_at(hit.global_offset, &mut sig)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if read < sig.len()
+            || sig[0] != 0xFF
+            || sig[1] != 0xD8
+            || sig[2] != 0xFF
+            || !is_valid_first_marker(sig[3])
+        {
+            return Ok(None);
+        }
+
         let (full_path, rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
@@ -138,5 +159,79 @@ impl CarveHandler for JpegCarveHandler {
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JpegCarveHandler;
+    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::evidence::RawFileSource;
+    use crate::scanner::NormalizedHit;
+    use tempfile::tempdir;
+
+    fn make_test_jpeg(first_marker: u8) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&[0xFF, 0xD8, 0xFF, first_marker]);
+        out.extend_from_slice(&[0x00, 0x10]); // segment length
+        out.extend_from_slice(b"SwiftBeaver");
+        out.extend_from_slice(&[0xFF, 0xD9]);
+        out
+    }
+
+    #[test]
+    fn accepts_jpeg_with_valid_first_marker() {
+        let temp_dir = tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("mkdir");
+
+        let data = make_test_jpeg(0xE0);
+        let input_path = temp_dir.path().join("input.bin");
+        std::fs::write(&input_path, data).expect("write");
+
+        let evidence = RawFileSource::open(&input_path).expect("open evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = JpegCarveHandler::new("jpg".to_string(), 10, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "jpeg".to_string(),
+            pattern_id: "jpeg_soi".to_string(),
+        };
+
+        let carved = handler.process_hit(&hit, &ctx).expect("carve");
+        let carved = carved.expect("expected jpeg");
+        assert!(carved.validated);
+        assert!(carved.size >= 10);
+    }
+
+    #[test]
+    fn rejects_jpeg_with_invalid_first_marker() {
+        let temp_dir = tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("mkdir");
+
+        let data = make_test_jpeg(0x83);
+        let input_path = temp_dir.path().join("input.bin");
+        std::fs::write(&input_path, data).expect("write");
+
+        let evidence = RawFileSource::open(&input_path).expect("open evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = JpegCarveHandler::new("jpg".to_string(), 10, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "jpeg".to_string(),
+            pattern_id: "jpeg_soi".to_string(),
+        };
+
+        let carved = handler.process_hit(&hit, &ctx).expect("carve");
+        assert!(carved.is_none(), "expected invalid marker to be rejected");
     }
 }

@@ -114,8 +114,9 @@ pub mod artifacts {
         pub global_end: u64,
     }
 
-    static URL_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r#"(?i)\b(?:https?://|www\.)[^\s"'<>]+"#).expect("url regex"));
+    static URL_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r#"(?i)(?:https?://|ftps?://|www\.|//)[^\s"'<>]+"#).expect("url regex")
+    });
     static EMAIL_RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b").expect("email regex")
     });
@@ -135,7 +136,14 @@ pub mod artifacts {
         let hint_mask = flags::URL_LIKE | flags::EMAIL_LIKE | flags::PHONE_LIKE;
         let use_hints = (flags & hint_mask) != 0;
 
-        if scan_cfg.urls && (!use_hints || (flags & flags::URL_LIKE) != 0) {
+        let should_scan_urls = scan_cfg.urls
+            && (!use_hints
+                || (flags & flags::URL_LIKE) != 0
+                || text.contains("://")
+                || text.contains("//")
+                || text.to_ascii_lowercase().contains("www."));
+
+        if should_scan_urls {
             for mat in URL_RE.find_iter(&text) {
                 if let Some(value) = normalize_url(mat.as_str()) {
                     out.push(build_artefact(
@@ -264,29 +272,85 @@ pub mod artifacts {
             return None;
         }
         let lower = trimmed.to_ascii_lowercase();
-        let rest = if lower.starts_with("http://") {
-            &trimmed[7..]
+        let (rest, canonical) = if lower.starts_with("http://") {
+            (&trimmed[7..], trimmed.to_string())
         } else if lower.starts_with("https://") {
-            &trimmed[8..]
+            (&trimmed[8..], trimmed.to_string())
+        } else if lower.starts_with("ftp://") {
+            (&trimmed[6..], trimmed.to_string())
+        } else if lower.starts_with("ftps://") {
+            (&trimmed[7..], trimmed.to_string())
         } else if lower.starts_with("www.") {
-            &trimmed[4..]
+            (&trimmed[4..], format!("http://{trimmed}"))
+        } else if trimmed.starts_with("//") {
+            (&trimmed[2..], format!("http:{trimmed}"))
         } else {
             return None;
         };
 
-        let host_end = rest.find('/').unwrap_or(rest.len());
-        let host_port = &rest[..host_end];
-        let host = host_port.split(':').next().unwrap_or("");
-        if host.is_empty() || host.len() > 253 || !host.contains('.') {
+        let host_end = rest
+            .find(|c| ['/', '?', '#'].contains(&c))
+            .unwrap_or(rest.len());
+        let authority = &rest[..host_end];
+        if authority.is_empty() {
             return None;
         }
-        for part in host.split('.') {
-            if part.is_empty() || part.len() > 63 {
-                return None;
-            }
+
+        let host_port = authority.rsplit('@').next().unwrap_or("");
+        if host_port.is_empty() {
+            return None;
         }
 
-        Some(trimmed.to_string())
+        let host = if host_port.starts_with('[') {
+            let end = host_port.find(']')?;
+            &host_port[1..end]
+        } else {
+            host_port.split(':').next().unwrap_or("")
+        };
+
+        if !is_valid_url_host(host) {
+            return None;
+        }
+
+        Some(canonical)
+    }
+
+    fn is_valid_url_host(host: &str) -> bool {
+        if host.is_empty() || host.len() > 253 {
+            return false;
+        }
+        if host.parse::<std::net::IpAddr>().is_ok() {
+            return true;
+        }
+        let labels: Vec<&str> = host.split('.').collect();
+        if labels.is_empty() {
+            return false;
+        }
+        for part in &labels {
+            if !is_valid_domain_label(part) {
+                return false;
+            }
+        }
+        if labels.len() == 1 {
+            let label = labels[0];
+            if !label.chars().any(|c| c.is_ascii_alphabetic()) {
+                return false;
+            }
+            if label.len() < 2 {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn is_valid_domain_label(label: &str) -> bool {
+        if label.is_empty() || label.len() > 63 {
+            return false;
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return false;
+        }
+        label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
     }
 
     fn normalize_email(value: &str) -> Option<String> {
@@ -384,6 +448,54 @@ pub mod artifacts {
                 .map(|a| a.content.as_str())
                 .collect();
             assert!(urls.contains(&"https://example.com/login"));
+        }
+
+        #[test]
+        fn extracts_ftp_url() {
+            let data = b"ftp://downloads.example.com/tool.zip";
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
+            let urls: Vec<&str> = out
+                .iter()
+                .filter(|a| matches!(a.artefact_kind, ArtefactKind::Url))
+                .map(|a| a.content.as_str())
+                .collect();
+            assert!(urls.contains(&"ftp://downloads.example.com/tool.zip"));
+        }
+
+        #[test]
+        fn canonicalizes_www_urls_to_http() {
+            let data = b"www.example.com/path";
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
+            let urls: Vec<&str> = out
+                .iter()
+                .filter(|a| matches!(a.artefact_kind, ArtefactKind::Url))
+                .map(|a| a.content.as_str())
+                .collect();
+            assert!(urls.contains(&"http://www.example.com/path"));
+        }
+
+        #[test]
+        fn canonicalizes_scheme_relative_urls() {
+            let data = b"//example.com/index.html";
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
+            let urls: Vec<&str> = out
+                .iter()
+                .filter(|a| matches!(a.artefact_kind, ArtefactKind::Url))
+                .map(|a| a.content.as_str())
+                .collect();
+            assert!(urls.contains(&"http://example.com/index.html"));
+        }
+
+        #[test]
+        fn accepts_single_label_host_urls() {
+            let data = b"http://ntbld";
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
+            let urls: Vec<&str> = out
+                .iter()
+                .filter(|a| matches!(a.artefact_kind, ArtefactKind::Url))
+                .map(|a| a.content.as_str())
+                .collect();
+            assert!(urls.contains(&"http://ntbld"));
         }
 
         #[test]
