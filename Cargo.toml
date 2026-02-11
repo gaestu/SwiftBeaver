@@ -13,8 +13,10 @@ arrow-schema = "51"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
+crc32fast = "1"
 ctrlc = "3"
 csv = "1"
+flate2 = "1"
 hex = "0.4"
 libc = "0.2"
 md5 = "0.7"

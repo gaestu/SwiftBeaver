@@ -99,7 +99,7 @@ file_types:
       - id: "zip_header"
         hex: "504B0304"
     footer_patterns: []
-    max_size: 104857600
+    max_size: 10485760
     min_size: 32
     validator: "zip"
     require_eocd: true

@@ -15,6 +15,39 @@ use tracing::{debug, warn};
 use crate::carve::{self, CarveRegistry};
 use crate::config::Config;
 use crate::metadata::MetadataBackendKind;
+use crate::scanner::NormalizedHit;
+
+struct DryRunCarveHandler {
+    file_type: String,
+    extension: String,
+}
+
+impl DryRunCarveHandler {
+    fn new(file_type: String, extension: String) -> Self {
+        Self {
+            file_type,
+            extension,
+        }
+    }
+}
+
+impl carve::CarveHandler for DryRunCarveHandler {
+    fn file_type(&self) -> &str {
+        &self.file_type
+    }
+
+    fn extension(&self) -> &str {
+        &self.extension
+    }
+
+    fn process_hit(
+        &self,
+        _hit: &NormalizedHit,
+        _ctx: &carve::ExtractionContext,
+    ) -> Result<Option<carve::CarvedFile>, carve::CarveError> {
+        Ok(None)
+    }
+}
 
 /// Convert CLI metadata backend to internal enum
 pub fn backend_from_cli(backend: crate::cli::MetadataBackend) -> MetadataBackendKind {
@@ -139,10 +172,6 @@ fn set_limit(resource: libc::__rlimit_resource_t, requested: u64, label: &str) -
 /// Build the carve registry from configuration
 /// If dry_run is true, creates a registry that won't write files to disk
 pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry> {
-    // For dry-run mode, we still need the registry to track hits but won't write files
-    // The actual file writing is skipped in the carve handlers when dry_run is enabled
-    let _ = dry_run; // Currently handled by not creating output dirs
-
     let mut handlers: HashMap<String, Box<dyn carve::CarveHandler>> = HashMap::new();
     let allow_quicktime = matches!(cfg.quicktime_mode, crate::config::QuicktimeMode::Mp4);
     let mut mp4_ext = "mp4".to_string();
@@ -159,6 +188,22 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                 mp4_ext = carve::sanitize_extension(ext);
             }
         }
+    }
+
+    if dry_run {
+        for file_type in &cfg.file_types {
+            let ext = file_type
+                .extensions
+                .first()
+                .cloned()
+                .unwrap_or_else(|| file_type.id.clone());
+            let ext = carve::sanitize_extension(&ext);
+            handlers.insert(
+                file_type.id.clone(),
+                Box::new(DryRunCarveHandler::new(file_type.id.clone(), ext)),
+            );
+        }
+        return Ok(CarveRegistry::new(handlers));
     }
 
     fn boxed<T: carve::CarveHandler + 'static>(handler: T) -> Box<dyn carve::CarveHandler> {
@@ -539,8 +584,11 @@ fn is_ole_kind(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_output_dir, filter_file_types};
+    use super::{build_carve_registry, ensure_output_dir, filter_file_types};
+    use crate::carve::ExtractionContext;
     use crate::config;
+    use crate::evidence::RawFileSource;
+    use crate::scanner::NormalizedHit;
     use std::fs::File;
     use tempfile::tempdir;
 
@@ -608,5 +656,37 @@ mod tests {
         let _ = File::create(&file_path).expect("create file");
         let err = ensure_output_dir(&file_path).expect_err("should fail");
         assert!(err.to_string().contains("not a directory"));
+    }
+
+    #[test]
+    fn dry_run_registry_does_not_write_carved_files() {
+        let loaded = config::load_config(None).expect("config");
+        let mut cfg = loaded.config;
+        let unknown = filter_file_types(&mut cfg, Some(&["jpeg".to_string()]), false);
+        assert!(unknown.is_empty());
+
+        let registry = build_carve_registry(&cfg, true).expect("registry");
+        let handler = registry.get("jpeg").expect("jpeg handler");
+
+        let dir = tempdir().expect("tempdir");
+        let evidence_path = dir.path().join("evidence.bin");
+        std::fs::write(&evidence_path, [0xFF, 0xD8, 0xFF, 0xD9]).expect("write evidence");
+        let evidence = RawFileSource::open(&evidence_path).expect("open evidence");
+
+        let output_root = dir.path().join("carved");
+        let ctx = ExtractionContext {
+            run_id: "dry_run_test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "jpeg".to_string(),
+            pattern_id: "jpeg_soi".to_string(),
+        };
+
+        let carved = handler.process_hit(&hit, &ctx).expect("process hit");
+        assert!(carved.is_none());
+        assert!(!output_root.exists());
     }
 }

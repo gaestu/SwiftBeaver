@@ -3,6 +3,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
+use crc32fast::Hasher as Crc32Hasher;
+use flate2::read::DeflateDecoder;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
@@ -12,6 +14,11 @@ use crate::scanner::NormalizedHit;
 
 const ZIP_HEADER: &[u8] = b"PK\x03\x04";
 const ZIP_EOCD: &[u8] = b"PK\x05\x06";
+const ZIP_VERSION_MIN: u16 = 10;
+const ZIP_VERSION_MAX: u16 = 63;
+const ZIP_MAX_FILENAME_LEN: u16 = 1024;
+const ZIP_EOCD_FIXED_LEN: usize = 22;
+const ZIP_MAX_COMMENT_LEN: u64 = u16::MAX as u64;
 
 pub struct ZipCarveHandler {
     extension: String,
@@ -59,6 +66,10 @@ impl CarveHandler for ZipCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
+        let Some(_local_header) = read_local_header(ctx, hit.global_offset)? else {
+            return Ok(None);
+        };
+
         let mut validated = false;
         let mut truncated = false;
         let mut errors = Vec::new();
@@ -72,7 +83,6 @@ impl CarveHandler for ZipCarveHandler {
             };
             let comment_len = parsed.comment_len;
             eocd = Some(parsed);
-            validated = true;
 
             let mut total_end = eocd_offset + 22 + comment_len as u64;
             if self.max_size > 0 {
@@ -112,6 +122,15 @@ impl CarveHandler for ZipCarveHandler {
             if bytes_written < self.min_size {
                 let _ = std::fs::remove_file(&full_path);
                 return Ok(None);
+            }
+
+            match validate_zip_archive(&full_path) {
+                Ok(()) => {
+                    validated = true;
+                }
+                Err(err) => {
+                    errors.push(format!("zip archive validation failed: {err}"));
+                }
             }
 
             let md5_hex = format!("{:x}", md5.compute());
@@ -276,7 +295,6 @@ impl CarveHandler for ZipCarveHandler {
                     }
                 }
 
-                validated = true;
                 break;
             }
 
@@ -300,6 +318,15 @@ impl CarveHandler for ZipCarveHandler {
             return Ok(None);
         }
 
+        match validate_zip_archive(&full_path) {
+            Ok(()) => {
+                validated = true;
+            }
+            Err(err) => {
+                errors.push(format!("zip archive validation failed: {err}"));
+            }
+        }
+
         let md5_hex = format!("{:x}", md5.compute());
         let sha256_hex = hex::encode(sha256.finalize());
         let global_end = if bytes_written == 0 {
@@ -311,18 +338,16 @@ impl CarveHandler for ZipCarveHandler {
         let mut file_type = self.file_type().to_string();
         let mut extension = self.extension.clone();
 
-        if validated {
-            if let Some(parsed) = &eocd {
-                if let Some(kind) = classify_zip(&full_path, parsed.cd_offset, parsed.cd_size) {
-                    file_type = kind.file_type().to_string();
-                    extension = kind.extension().to_string();
-                    if file_type != self.file_type() {
-                        if let Ok((new_path, new_rel)) =
-                            output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
-                        {
-                            if std::fs::rename(&full_path, &new_path).is_ok() {
-                                rel_path = new_rel;
-                            }
+        if let Some(parsed) = &eocd {
+            if let Some(kind) = classify_zip(&full_path, parsed.cd_offset, parsed.cd_size) {
+                file_type = kind.file_type().to_string();
+                extension = kind.extension().to_string();
+                if file_type != self.file_type() {
+                    if let Ok((new_path, new_rel)) =
+                        output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                    {
+                        if std::fs::rename(&full_path, &new_path).is_ok() {
+                            rel_path = new_rel;
                         }
                     }
                 }
@@ -345,6 +370,93 @@ impl CarveHandler for ZipCarveHandler {
             pattern_id: Some(hit.pattern_id.clone()),
         }))
     }
+}
+
+struct ZipLocalHeader {
+    _flags: u16,
+    _compressed_size: u64,
+    _data_offset: u64,
+}
+
+fn read_local_header(
+    ctx: &ExtractionContext,
+    offset: u64,
+) -> Result<Option<ZipLocalHeader>, CarveError> {
+    let mut buf = [0u8; 30];
+    let n = ctx
+        .evidence
+        .read_at(offset, &mut buf)
+        .map_err(|e| CarveError::Evidence(e.to_string()))?;
+    if n < buf.len() {
+        return Ok(None);
+    }
+    if &buf[0..4] != ZIP_HEADER {
+        return Ok(None);
+    }
+
+    let version_needed = u16::from_le_bytes([buf[4], buf[5]]);
+    if !(ZIP_VERSION_MIN..=ZIP_VERSION_MAX).contains(&version_needed) {
+        return Ok(None);
+    }
+
+    let flags = u16::from_le_bytes([buf[6], buf[7]]);
+    if flags & 0xC000 != 0 {
+        return Ok(None);
+    }
+
+    let method = u16::from_le_bytes([buf[8], buf[9]]);
+    if !is_supported_zip_method(method) {
+        return Ok(None);
+    }
+
+    let compressed_size = u32::from_le_bytes([buf[18], buf[19], buf[20], buf[21]]) as u64;
+    let uncompressed_size = u32::from_le_bytes([buf[22], buf[23], buf[24], buf[25]]) as u64;
+    let file_name_len = u16::from_le_bytes([buf[26], buf[27]]);
+    let extra_len = u16::from_le_bytes([buf[28], buf[29]]);
+
+    if file_name_len == 0 || file_name_len > ZIP_MAX_FILENAME_LEN {
+        return Ok(None);
+    }
+
+    let data_offset = match offset
+        .checked_add(30)
+        .and_then(|v| v.checked_add(file_name_len as u64))
+        .and_then(|v| v.checked_add(extra_len as u64))
+    {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    if data_offset >= ctx.evidence.len() {
+        return Ok(None);
+    }
+
+    // Bit 3 indicates data descriptor: sizes may be absent/zero in local header.
+    let has_data_descriptor = flags & (1 << 3) != 0;
+    if !has_data_descriptor {
+        if compressed_size == 0 && uncompressed_size > 0 {
+            return Ok(None);
+        }
+        if compressed_size != 0xFFFF_FFFF {
+            let available = ctx.evidence.len().saturating_sub(data_offset);
+            if compressed_size > available {
+                return Ok(None);
+            }
+        }
+    }
+
+    Ok(Some(ZipLocalHeader {
+        _flags: flags,
+        _compressed_size: compressed_size,
+        _data_offset: data_offset,
+    }))
+}
+
+fn is_supported_zip_method(method: u16) -> bool {
+    matches!(
+        method,
+        0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 12 | 14 | 18 | 19 | 20 | 93 | 94 | 95
+            | 96 | 97 | 98 | 99
+    )
 }
 
 fn find_eocd(
@@ -416,6 +528,7 @@ fn find_eocd(
 struct ZipEocd {
     cd_offset: u64,
     cd_size: u64,
+    total_entries: u16,
     comment_len: u16,
 }
 
@@ -428,19 +541,286 @@ fn read_eocd(ctx: &ExtractionContext, offset: u64) -> Result<ZipEocd, CarveError
     if n < 22 {
         return Err(CarveError::Eof);
     }
+    parse_eocd_bytes(&buf)
+}
+
+fn parse_eocd_bytes(buf: &[u8]) -> Result<ZipEocd, CarveError> {
+    if buf.len() < ZIP_EOCD_FIXED_LEN {
+        return Err(CarveError::Eof);
+    }
     if &buf[0..4] != ZIP_EOCD {
         return Err(CarveError::Invalid(
             "zip eocd signature mismatch".to_string(),
         ));
     }
+    let total_entries = u16::from_le_bytes([buf[10], buf[11]]);
     let cd_size = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as u64;
     let cd_offset = u32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]) as u64;
     let comment_len = u16::from_le_bytes([buf[20], buf[21]]);
     Ok(ZipEocd {
         cd_offset,
         cd_size,
+        total_entries,
         comment_len,
     })
+}
+
+#[derive(Debug, Clone)]
+struct ZipArchiveEntry {
+    local_header_offset: u64,
+    compression_method: u16,
+    flags: u16,
+    crc32: u32,
+    compressed_size: u64,
+    uncompressed_size: u64,
+}
+
+fn validate_zip_archive(path: &Path) -> Result<(), CarveError> {
+    let mut file = File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let (eocd_offset, eocd) = find_archive_eocd(&mut file, file_len)?;
+    let entries = parse_archive_central_directory(&mut file, file_len, eocd_offset, &eocd)?;
+    for entry in &entries {
+        validate_archive_entry(&mut file, file_len, entry)?;
+    }
+    Ok(())
+}
+
+fn find_archive_eocd(file: &mut File, file_len: u64) -> Result<(u64, ZipEocd), CarveError> {
+    if file_len < ZIP_EOCD_FIXED_LEN as u64 {
+        return Err(CarveError::Invalid("zip file too small for EOCD".to_string()));
+    }
+
+    let scan_len = file_len.min(ZIP_EOCD_FIXED_LEN as u64 + ZIP_MAX_COMMENT_LEN);
+    let scan_start = file_len.saturating_sub(scan_len);
+    file.seek(SeekFrom::Start(scan_start))?;
+    let mut tail = vec![0u8; scan_len as usize];
+    file.read_exact(&mut tail)?;
+
+    if tail.len() < 4 {
+        return Err(CarveError::Invalid("zip EOCD not found".to_string()));
+    }
+
+    for idx in (0..=tail.len() - 4).rev() {
+        if &tail[idx..idx + 4] != ZIP_EOCD {
+            continue;
+        }
+        if idx + ZIP_EOCD_FIXED_LEN > tail.len() {
+            continue;
+        }
+        let eocd = parse_eocd_bytes(&tail[idx..idx + ZIP_EOCD_FIXED_LEN])?;
+        let expected_end = idx + ZIP_EOCD_FIXED_LEN + eocd.comment_len as usize;
+        if expected_end != tail.len() {
+            continue;
+        }
+        let eocd_offset = scan_start + idx as u64;
+        return Ok((eocd_offset, eocd));
+    }
+
+    Err(CarveError::Invalid(
+        "zip EOCD not found at archive end".to_string(),
+    ))
+}
+
+fn parse_archive_central_directory(
+    file: &mut File,
+    file_len: u64,
+    eocd_offset: u64,
+    eocd: &ZipEocd,
+) -> Result<Vec<ZipArchiveEntry>, CarveError> {
+    if eocd.total_entries == u16::MAX {
+        return Err(CarveError::Invalid(
+            "zip64 archives are not supported for strict validation".to_string(),
+        ));
+    }
+    if eocd.cd_size == u32::MAX as u64 || eocd.cd_offset == u32::MAX as u64 {
+        return Err(CarveError::Invalid(
+            "zip64 central directory is not supported for strict validation".to_string(),
+        ));
+    }
+
+    let cd_end = eocd
+        .cd_offset
+        .checked_add(eocd.cd_size)
+        .ok_or_else(|| CarveError::Invalid("zip central directory overflow".to_string()))?;
+    if cd_end > eocd_offset || cd_end > file_len {
+        return Err(CarveError::Invalid(
+            "zip central directory exceeds archive bounds".to_string(),
+        ));
+    }
+
+    file.seek(SeekFrom::Start(eocd.cd_offset))?;
+    let mut cd = vec![0u8; eocd.cd_size as usize];
+    if !cd.is_empty() {
+        file.read_exact(&mut cd)?;
+    }
+
+    let mut entries = Vec::new();
+    let mut idx = 0usize;
+    while idx < cd.len() {
+        if idx + 46 > cd.len() {
+            return Err(CarveError::Invalid(
+                "zip central directory entry truncated".to_string(),
+            ));
+        }
+        if &cd[idx..idx + 4] != b"PK\x01\x02" {
+            return Err(CarveError::Invalid(
+                "zip central directory signature mismatch".to_string(),
+            ));
+        }
+
+        let flags = u16::from_le_bytes([cd[idx + 8], cd[idx + 9]]);
+        let method = u16::from_le_bytes([cd[idx + 10], cd[idx + 11]]);
+        let crc32 = u32::from_le_bytes([cd[idx + 16], cd[idx + 17], cd[idx + 18], cd[idx + 19]]);
+        let compressed_size =
+            u32::from_le_bytes([cd[idx + 20], cd[idx + 21], cd[idx + 22], cd[idx + 23]]) as u64;
+        let uncompressed_size =
+            u32::from_le_bytes([cd[idx + 24], cd[idx + 25], cd[idx + 26], cd[idx + 27]]) as u64;
+        let name_len = u16::from_le_bytes([cd[idx + 28], cd[idx + 29]]) as usize;
+        let extra_len = u16::from_le_bytes([cd[idx + 30], cd[idx + 31]]) as usize;
+        let comment_len = u16::from_le_bytes([cd[idx + 32], cd[idx + 33]]) as usize;
+        let local_header_offset =
+            u32::from_le_bytes([cd[idx + 42], cd[idx + 43], cd[idx + 44], cd[idx + 45]]) as u64;
+
+        let next = idx
+            .checked_add(46)
+            .and_then(|v| v.checked_add(name_len))
+            .and_then(|v| v.checked_add(extra_len))
+            .and_then(|v| v.checked_add(comment_len))
+            .ok_or_else(|| CarveError::Invalid("zip central directory overflow".to_string()))?;
+        if next > cd.len() {
+            return Err(CarveError::Invalid(
+                "zip central directory entry exceeds bounds".to_string(),
+            ));
+        }
+
+        entries.push(ZipArchiveEntry {
+            local_header_offset,
+            compression_method: method,
+            flags,
+            crc32,
+            compressed_size,
+            uncompressed_size,
+        });
+
+        idx = next;
+    }
+
+    if entries.len() != eocd.total_entries as usize {
+        return Err(CarveError::Invalid(format!(
+            "zip central directory entry count mismatch: expected {}, got {}",
+            eocd.total_entries,
+            entries.len()
+        )));
+    }
+
+    Ok(entries)
+}
+
+fn validate_archive_entry(
+    file: &mut File,
+    file_len: u64,
+    entry: &ZipArchiveEntry,
+) -> Result<(), CarveError> {
+    if entry.local_header_offset >= file_len {
+        return Err(CarveError::Invalid(
+            "zip local header offset outside archive".to_string(),
+        ));
+    }
+
+    file.seek(SeekFrom::Start(entry.local_header_offset))?;
+    let mut header = [0u8; 30];
+    file.read_exact(&mut header)?;
+    if &header[0..4] != ZIP_HEADER {
+        return Err(CarveError::Invalid(
+            "zip local header signature mismatch".to_string(),
+        ));
+    }
+
+    let local_flags = u16::from_le_bytes([header[6], header[7]]);
+    let local_method = u16::from_le_bytes([header[8], header[9]]);
+    if local_method != entry.compression_method {
+        return Err(CarveError::Invalid(
+            "zip local/central compression method mismatch".to_string(),
+        ));
+    }
+
+    let name_len = u16::from_le_bytes([header[26], header[27]]) as u64;
+    let extra_len = u16::from_le_bytes([header[28], header[29]]) as u64;
+    let data_offset = entry
+        .local_header_offset
+        .checked_add(30)
+        .and_then(|v| v.checked_add(name_len))
+        .and_then(|v| v.checked_add(extra_len))
+        .ok_or_else(|| CarveError::Invalid("zip local header overflow".to_string()))?;
+    let data_end = data_offset
+        .checked_add(entry.compressed_size)
+        .ok_or_else(|| CarveError::Invalid("zip entry data overflow".to_string()))?;
+    if data_end > file_len {
+        return Err(CarveError::Invalid(
+            "zip entry data exceeds archive bounds".to_string(),
+        ));
+    }
+
+    // Bit 3 indicates data descriptor; sizes/CRC in local header may be zero, but
+    // central directory values are authoritative.
+    let _has_data_descriptor = (entry.flags | local_flags) & (1 << 3) != 0;
+
+    file.seek(SeekFrom::Start(data_offset))?;
+    let (crc32, uncompressed_size) = match entry.compression_method {
+        0 => {
+            let mut reader = (&mut *file).take(entry.compressed_size);
+            let (crc, size) = crc32_and_size(&mut reader)?;
+            if size != entry.compressed_size {
+                return Err(CarveError::Invalid(
+                    "stored zip entry size mismatch".to_string(),
+                ));
+            }
+            (crc, size)
+        }
+        8 => {
+            let reader = (&mut *file).take(entry.compressed_size);
+            let mut decoder = DeflateDecoder::new(reader);
+            let (crc, size) = crc32_and_size(&mut decoder)?;
+            if decoder.get_ref().limit() != 0 {
+                return Err(CarveError::Invalid(
+                    "deflate zip entry has trailing compressed bytes".to_string(),
+                ));
+            }
+            (crc, size)
+        }
+        method => {
+            return Err(CarveError::Invalid(format!(
+                "unsupported zip compression method for strict validation: {}",
+                method
+            )));
+        }
+    };
+
+    if crc32 != entry.crc32 {
+        return Err(CarveError::Invalid("zip entry CRC32 mismatch".to_string()));
+    }
+    if uncompressed_size != entry.uncompressed_size {
+        return Err(CarveError::Invalid(
+            "zip entry uncompressed size mismatch".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn crc32_and_size<R: Read>(reader: &mut R) -> Result<(u32, u64), CarveError> {
+    let mut crc = Crc32Hasher::new();
+    let mut total = 0u64;
+    let mut buf = [0u8; 16 * 1024];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        crc.update(&buf[..n]);
+        total = total.saturating_add(n as u64);
+    }
+    Ok((crc.finalize(), total))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -661,8 +1041,18 @@ mod tests {
     }
 
     fn sample_zip_with_entry(name: &str) -> Vec<u8> {
+        sample_zip_with_entry_payload(name, b"x", 0)
+    }
+
+    fn sample_valid_stored_zip(name: &str, payload: &[u8]) -> Vec<u8> {
+        let crc = crc32fast::hash(payload);
+        sample_zip_with_entry_payload(name, payload, crc)
+    }
+
+    fn sample_zip_with_entry_payload(name: &str, payload: &[u8], crc32: u32) -> Vec<u8> {
         let name_bytes = name.as_bytes();
         let name_len = name_bytes.len() as u16;
+        let payload_len = payload.len() as u32;
         let mut out = Vec::new();
 
         out.extend_from_slice(b"PK\x03\x04");
@@ -671,13 +1061,13 @@ mod tests {
         out.extend_from_slice(&[0x00, 0x00]);
         out.extend_from_slice(&[0x00, 0x00]);
         out.extend_from_slice(&[0x00, 0x00]);
-        out.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
-        out.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
-        out.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
+        out.extend_from_slice(&crc32.to_le_bytes());
+        out.extend_from_slice(&payload_len.to_le_bytes());
+        out.extend_from_slice(&payload_len.to_le_bytes());
         out.extend_from_slice(&name_len.to_le_bytes());
         out.extend_from_slice(&[0x00, 0x00]);
         out.extend_from_slice(name_bytes);
-        out.extend_from_slice(b"x");
+        out.extend_from_slice(payload);
 
         out.extend_from_slice(b"PK\x01\x02");
         out.extend_from_slice(&[0x14, 0x00]);
@@ -686,9 +1076,9 @@ mod tests {
         out.extend_from_slice(&[0x00, 0x00]);
         out.extend_from_slice(&[0x00, 0x00]);
         out.extend_from_slice(&[0x00, 0x00]);
-        out.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
-        out.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
-        out.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
+        out.extend_from_slice(&crc32.to_le_bytes());
+        out.extend_from_slice(&payload_len.to_le_bytes());
+        out.extend_from_slice(&payload_len.to_le_bytes());
         out.extend_from_slice(&name_len.to_le_bytes());
         out.extend_from_slice(&[0x00, 0x00]);
         out.extend_from_slice(&[0x00, 0x00]);
@@ -699,7 +1089,7 @@ mod tests {
         out.extend_from_slice(name_bytes);
 
         let cd_size = 46 + name_bytes.len();
-        let cd_offset = 30 + name_bytes.len() + 1;
+        let cd_offset = 30 + name_bytes.len() + payload.len();
 
         out.extend_from_slice(b"PK\x05\x06");
         out.extend_from_slice(&[0x00, 0x00]);
@@ -852,5 +1242,106 @@ mod tests {
         let result = handler.process_hit(&hit, &ctx).expect("process");
         assert!(result.is_none());
         assert!(!dir.path().join("xlsx").exists());
+    }
+
+    #[test]
+    fn rejects_invalid_local_header_fields() {
+        let dir = tempdir().expect("tempdir");
+        let evidence_path = dir.path().join("evidence.bin");
+        let mut file = File::create(&evidence_path).expect("create");
+
+        let mut data = Vec::new();
+        data.extend_from_slice(b"PK\x03\x04");
+        data.extend_from_slice(&0u16.to_le_bytes()); // invalid version
+        data.extend_from_slice(&0u16.to_le_bytes()); // flags
+        data.extend_from_slice(&8u16.to_le_bytes()); // method
+        data.extend_from_slice(&0u16.to_le_bytes()); // mod time
+        data.extend_from_slice(&0u16.to_le_bytes()); // mod date
+        data.extend_from_slice(&0u32.to_le_bytes()); // crc32
+        data.extend_from_slice(&1u32.to_le_bytes()); // comp size
+        data.extend_from_slice(&1u32.to_le_bytes()); // uncomp size
+        data.extend_from_slice(&5u16.to_le_bytes()); // file name len
+        data.extend_from_slice(&0u16.to_le_bytes()); // extra len
+        data.extend_from_slice(b"a.txt");
+        data.push(0x41);
+        file.write_all(&data).expect("write");
+        drop(file);
+
+        let evidence = RawFileSource::open(&evidence_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "run",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+        let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "zip".to_string(),
+            pattern_id: "zip_header".to_string(),
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn marks_crc_mismatch_as_unvalidated() {
+        let dir = tempdir().expect("tempdir");
+        let evidence_path = dir.path().join("evidence.bin");
+        let mut file = File::create(&evidence_path).expect("create");
+
+        // Uses CRC32=0 for payload "x", so strict archive validation must fail.
+        let data = sample_zip_with_entry("word/document.xml");
+        file.write_all(&data).expect("write");
+        drop(file);
+
+        let evidence = RawFileSource::open(&evidence_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "run",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+        let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "zip".to_string(),
+            pattern_id: "zip_header".to_string(),
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        let carved = result.expect("carved");
+        assert!(!carved.validated);
+        assert!(carved
+            .errors
+            .iter()
+            .any(|e| e.contains("zip archive validation failed")));
+    }
+
+    #[test]
+    fn validates_well_formed_stored_zip() {
+        let dir = tempdir().expect("tempdir");
+        let evidence_path = dir.path().join("evidence.bin");
+        let mut file = File::create(&evidence_path).expect("create");
+        let data = sample_valid_stored_zip("hello.txt", b"hello zip");
+        file.write_all(&data).expect("write");
+        drop(file);
+
+        let evidence = RawFileSource::open(&evidence_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "run",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+        let handler = ZipCarveHandler::new("zip".to_string(), 0, 2048, true, None);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "zip".to_string(),
+            pattern_id: "zip_header".to_string(),
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        let carved = result.expect("carved");
+        assert!(carved.validated);
+        assert!(carved.errors.is_empty());
     }
 }

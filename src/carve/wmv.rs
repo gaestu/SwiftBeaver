@@ -48,20 +48,47 @@ impl CarveHandler for WmvCarveHandler {
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<CarvedFile>, CarveError> {
+        let evidence_len = ctx.evidence.len();
+        if hit.global_offset >= evidence_len {
+            return Ok(None);
+        }
+        let remaining = evidence_len.saturating_sub(hit.global_offset);
+        if remaining < 30 {
+            return Ok(None);
+        }
+
         let header = read_exact_at(ctx, hit.global_offset, 30)
             .ok_or_else(|| CarveError::Invalid("asf header too short".to_string()))?;
         if header[0..16] != ASF_HEADER_GUID {
             return Ok(None);
         }
+
+        // Reserved bytes are fixed in ASF header object and useful to reject random GUID matches.
+        if header[28] != 0x01 || header[29] != 0x02 {
+            return Ok(None);
+        }
+
         let header_size = u64::from_le_bytes([
             header[16], header[17], header[18], header[19], header[20], header[21], header[22],
             header[23],
         ]);
+        if header_size < 30 || header_size > remaining {
+            return Ok(None);
+        }
+        if self.max_size > 0 && header_size > self.max_size {
+            return Ok(None);
+        }
+
+        let object_count = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
+        if object_count == 0 || object_count > 4096 {
+            return Ok(None);
+        }
 
         let mut file_size = None;
         let mut offset = hit.global_offset + 30;
         let header_end = hit.global_offset + header_size;
-        while offset + 24 <= header_end {
+        let mut seen = 0u32;
+        while seen < object_count && offset + 24 <= header_end {
             let obj = read_exact_at(ctx, offset, 24)
                 .ok_or_else(|| CarveError::Invalid("asf object truncated".to_string()))?;
             let guid = &obj[0..16];
@@ -69,9 +96,19 @@ impl CarveHandler for WmvCarveHandler {
                 obj[16], obj[17], obj[18], obj[19], obj[20], obj[21], obj[22], obj[23],
             ]);
             if obj_size < 24 {
-                break;
+                return Ok(None);
+            }
+            let next = match offset.checked_add(obj_size) {
+                Some(v) => v,
+                None => return Ok(None),
+            };
+            if next > header_end {
+                return Ok(None);
             }
             if guid == ASF_FILE_PROP_GUID {
+                if obj_size < 104 {
+                    return Ok(None);
+                }
                 if let Some(bytes) = read_exact_at(ctx, offset + 40, 8) {
                     file_size = Some(u64::from_le_bytes([
                         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
@@ -80,14 +117,17 @@ impl CarveHandler for WmvCarveHandler {
                     break;
                 }
             }
-            offset = offset.saturating_add(obj_size);
+            offset = next;
+            seen = seen.saturating_add(1);
         }
 
-        let mut total_end = if let Some(size) = file_size {
-            hit.global_offset + size
-        } else {
-            header_end
-        };
+        let mut total_end = header_end;
+        if let Some(size) = file_size {
+            if size < header_size || size > remaining {
+                return Ok(None);
+            }
+            total_end = hit.global_offset + size;
+        }
 
         if self.max_size > 0 {
             let max_end = hit.global_offset.saturating_add(self.max_size);
@@ -207,5 +247,38 @@ mod tests {
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
         let carved = carved.expect("carved");
         assert_eq!(carved.size, data.len() as u64);
+    }
+
+    #[test]
+    fn rejects_unreasonable_header_size() {
+        let temp_dir = tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("output root");
+
+        let mut data = vec![0u8; 256];
+        data[0..16].copy_from_slice(&ASF_HEADER_GUID);
+        data[16..24].copy_from_slice(&u64::MAX.to_le_bytes());
+        data[24..28].copy_from_slice(&1u32.to_le_bytes());
+        data[28] = 1;
+        data[29] = 2;
+
+        let input_path = temp_dir.path().join("image.bin");
+        std::fs::write(&input_path, &data).expect("write asf");
+
+        let evidence = RawFileSource::open(&input_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = WmvCarveHandler::new("wmv".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "wmv".to_string(),
+            pattern_id: "wmv_asf".to_string(),
+        };
+
+        let carved = handler.process_hit(&hit, &ctx).expect("carve");
+        assert!(carved.is_none());
     }
 }

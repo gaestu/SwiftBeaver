@@ -4,7 +4,9 @@
 //! so we use a best-effort scan for the next gzip header or EOF.
 
 use std::fs::File;
+use std::io::{self, Seek};
 
+use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
@@ -60,7 +62,6 @@ impl CarveHandler for GzipCarveHandler {
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
-        let mut validated = false;
         let mut truncated = false;
         let mut errors = Vec::new();
 
@@ -83,7 +84,6 @@ impl CarveHandler for GzipCarveHandler {
                 .read_at(offset, &mut buf)
                 .map_err(|e| CarveError::Evidence(e.to_string()))?;
             if n == 0 {
-                validated = true;
                 end_offset = Some(offset);
                 break;
             }
@@ -99,7 +99,6 @@ impl CarveHandler for GzipCarveHandler {
                     .saturating_add(absolute as u64);
                 if gzip_offset > hit.global_offset {
                     end_offset = Some(gzip_offset);
-                    validated = true;
                     break;
                 }
                 search_start = absolute + 1;
@@ -142,6 +141,11 @@ impl CarveHandler for GzipCarveHandler {
             return Ok(None);
         }
 
+        if !validate_gzip_member(&full_path, written)? {
+            let _ = std::fs::remove_file(&full_path);
+            return Ok(None);
+        }
+
         let md5_hex = format!("{:x}", md5.compute());
         let sha256_hex = hex::encode(sha256.finalize());
         let global_end = if written == 0 {
@@ -160,7 +164,7 @@ impl CarveHandler for GzipCarveHandler {
             size: written,
             md5: Some(md5_hex),
             sha256: Some(sha256_hex),
-            validated,
+            validated: true,
             truncated,
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
@@ -240,12 +244,26 @@ fn read_exact_at(ctx: &ExtractionContext, offset: u64, len: usize) -> Option<Vec
     Some(buf)
 }
 
+fn validate_gzip_member(path: &std::path::Path, expected_size: u64) -> Result<bool, CarveError> {
+    let file = File::open(path)?;
+    let mut decoder = GzDecoder::new(file);
+    if io::copy(&mut decoder, &mut io::sink()).is_err() {
+        return Ok(false);
+    }
+
+    let mut file = decoder.into_inner();
+    let consumed = file.stream_position()?;
+    Ok(consumed == expected_size)
+}
+
 #[cfg(test)]
 mod tests {
     use super::GzipCarveHandler;
     use crate::carve::{CarveHandler, ExtractionContext};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
+    use flate2::{Compression, write::GzEncoder};
+    use std::io::Write;
     use tempfile::tempdir;
 
     struct SliceEvidence {
@@ -269,11 +287,9 @@ mod tests {
     }
 
     fn minimal_gzip_payload() -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend_from_slice(&[0x1F, 0x8B, 0x08, 0x00]);
-        data.extend_from_slice(&[0x00; 6]);
-        data.extend_from_slice(b"DATA");
-        data
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(b"DATA").expect("write payload");
+        encoder.finish().expect("finish gzip")
     }
 
     #[test]
@@ -300,5 +316,30 @@ mod tests {
         let carved = carved.expect("carved");
         assert!(carved.validated);
         assert_eq!(carved.size as usize, minimal_gzip_payload().len());
+    }
+
+    #[test]
+    fn rejects_invalid_gzip_stream() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0x1F, 0x8B, 0x08, 0x00]);
+        data.extend_from_slice(&[0x00; 6]);
+        data.extend_from_slice(b"NOT_A_VALID_STREAM");
+
+        let evidence = SliceEvidence { data };
+        let handler = GzipCarveHandler::new("gz".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "gzip".to_string(),
+            pattern_id: "gzip_header".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let carved = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(carved.is_none());
     }
 }
