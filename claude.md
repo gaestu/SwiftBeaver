@@ -345,6 +345,11 @@ evidence_sha256: Option<String>
 
 ## 9. Quick Reference
 
+### Github interaction
+```
+For interacting with github use if possible gh (github cli)
+```
+
 ### Before Starting Work
 ```
 1. Read this document
