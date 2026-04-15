@@ -220,7 +220,7 @@ file_types:
       - id: "mp3_sync_fa"
         hex: "FFFA"
     footer_patterns: []
-    max_size: 104857600
+    max_size: 52428800        # 50 MB
     min_size: 128
     validator: "mp3"
   - id: "ole"

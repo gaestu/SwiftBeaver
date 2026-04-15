@@ -54,8 +54,11 @@ const SAMPLES_PER_FRAME: [[u32; 4]; 4] = [
 /// Increased from 3 to 5 for better false positive rejection.
 const MIN_FRAMES_FOR_SYNC_VALIDATION: u32 = 5;
 
-/// Maximum duration in seconds (3 hours) - used to reject implausibly long files
-const MAX_DURATION_SECONDS: u64 = 3 * 60 * 60;
+/// Maximum duration in seconds (1 hour) - used to reject implausibly long files
+const MAX_DURATION_SECONDS: u64 = 60 * 60;
+
+/// Maximum ID3v2 tag size (32 MB) — real tags rarely exceed this even with embedded art
+const MAX_ID3V2_TAG_SIZE: u64 = 32 * 1024 * 1024;
 
 pub struct Mp3CarveHandler {
     extension: String,
@@ -88,14 +91,36 @@ fn parse_id3v2_size(header: &[u8]) -> Option<u64> {
         return None;
     }
 
-    // Syncsafe integer: each byte's MSB is 0, so only 7 bits per byte
+    // Major version must be 2, 3, or 4
+    let major = header[3];
+    if major != 2 && major != 3 && major != 4 {
+        return None;
+    }
+
+    // Syncsafe bytes: bits 7 must be 0 per spec
+    if header[6] & 0x80 != 0
+        || header[7] & 0x80 != 0
+        || header[8] & 0x80 != 0
+        || header[9] & 0x80 != 0
+    {
+        return None;
+    }
+
+    // Syncsafe integer: each byte's MSB is 0, so only 7 bits per byte.
+    // Masks retained as defense-in-depth even though MSB=0 is enforced above.
     let size = ((header[6] as u64 & 0x7F) << 21)
         | ((header[7] as u64 & 0x7F) << 14)
         | ((header[8] as u64 & 0x7F) << 7)
         | (header[9] as u64 & 0x7F);
 
-    // Total = 10-byte header + tag data
-    Some(10 + size)
+    let total = 10 + size;
+
+    // Cap at maximum ID3v2 tag size
+    if total > MAX_ID3V2_TAG_SIZE {
+        return None;
+    }
+
+    Some(total)
 }
 
 /// Parse MPEG audio frame header and return (frame_size, sample_rate, samples_per_frame).
@@ -207,8 +232,6 @@ impl CarveHandler for Mp3CarveHandler {
         let mut validated = false;
         let mut truncated = false;
         let mut errors = Vec::new();
-        // Track if we started with ID3 tag (more reliable) vs sync word (needs more validation)
-        let mut started_with_id3 = false;
 
         let result: Result<u64, CarveError> = (|| {
             // Read initial header to check for ID3v2
@@ -224,7 +247,6 @@ impl CarveHandler for Mp3CarveHandler {
                     stream.read_exact(remaining_id3 as usize)?;
                 }
                 audio_start = id3_size;
-                started_with_id3 = true;
             } else {
                 // No ID3v2, check if this starts with audio frame
                 if header[0] != 0xFF || (header[1] & 0xE0) != 0xE0 {
@@ -319,11 +341,7 @@ impl CarveHandler for Mp3CarveHandler {
                 }
             }
 
-            // Validation requirements:
-            // - ID3v2 tag: valid even with 0 frames (metadata-only is rare but possible)
-            // - Sync word only: require MIN_FRAMES_FOR_SYNC_VALIDATION consecutive valid frames
-            //   to avoid false positives from random 0xFFFB/0xFFFA occurrences
-            if started_with_id3 || frame_count >= MIN_FRAMES_FOR_SYNC_VALIDATION {
+            if frame_count >= MIN_FRAMES_FOR_SYNC_VALIDATION {
                 validated = true;
             }
 
@@ -483,8 +501,8 @@ mod tests {
         let mut mp3_data = create_id3v2_header(100);
         mp3_data.resize(110, 0x00); // ID3 tag data
 
-        // Add a few frames
-        for _ in 0..3 {
+        // Add enough frames to pass validation (MIN_FRAMES_FOR_SYNC_VALIDATION)
+        for _ in 0..5 {
             mp3_data.extend_from_slice(&create_mp3_frame(9, 0, false)); // 128kbps, 44100Hz
         }
 
@@ -624,6 +642,62 @@ mod tests {
             result.is_some(),
             "Should accept sync-word hit with {} valid frames",
             MIN_FRAMES_FOR_SYNC_VALIDATION
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_id3v2_version() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"ID3");
+        data.push(0x30); // Invalid major version
+        data.push(0x00);
+        data.push(0x00);
+        data.extend_from_slice(&[0x00, 0x00, 0x01, 0x00]); // syncsafe size
+        data.resize(200, 0x00);
+
+        let evidence = SliceEvidence { data };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "mp3".to_string(),
+            pattern_id: "mp3_id3v2".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none(), "Should reject invalid ID3v2 version");
+    }
+
+    #[test]
+    fn rejects_id3v2_without_audio_frames() {
+        // Valid ID3v2.3 header with reasonable size, but no valid frames after
+        let mut data = create_id3v2_header(200);
+        data.resize(210, 0x00); // ID3 tag data (zeros, no valid frames)
+        data.resize(500, 0x00); // Extra space with no valid frames
+
+        let evidence = SliceEvidence { data };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "mp3".to_string(),
+            pattern_id: "mp3_id3v2".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(
+            result.is_none(),
+            "Should reject ID3v2 tag with no audio frames (frame_count < 5)"
         );
     }
 }

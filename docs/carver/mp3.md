@@ -9,6 +9,9 @@ The MP3 carver extracts MPEG Audio Layer III files by detecting ID3 tags and/or 
 **ID3v2 Pattern**: `ID3` (ASCII bytes: 0x49 0x44 0x33)
 - Preferred starting point when present
 - Contains tag size information for accurate positioning
+- **Version validation**: Major version must be 2, 3, or 4 (the only valid ID3v2 versions)
+- **Syncsafe byte validation**: Bytes 6–9 must each have MSB=0 per spec
+- **Size cap**: Total tag size (header + data) capped at 32 MB
 
 **MPEG Frame Sync Patterns**:
 - `0xFF 0xFB`: MPEG1 Layer III, no CRC
@@ -98,10 +101,10 @@ The MP3 carver includes additional checks to reduce false positives:
 
 1. **Sample rate consistency**: All frames must have the same sample rate. If a frame has a different sample rate than previous frames, carving stops.
 
-2. **Maximum duration**: Files with estimated duration > 3 hours are rejected as implausible.
+2. **Maximum duration**: Files with estimated duration > 1 hour are rejected as implausible.
 
 ```rust
-const MAX_DURATION_SECONDS: u64 = 3 * 60 * 60;  // 3 hours
+const MAX_DURATION_SECONDS: u64 = 60 * 60;  // 1 hour
 let duration = total_samples / sample_rate;
 if duration > MAX_DURATION_SECONDS {
     break;  // Stop carving
@@ -111,13 +114,12 @@ if duration > MAX_DURATION_SECONDS {
 ## Validation
 
 - **Validated**: `true` if:
-  - ID3 tag found and parsed, OR
-  - At least **5** consecutive valid MPEG frames found (increased from 3 for FP reduction)
+  - At least **5** consecutive valid MPEG frames found (applies to all detections, including ID3-based)
 - **Truncated**: `true` if:
   - max_size reached during frame parsing
   - EOF reached mid-frame
 - **Invalid**: Removed if:
-  - Less than 3 valid frames (sync-word detection)
+  - Less than **5** valid frames (all detection methods)
   - Frame header validation fails
 
 ## Size Constraints
@@ -126,6 +128,8 @@ if duration > MAX_DURATION_SECONDS {
 - **Default max_size**: 50 MB
 - Minimum viable MP3: ~200 bytes (ID3 tag + few frames)
 - Files below min_size are discarded
+
+> **Tip:** For media-heavy images (e.g. containing podcasts or audiobooks), raise `max_size` in your config override. At 128 kbps a 1-hour MP3 is ~57 MB.
 
 ## Hash Computation
 
