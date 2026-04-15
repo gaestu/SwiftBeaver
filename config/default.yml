@@ -198,7 +198,7 @@ file_types:
       - id: "wav_riff"
         hex: "52494646"
     footer_patterns: []
-    max_size: 1073741824
+    max_size: 524288000
     min_size: 44
     validator: "wav"
   - id: "avi"
@@ -256,7 +256,7 @@ file_types:
       - id: "bzip2_header"
         hex: "425A68"
     footer_patterns: []
-    max_size: 1073741824
+    max_size: 104857600
     min_size: 14
     validator: "bzip2"
   - id: "xz"
@@ -274,7 +274,7 @@ file_types:
       - id: "ogg_sync"
         hex: "4F676753"
     footer_patterns: []
-    max_size: 1073741824
+    max_size: 524288000
     min_size: 28
     validator: "ogg"
   - id: "mov"

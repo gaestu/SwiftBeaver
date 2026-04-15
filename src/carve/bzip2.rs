@@ -13,6 +13,8 @@ use crate::scanner::NormalizedHit;
 
 const BZIP2_MAGIC: [u8; 3] = [0x42, 0x5A, 0x68];
 const BZIP2_END: [u8; 6] = [0x17, 0x72, 0x45, 0x38, 0x50, 0x90];
+/// Maximum bytes to search for footer before giving up (10MB)
+const BZIP2_SEARCH_LIMIT: u64 = 10 * 1024 * 1024;
 
 pub struct Bzip2CarveHandler {
     extension: String,
@@ -100,6 +102,15 @@ impl CarveHandler for Bzip2CarveHandler {
                 end_offset = Some(absolute + BZIP2_END.len() as u64);
                 validated = true;
                 break;
+            }
+
+            // Early termination: if we've searched past BZIP2_SEARCH_LIMIT without
+            // finding the footer, this is likely a false positive
+            let bytes_searched = offset.saturating_sub(hit.global_offset);
+            if bytes_searched > BZIP2_SEARCH_LIMIT && !validated {
+                // Searched too far without finding footer - likely false positive
+                let _ = std::fs::remove_file(&full_path);
+                return Ok(None);
             }
 
             offset = offset.saturating_add(buf.len() as u64);
@@ -239,5 +250,65 @@ mod tests {
         let carved = carved.expect("carved");
         assert!(carved.validated);
         assert_eq!(carved.size, data.len() as u64);
+    }
+
+    #[test]
+    fn rejects_when_footer_not_found_within_limit() {
+        // Create bzip2 header followed by data larger than BZIP2_SEARCH_LIMIT (10MB)
+        // without a valid footer - this should be rejected as a false positive
+        let mut data = Vec::new();
+        data.extend_from_slice(b"BZh9");
+        // Add 11MB of zeros (exceeds 10MB search limit)
+        data.extend(vec![0u8; 11 * 1024 * 1024]);
+        // No end marker added - simulates false positive
+
+        let evidence = SliceEvidence { data };
+        let handler = Bzip2CarveHandler::new("bz2".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "bzip2".to_string(),
+            pattern_id: "bzip2_header".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        // Should reject because footer not found within 10MB search limit
+        let carved = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(
+            carved.is_none(),
+            "should reject when footer not found within search limit"
+        );
+    }
+
+    #[test]
+    fn accepts_footer_within_limit() {
+        // Create bzip2 with footer at ~5MB (within limit)
+        let mut data = Vec::new();
+        data.extend_from_slice(b"BZh9");
+        data.extend(vec![0u8; 5 * 1024 * 1024]); // 5MB of data
+        data.extend_from_slice(&[0x17, 0x72, 0x45, 0x38, 0x50, 0x90]); // footer
+
+        let evidence = SliceEvidence { data: data.clone() };
+        let handler = Bzip2CarveHandler::new("bz2".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "bzip2".to_string(),
+            pattern_id: "bzip2_header".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        // Should accept because footer found within limit
+        let carved = handler.process_hit(&hit, &ctx).expect("process");
+        let carved = carved.expect("should carve file with footer within limit");
+        assert!(carved.validated);
     }
 }

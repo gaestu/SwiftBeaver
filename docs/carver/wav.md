@@ -42,10 +42,29 @@ stream.read_exact(remaining as usize)?;
 
 ## Validation
 
+### RIFF Structure Validation
+
 - **Validated**: `true` if:
   - "RIFF" signature matches
   - "WAVE" form type matches
   - Size field is reasonable (>= 4)
+  - Valid `fmt ` subchunk found within first 64 KB
+
+### Audio Format Validation (fmt chunk)
+
+The carver validates the `fmt ` subchunk to prevent false positives:
+
+| Field | Valid Values | Description |
+|-------|--------------|-------------|
+| Audio Format | 0x0001 (PCM), 0x0003 (IEEE Float) | Compression format |
+| Channels | 1-8 | Number of audio channels |
+| Sample Rate | 8,000 - 192,000 Hz | Samples per second |
+| Bits per Sample | 8, 16, 24, 32 | Bit depth |
+
+Files with invalid audio parameters are rejected as false positives.
+
+### Validation Status
+
 - **Truncated**: `true` if:
   - max_size reached before complete file
   - EOF reached before complete file
@@ -57,7 +76,7 @@ stream.read_exact(remaining as usize)?;
 ## Size Constraints
 
 - **Default min_size**: 44 bytes (minimal WAV with tiny PCM data)
-- **Default max_size**: 2 GB
+- **Default max_size**: 500 MB
 - Minimum viable WAV: 44 bytes (RIFF header + fmt chunk + data chunk header)
 - Files below min_size are discarded
 

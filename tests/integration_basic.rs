@@ -215,13 +215,22 @@ fn sample_rar4() -> Vec<u8> {
 }
 
 fn sample_7z() -> Vec<u8> {
+    // Build header bytes 12-31 first (values to be CRCed)
+    let next_header_offset: u64 = 0;
+    let next_header_size: u64 = 0;
+    let next_header_crc: u32 = 0;
+    let mut crc_region = Vec::new();
+    crc_region.extend_from_slice(&next_header_offset.to_le_bytes());
+    crc_region.extend_from_slice(&next_header_size.to_le_bytes());
+    crc_region.extend_from_slice(&next_header_crc.to_le_bytes());
+    // Compute CRC of bytes 12-31
+    let header_crc = crc32fast::hash(&crc_region);
+
     let mut sevenz = Vec::new();
-    sevenz.extend_from_slice(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]);
-    sevenz.extend_from_slice(&[0u8, 4u8]);
-    sevenz.extend_from_slice(&[0u8; 4]);
-    sevenz.extend_from_slice(&0u64.to_le_bytes());
-    sevenz.extend_from_slice(&0u64.to_le_bytes());
-    sevenz.extend_from_slice(&[0u8; 4]);
+    sevenz.extend_from_slice(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]); // bytes 0-5 magic
+    sevenz.extend_from_slice(&[0u8, 4u8]); // bytes 6-7 version
+    sevenz.extend_from_slice(&header_crc.to_le_bytes()); // bytes 8-11 CRC
+    sevenz.extend_from_slice(&crc_region); // bytes 12-31
     sevenz
 }
 

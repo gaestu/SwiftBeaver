@@ -11,6 +11,11 @@ use crate::scanner::NormalizedHit;
 const SEVENZ_MAGIC: [u8; 6] = [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C];
 const SEVENZ_HEADER_LEN: usize = 32;
 
+/// Maximum reasonable offset to the next header (1GB)
+const MAX_NEXT_HEADER_OFFSET: u64 = 1024 * 1024 * 1024;
+/// Maximum reasonable size for header structures (64MB)
+const MAX_NEXT_HEADER_SIZE: u64 = 64 * 1024 * 1024;
+
 pub struct SevenZCarveHandler {
     extension: String,
     min_size: u64,
@@ -53,6 +58,13 @@ impl CarveHandler for SevenZCarveHandler {
             return Ok(None);
         }
 
+        // Validate CRC32 of bytes 12-31 against stored CRC in bytes 8-11
+        let stored_crc = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
+        let computed_crc = crc32fast::hash(&header[12..32]);
+        if stored_crc != computed_crc {
+            return Ok(None); // Invalid header CRC - reject
+        }
+
         let next_header_offset = u64::from_le_bytes([
             header[12], header[13], header[14], header[15], header[16], header[17], header[18],
             header[19],
@@ -61,6 +73,14 @@ impl CarveHandler for SevenZCarveHandler {
             header[20], header[21], header[22], header[23], header[24], header[25], header[26],
             header[27],
         ]);
+
+        // Sanity checks on size fields to reject unreasonable values
+        if next_header_offset > MAX_NEXT_HEADER_OFFSET {
+            return Ok(None);
+        }
+        if next_header_size > MAX_NEXT_HEADER_SIZE {
+            return Ok(None);
+        }
 
         let mut total_size = (SEVENZ_HEADER_LEN as u64)
             .saturating_add(next_header_offset)
@@ -146,13 +166,22 @@ mod tests {
         let output_root = temp_dir.path().join("out");
         std::fs::create_dir_all(&output_root).expect("output root");
 
+        // Build header bytes 12-31 first (values to be CRCed)
+        let next_header_offset: u64 = 0;
+        let next_header_size: u64 = 0;
+        let next_header_crc: u32 = 0;
+        let mut crc_region = Vec::new();
+        crc_region.extend_from_slice(&next_header_offset.to_le_bytes());
+        crc_region.extend_from_slice(&next_header_size.to_le_bytes());
+        crc_region.extend_from_slice(&next_header_crc.to_le_bytes());
+        // Compute CRC of bytes 12-31
+        let header_crc = crc32fast::hash(&crc_region);
+
         let mut sevenz = Vec::new();
-        sevenz.extend_from_slice(&super::SEVENZ_MAGIC);
-        sevenz.extend_from_slice(&[0u8, 4u8]);
-        sevenz.extend_from_slice(&[0u8; 4]);
-        sevenz.extend_from_slice(&0u64.to_le_bytes());
-        sevenz.extend_from_slice(&0u64.to_le_bytes());
-        sevenz.extend_from_slice(&[0u8; 4]);
+        sevenz.extend_from_slice(&super::SEVENZ_MAGIC); // bytes 0-5
+        sevenz.extend_from_slice(&[0u8, 4u8]); // bytes 6-7 (version)
+        sevenz.extend_from_slice(&header_crc.to_le_bytes()); // bytes 8-11 (CRC of 12-31)
+        sevenz.extend_from_slice(&crc_region); // bytes 12-31
 
         let input_path = temp_dir.path().join("image.bin");
         std::fs::write(&input_path, &sevenz).expect("write 7z");
@@ -174,5 +203,81 @@ mod tests {
         let carved = carved.expect("carved");
         assert!(carved.validated);
         assert_eq!(carved.size, sevenz.len() as u64);
+    }
+
+    #[test]
+    fn rejects_invalid_crc() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("output root");
+
+        let mut sevenz = Vec::new();
+        sevenz.extend_from_slice(&super::SEVENZ_MAGIC); // bytes 0-5
+        sevenz.extend_from_slice(&[0u8, 4u8]); // bytes 6-7 (version)
+        sevenz.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]); // bytes 8-11 (bad CRC)
+        sevenz.extend_from_slice(&[0u8; 20]); // bytes 12-31 (zeros)
+
+        let input_path = temp_dir.path().join("image.bin");
+        std::fs::write(&input_path, &sevenz).expect("write 7z");
+
+        let evidence = RawFileSource::open(&input_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "7z".to_string(),
+            pattern_id: "7z_header".to_string(),
+        };
+
+        // Should reject due to invalid CRC
+        let carved = handler.process_hit(&hit, &ctx).expect("carve");
+        assert!(carved.is_none(), "should reject invalid CRC");
+    }
+
+    #[test]
+    fn rejects_excessive_offset() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("output root");
+
+        // Create header with excessive next_header_offset (> 1GB)
+        let next_header_offset: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+        let next_header_size: u64 = 0;
+        let next_header_crc: u32 = 0;
+        let mut crc_region = Vec::new();
+        crc_region.extend_from_slice(&next_header_offset.to_le_bytes());
+        crc_region.extend_from_slice(&next_header_size.to_le_bytes());
+        crc_region.extend_from_slice(&next_header_crc.to_le_bytes());
+        let header_crc = crc32fast::hash(&crc_region);
+
+        let mut sevenz = Vec::new();
+        sevenz.extend_from_slice(&super::SEVENZ_MAGIC);
+        sevenz.extend_from_slice(&[0u8, 4u8]);
+        sevenz.extend_from_slice(&header_crc.to_le_bytes());
+        sevenz.extend_from_slice(&crc_region);
+
+        let input_path = temp_dir.path().join("image.bin");
+        std::fs::write(&input_path, &sevenz).expect("write 7z");
+
+        let evidence = RawFileSource::open(&input_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "7z".to_string(),
+            pattern_id: "7z_header".to_string(),
+        };
+
+        // Should reject due to excessive offset
+        let carved = handler.process_hit(&hit, &ctx).expect("carve");
+        assert!(carved.is_none(), "should reject excessive offset");
     }
 }

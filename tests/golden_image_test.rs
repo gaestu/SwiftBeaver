@@ -255,10 +255,10 @@ fn golden_carves_from_raw() {
     for record in deserializer.into_iter::<serde_json::Value>() {
         match record {
             Ok(record) => {
-                if let Some(hash) = record.get("sha256").and_then(|v| v.as_str()) {
-                    if manifest_hashes.contains(hash) {
-                        matched += 1;
-                    }
+                if let Some(hash) = record.get("sha256").and_then(|v| v.as_str())
+                    && manifest_hashes.contains(hash)
+                {
+                    matched += 1;
                 }
             }
             Err(err) => {

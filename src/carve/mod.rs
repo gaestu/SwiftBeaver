@@ -314,6 +314,26 @@ impl<'a> CarveStream<'a> {
     pub(crate) fn bytes_written(&self) -> u64 {
         self.written
     }
+
+    /// Read data from current offset without advancing or writing.
+    /// Used to peek ahead for validation without consuming data.
+    pub(crate) fn peek_exact(&self, len: usize) -> Result<Vec<u8>, CarveError> {
+        let mut buf = vec![0u8; len];
+        let mut read = 0usize;
+        let mut offset = self.offset;
+        while read < len {
+            let n = self
+                .evidence
+                .read_at(offset, &mut buf[read..])
+                .map_err(|e| CarveError::Evidence(e.to_string()))?;
+            if n == 0 {
+                return Err(CarveError::Eof);
+            }
+            read += n;
+            offset += n as u64;
+        }
+        Ok(buf)
+    }
 }
 
 pub(crate) fn write_range(

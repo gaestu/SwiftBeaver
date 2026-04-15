@@ -25,6 +25,8 @@ const VERSION_4: u16 = 4;
 const SECTOR_SIZE_V3: u64 = 512;
 /// Sector size for version 4
 const SECTOR_SIZE_V4: u64 = 4096;
+/// Maximum FAT sectors allowed (supports files up to ~128MB)
+const MAX_FAT_SECTORS: u32 = 1000;
 
 pub struct OleCarveHandler {
     extension: String,
@@ -121,6 +123,14 @@ fn parse_ole_header(header: &[u8]) -> Result<(u64, u64), CarveError> {
 
     // Read number of FAT sectors (this tells us how many sectors contain FAT entries)
     let num_fat_sectors = u32::from_le_bytes([header[44], header[45], header[46], header[47]]);
+
+    // Cap FAT sectors to reject implausibly large files
+    if num_fat_sectors > MAX_FAT_SECTORS {
+        return Err(CarveError::Invalid(format!(
+            "ole num_fat_sectors {} exceeds limit {}",
+            num_fat_sectors, MAX_FAT_SECTORS
+        )));
+    }
 
     // Read first directory sector
     let first_dir_sector = u32::from_le_bytes([header[48], header[49], header[50], header[51]]);
@@ -751,5 +761,43 @@ mod tests {
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn rejects_excessive_fat_sectors() {
+        let mut ole = create_minimal_ole();
+
+        // Set num_fat_sectors to exceed MAX_FAT_SECTORS (1000)
+        ole[44..48].copy_from_slice(&2000u32.to_le_bytes());
+
+        let evidence = SliceEvidence { data: ole };
+        let handler = OleCarveHandler::new("doc".to_string(), 0, 0, None);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "ole".to_string(),
+            pattern_id: "ole_cfb".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        // Should reject due to excessive FAT sectors
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none(), "should reject excessive FAT sectors");
+    }
+
+    #[test]
+    fn accepts_fat_sectors_at_limit() {
+        let mut ole = create_minimal_ole();
+
+        // Set num_fat_sectors to exactly MAX_FAT_SECTORS (1000)
+        ole[44..48].copy_from_slice(&1000u32.to_le_bytes());
+
+        // This will still parse, though size estimation will be large
+        let result = parse_ole_header(&ole);
+        assert!(result.is_ok(), "should accept FAT sectors at limit");
     }
 }

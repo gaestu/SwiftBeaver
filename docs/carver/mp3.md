@@ -72,7 +72,7 @@ let frame_size = (72 * bitrate * 1000) / sample_rate + padding;
 
 ### 4. Frame Validation
 
-For sync-word detection (no ID3), requires minimum 3 consecutive valid frames:
+For sync-word detection (no ID3), requires minimum **5** consecutive valid frames:
 
 ```rust
 let mut valid_frames = 0;
@@ -87,8 +87,24 @@ loop {
     stream.read_exact(frame_size - 4)?;  // Read frame data
 }
 
-if valid_frames < MIN_FRAMES_FOR_SYNC_VALIDATION {
+if valid_frames < MIN_FRAMES_FOR_SYNC_VALIDATION {  // MIN_FRAMES = 5
     return Ok(None);  // Too few frames, likely false positive
+}
+```
+
+### 5. Additional Validation (False Positive Mitigation)
+
+The MP3 carver includes additional checks to reduce false positives:
+
+1. **Sample rate consistency**: All frames must have the same sample rate. If a frame has a different sample rate than previous frames, carving stops.
+
+2. **Maximum duration**: Files with estimated duration > 3 hours are rejected as implausible.
+
+```rust
+const MAX_DURATION_SECONDS: u64 = 3 * 60 * 60;  // 3 hours
+let duration = total_samples / sample_rate;
+if duration > MAX_DURATION_SECONDS {
+    break;  // Stop carving
 }
 ```
 
@@ -96,7 +112,7 @@ if valid_frames < MIN_FRAMES_FOR_SYNC_VALIDATION {
 
 - **Validated**: `true` if:
   - ID3 tag found and parsed, OR
-  - At least 3 consecutive valid MPEG frames found
+  - At least **5** consecutive valid MPEG frames found (increased from 3 for FP reduction)
 - **Truncated**: `true` if:
   - max_size reached during frame parsing
   - EOF reached mid-frame

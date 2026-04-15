@@ -10,6 +10,65 @@ use crate::carve::{
 };
 use crate::scanner::NormalizedHit;
 
+/// PCM audio format
+const WAV_AUDIO_FORMAT_PCM: u16 = 0x0001;
+/// IEEE float audio format
+const WAV_AUDIO_FORMAT_IEEE_FLOAT: u16 = 0x0003;
+/// Minimum reasonable sample rate (8kHz)
+const WAV_MIN_SAMPLE_RATE: u32 = 8000;
+/// Maximum reasonable sample rate (192kHz)
+const WAV_MAX_SAMPLE_RATE: u32 = 192000;
+/// Maximum reasonable number of channels
+const WAV_MAX_CHANNELS: u16 = 8;
+/// Maximum bytes to search for fmt chunk
+const WAV_FMT_SEARCH_LIMIT: usize = 65536;
+
+/// Validate the fmt chunk data for reasonable audio parameters.
+/// Returns true if the format parameters are valid.
+fn validate_fmt_chunk(data: &[u8]) -> bool {
+    if data.len() < 16 {
+        return false;
+    }
+    let audio_format = u16::from_le_bytes([data[0], data[1]]);
+    let num_channels = u16::from_le_bytes([data[2], data[3]]);
+    let sample_rate = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let bits_per_sample = u16::from_le_bytes([data[14], data[15]]);
+
+    // Only accept PCM and IEEE float formats for now
+    if audio_format != WAV_AUDIO_FORMAT_PCM && audio_format != WAV_AUDIO_FORMAT_IEEE_FLOAT {
+        return false;
+    }
+    if num_channels == 0 || num_channels > WAV_MAX_CHANNELS {
+        return false;
+    }
+    if !(WAV_MIN_SAMPLE_RATE..=WAV_MAX_SAMPLE_RATE).contains(&sample_rate) {
+        return false;
+    }
+    if !matches!(bits_per_sample, 8 | 16 | 24 | 32) {
+        return false;
+    }
+    true
+}
+
+/// Search for the "fmt " subchunk within data and validate it.
+/// Returns true if a valid fmt chunk is found.
+fn find_and_validate_fmt_chunk(data: &[u8]) -> bool {
+    // fmt chunk starts with "fmt " followed by 4-byte size
+    const FMT_MARKER: &[u8; 4] = b"fmt ";
+
+    for i in 0..data.len().saturating_sub(8) {
+        if &data[i..i + 4] == FMT_MARKER {
+            let chunk_size =
+                u32::from_le_bytes([data[i + 4], data[i + 5], data[i + 6], data[i + 7]]) as usize;
+            let chunk_data_start = i + 8;
+            if chunk_data_start + 16 <= data.len() && chunk_size >= 16 {
+                return validate_fmt_chunk(&data[chunk_data_start..]);
+            }
+        }
+    }
+    false
+}
+
 pub struct WavCarveHandler {
     extension: String,
     min_size: u64,
@@ -71,6 +130,21 @@ impl CarveHandler for WavCarveHandler {
             // Sanity check on size
             if total_size < 12 {
                 return Err(CarveError::Invalid("wav size too small".to_string()));
+            }
+
+            // Read enough data to find and validate the fmt chunk
+            let peek_size = WAV_FMT_SEARCH_LIMIT.min((total_size as usize).saturating_sub(12));
+            if peek_size > 0 {
+                let peek_data = stream.peek_exact(peek_size)?;
+                if !find_and_validate_fmt_chunk(&peek_data) {
+                    return Err(CarveError::Invalid(
+                        "wav fmt chunk missing or invalid".to_string(),
+                    ));
+                }
+            } else {
+                return Err(CarveError::Invalid(
+                    "wav too small for fmt chunk".to_string(),
+                ));
             }
 
             // Apply max_size limit
@@ -239,7 +313,7 @@ mod tests {
         data.extend_from_slice(b"RIFF");
         data.extend_from_slice(&100u32.to_le_bytes());
         data.extend_from_slice(b"AVI "); // Not WAVE
-        data.extend_from_slice(&vec![0u8; 100]);
+        data.extend_from_slice(&[0u8; 100]);
 
         let evidence = SliceEvidence { data };
         let handler = WavCarveHandler::new("wav".to_string(), 0, 0);
@@ -306,5 +380,109 @@ mod tests {
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
         assert!(result.is_none(), "should reject file below min_size");
+    }
+
+    #[test]
+    fn rejects_invalid_sample_rate() {
+        // Create WAV with invalid sample rate (too low)
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&36u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // 1 channel
+        wav.extend_from_slice(&100u32.to_le_bytes()); // Invalid sample rate (too low, < 8000)
+        wav.extend_from_slice(&200u32.to_le_bytes()); // Byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes()); // Block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // Bits per sample
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&0u32.to_le_bytes());
+
+        let evidence = SliceEvidence { data: wav };
+        let handler = WavCarveHandler::new("wav".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "wav".to_string(),
+            pattern_id: "wav_riff".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none(), "should reject invalid sample rate");
+    }
+
+    #[test]
+    fn rejects_invalid_channels() {
+        // Create WAV with too many channels
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&36u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&100u16.to_le_bytes()); // Invalid: 100 channels (> 8)
+        wav.extend_from_slice(&44100u32.to_le_bytes()); // Sample rate
+        wav.extend_from_slice(&88200u32.to_le_bytes()); // Byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes()); // Block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // Bits per sample
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&0u32.to_le_bytes());
+
+        let evidence = SliceEvidence { data: wav };
+        let handler = WavCarveHandler::new("wav".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "wav".to_string(),
+            pattern_id: "wav_riff".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none(), "should reject too many channels");
+    }
+
+    #[test]
+    fn rejects_missing_fmt_chunk() {
+        // Create WAV without fmt chunk
+        // RIFF size = total file size - 8
+        // We have: "RIFF"(4) + size(4) + "WAVE"(4) + "data"(4) + size(4) + data(20) = 40 bytes
+        // So RIFF size = 40 - 8 = 32
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&32u32.to_le_bytes()); // Correct size field
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"data"); // Missing fmt chunk
+        wav.extend_from_slice(&20u32.to_le_bytes());
+        wav.extend_from_slice(&[0u8; 20]);
+
+        let evidence = SliceEvidence { data: wav };
+        let handler = WavCarveHandler::new("wav".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "wav".to_string(),
+            pattern_id: "wav_riff".to_string(),
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none(), "should reject missing fmt chunk");
     }
 }

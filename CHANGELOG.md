@@ -4,7 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-- TBD
+### Fixed
+- **Reduced false positive rates for 6 carvers** (Issue #6):
+  - **7z**: Added CRC32 header validation and sanity limits (max offset: 1GB, max header size: 64MB)
+  - **WAV**: Added fmt subchunk validation (audio format, channels, sample rate, bits per sample)
+  - **OGG**: Reduced page limit from 1M to 100K, added per-page data size validation
+  - **BZIP2**: Added 10MB search limit to reject false positives when footer not found quickly
+  - **MP3**: Increased minimum frames from 3 to 5, added sample rate consistency check, added 3-hour max duration
+  - **OLE**: Added 1000 FAT sector cap to prevent excessive size estimates
+
+### Changed
+- Reduced default max_size for false-positive-prone formats:
+  - BZIP2: 1GB → 100MB
+  - OGG: 1GB → 500MB
+  - WAV: 1GB → 500MB
+
+### Added
+- Documentation for BZIP2 and OGG carvers (`docs/carver/bzip2.md`, `docs/carver/ogg.md`)
 
 ## 0.3.0
 

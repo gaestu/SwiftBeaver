@@ -262,7 +262,7 @@ mod tests {
         data.extend_from_slice(b"RIFF");
         data.extend_from_slice(&100u32.to_le_bytes());
         data.extend_from_slice(b"WAVE"); // Not AVI
-        data.extend_from_slice(&vec![0u8; 100]);
+        data.extend_from_slice(&[0u8; 100]);
 
         let evidence = SliceEvidence { data };
         let handler = AviCarveHandler::new("avi".to_string(), 0, 0);

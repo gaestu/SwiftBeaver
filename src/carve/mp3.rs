@@ -51,7 +51,11 @@ const SAMPLES_PER_FRAME: [[u32; 4]; 4] = [
 
 /// Minimum number of consecutive valid frames required for sync-word based detection.
 /// This helps reduce false positives from random 0xFFFB/0xFFFA bytes.
-const MIN_FRAMES_FOR_SYNC_VALIDATION: u32 = 3;
+/// Increased from 3 to 5 for better false positive rejection.
+const MIN_FRAMES_FOR_SYNC_VALIDATION: u32 = 5;
+
+/// Maximum duration in seconds (3 hours) - used to reject implausibly long files
+const MAX_DURATION_SECONDS: u64 = 3 * 60 * 60;
 
 pub struct Mp3CarveHandler {
     extension: String,
@@ -94,9 +98,9 @@ fn parse_id3v2_size(header: &[u8]) -> Option<u64> {
     Some(10 + size)
 }
 
-/// Parse MPEG audio frame header and return frame size in bytes.
+/// Parse MPEG audio frame header and return (frame_size, sample_rate, samples_per_frame).
 /// Frame header is 4 bytes with sync word 0xFFE or 0xFFF.
-fn parse_frame_header(header: &[u8]) -> Option<u32> {
+fn parse_frame_header_with_rate(header: &[u8]) -> Option<(u32, u32, u32)> {
     if header.len() < 4 {
         return None;
     }
@@ -160,7 +164,7 @@ fn parse_frame_header(header: &[u8]) -> Option<u32> {
         slot_size * bitrate * 1000 / sample_rate + padding as u32
     };
 
-    Some(frame_size)
+    Some((frame_size, sample_rate, samples))
 }
 
 /// Check for ID3v1 tag at the given data (128 bytes starting with "TAG").
@@ -234,16 +238,23 @@ impl CarveHandler for Mp3CarveHandler {
             // Now walk audio frames
             let mut total_size = audio_start.max(10); // We've already read at least 10 bytes
             let mut frame_count = 0u32;
-            let max_frames = 100000; // Reasonable limit
+            let max_frames = 100_000u32; // Reasonable limit
             let max_size = if self.max_size > 0 {
                 self.max_size
             } else {
                 500 * 1024 * 1024
             };
 
+            // Track expected sample rate for consistency checking
+            let mut expected_sample_rate: Option<u32> = None;
+            // Track total samples for duration estimation
+            let mut total_samples: u64 = 0;
+
             // If we didn't have ID3v2, we need to parse the first frame from what we read
             if audio_start == 0 {
-                if let Some(frame_size) = parse_frame_header(&header[0..4]) {
+                if let Some((frame_size, sample_rate, samples_per_frame)) =
+                    parse_frame_header_with_rate(&header[0..4])
+                {
                     // Read rest of first frame (we read 10 bytes, frame needs frame_size)
                     let remaining = frame_size.saturating_sub(10) as usize;
                     if remaining > 0 {
@@ -251,6 +262,8 @@ impl CarveHandler for Mp3CarveHandler {
                     }
                     total_size = frame_size as u64;
                     frame_count = 1;
+                    expected_sample_rate = Some(sample_rate);
+                    total_samples += samples_per_frame as u64;
                 } else {
                     return Err(CarveError::Invalid(
                         "mp3: invalid first frame header".to_string(),
@@ -273,11 +286,33 @@ impl CarveHandler for Mp3CarveHandler {
                     break;
                 }
 
-                // Parse frame header
-                if let Some(frame_size) = parse_frame_header(&frame_header) {
+                // Parse frame header with sample rate for consistency check
+                if let Some((frame_size, sample_rate, samples_per_frame)) =
+                    parse_frame_header_with_rate(&frame_header)
+                {
+                    // Check sample rate consistency to reject false positives
+                    if let Some(expected) = expected_sample_rate {
+                        if sample_rate != expected {
+                            // Inconsistent sample rate - likely false positive, stop here
+                            break;
+                        }
+                    } else {
+                        expected_sample_rate = Some(sample_rate);
+                    }
+
                     stream.read_exact(frame_size as usize)?;
                     total_size += frame_size as u64;
                     frame_count += 1;
+                    total_samples += samples_per_frame as u64;
+
+                    // Check duration limit
+                    if let Some(sr) = expected_sample_rate {
+                        let duration_secs = total_samples / sr as u64;
+                        if duration_secs > MAX_DURATION_SECONDS {
+                            // Implausibly long - stop here
+                            break;
+                        }
+                    }
                 } else {
                     // Invalid frame header - stop without writing it
                     break;
@@ -407,7 +442,7 @@ mod tests {
         ];
 
         // Calculate frame size and add padding data
-        if let Some(frame_size) = parse_frame_header(&header) {
+        if let Some((frame_size, _, _)) = parse_frame_header_with_rate(&header) {
             header.resize(frame_size as usize, 0x00);
         }
 
@@ -425,8 +460,22 @@ mod tests {
     fn parse_frame_header_basic() {
         // MPEG1 Layer III, 128kbps, 44100Hz, no padding
         let header = [0xFF, 0xFB, 0x90, 0x00];
-        let size = parse_frame_header(&header).unwrap();
+        let (size, rate, samples) = parse_frame_header_with_rate(&header).unwrap();
         assert_eq!(size, 417); // 144 * 128000 / 44100 = 417
+        assert_eq!(rate, 44100);
+        assert_eq!(samples, 1152); // MPEG1 Layer III
+    }
+
+    #[test]
+    fn parse_frame_header_mpeg2_samples() {
+        // MPEG2 Layer III uses 576 samples per frame, not 1152
+        // 0xFF 0xF3 = sync + MPEG2 (10) + Layer III (01) + no CRC (1)
+        // 0x90 = bitrate_idx=9 (80kbps for MPEG2 L3), sample_rate_idx=0 (22050Hz)
+        let header = [0xFF, 0xF3, 0x90, 0x00];
+        let (size, rate, samples) = parse_frame_header_with_rate(&header).unwrap();
+        assert_eq!(rate, 22050);
+        assert_eq!(samples, 576); // MPEG2 Layer III uses 576 samples
+        assert_eq!(size, 72 * 80000 / 22050); // 72 slot size for MPEG2, 80kbps
     }
 
     #[test]

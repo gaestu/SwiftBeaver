@@ -27,6 +27,7 @@ pub struct Manifest {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct ManifestFile {
     pub path: String,
     pub extension: String,
@@ -84,6 +85,7 @@ pub fn manifest_available() -> bool {
 // ============================================================================
 
 /// Get expected files from manifest filtered by extension(s)
+#[allow(dead_code)]
 pub fn get_expected_files(manifest: &Manifest, extensions: &[&str]) -> Vec<ManifestFile> {
     manifest
         .files
