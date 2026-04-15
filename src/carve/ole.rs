@@ -209,6 +209,11 @@ fn refine_ole_size(
 ) -> Result<u64, CarveError> {
     let header_size = 512u64; // Always 512 for header
 
+    // Calculate the maximum addressable sector from the FAT capacity
+    let num_fat_sectors = u32::from_le_bytes([header[44], header[45], header[46], header[47]]);
+    let entries_per_fat_sector = sector_size / 4;
+    let max_addressable_sector = num_fat_sectors as u64 * entries_per_fat_sector;
+
     // Read DIFAT entries from header to find FAT sector locations
     let mut fat_sectors = Vec::new();
 
@@ -224,19 +229,24 @@ fn refine_ole_size(
             header[offset + 3],
         ]);
         if sector_id < 0xFFFFFFFA {
-            fat_sectors.push(sector_id);
+            // Validate DIFAT entry is within addressable range
+            if (sector_id as u64) < max_addressable_sector {
+                fat_sectors.push(sector_id);
+            }
         } else {
             break;
         }
     }
 
     if fat_sectors.is_empty() {
-        // No FAT sectors found, return minimal size
+        // No valid FAT sectors found, return minimal size
         return Ok(header_size + sector_size);
     }
 
     // Read all FAT sectors to find the highest sector that's in use
     let mut highest_used_sector: u32 = 0;
+    let mut valid_used_count: u32 = 0;
+    let mut garbage_count: u32 = 0;
 
     // Track FAT sectors themselves as used
     for &fat_sec in &fat_sectors {
@@ -245,9 +255,12 @@ fn refine_ole_size(
         }
     }
 
-    // Read first directory sector from header
+    // Read first directory sector from header — validate it's within addressable range
     let first_dir_sector = u32::from_le_bytes([header[48], header[49], header[50], header[51]]);
-    if first_dir_sector < 0xFFFFFFFA && first_dir_sector > highest_used_sector {
+    if first_dir_sector < 0xFFFFFFFA
+        && (first_dir_sector as u64) < max_addressable_sector
+        && first_dir_sector > highest_used_sector
+    {
         highest_used_sector = first_dir_sector;
     }
 
@@ -286,19 +299,49 @@ fn refine_ole_size(
                 fat_data[byte_offset + 3],
             ]);
 
-            // If this entry is not FREESECT (0xFFFFFFFF), this sector index is used
-            // FREESECT = 0xFFFFFFFF, ENDOFCHAIN = 0xFFFFFFFE, FATSECT = 0xFFFFFFFD, etc.
-            if fat_entry != 0xFFFFFFFF {
-                let sector_index = (base_sector_id + entry_idx) as u32;
-                if sector_index > highest_used_sector && sector_index < 0xFFFFFFFA {
+            // Skip FREESECT entries — they indicate unused sectors
+            if fat_entry == 0xFFFFFFFF {
+                continue;
+            }
+
+            let sector_index = (base_sector_id + entry_idx) as u32;
+
+            if fat_entry >= 0xFFFFFFFA {
+                // Special value (ENDOFCHAIN, FATSECT, DIFSECT, etc.) — valid
+                valid_used_count += 1;
+                if sector_index > highest_used_sector
+                    && (sector_index as u64) < max_addressable_sector
+                {
                     highest_used_sector = sector_index;
                 }
-                // Also check where this entry points to (the chain)
-                if fat_entry < 0xFFFFFFFA && fat_entry > highest_used_sector {
+            } else if (fat_entry as u64) < max_addressable_sector {
+                // Valid chain pointer within addressable range
+                valid_used_count += 1;
+                if sector_index > highest_used_sector
+                    && (sector_index as u64) < max_addressable_sector
+                {
+                    highest_used_sector = sector_index;
+                }
+                if fat_entry > highest_used_sector {
                     highest_used_sector = fat_entry;
                 }
+            } else {
+                // Entry points beyond addressable range — garbage
+                garbage_count += 1;
             }
         }
+    }
+
+    // If garbage entries dominate, the FAT is corrupt (likely false-positive header)
+    // Return a conservative size covering just the FAT sectors plus a small buffer
+    if garbage_count > valid_used_count {
+        tracing::debug!(
+            garbage_count,
+            valid_used_count,
+            "FAT dominated by garbage entries; using conservative size"
+        );
+        let conservative_size = header_size + (fat_sectors.len() as u64 + 2) * sector_size;
+        return Ok(conservative_size.min(max_size));
     }
 
     // File size = header + (highest_sector + 1) * sector_size
@@ -386,6 +429,11 @@ fn read_fat(
     sector_size: u64,
     max_size: u64,
 ) -> Result<Vec<u32>, CarveError> {
+    // Calculate max addressable sector for bounds validation
+    let num_fat_sectors = u32::from_le_bytes([header[44], header[45], header[46], header[47]]);
+    let entries_per_fat_sector = sector_size / 4;
+    let max_addressable_sector = num_fat_sectors as u64 * entries_per_fat_sector;
+
     let mut fat_sectors = Vec::new();
 
     for i in 0..109 {
@@ -400,7 +448,10 @@ fn read_fat(
             header[offset + 3],
         ]);
         if sector_id < 0xFFFFFFFA {
-            fat_sectors.push(sector_id);
+            // Validate DIFAT entry is within addressable range
+            if (sector_id as u64) < max_addressable_sector {
+                fat_sectors.push(sector_id);
+            }
         } else {
             break;
         }
@@ -473,7 +524,7 @@ impl CarveHandler for OleCarveHandler {
         let effective_max = if self.max_size > 0 {
             self.max_size
         } else {
-            512 * 1024 * 1024 // 512 MiB default limit
+            100 * 1024 * 1024 // 100 MiB default limit
         };
         let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, effective_max, file);
 
@@ -799,5 +850,55 @@ mod tests {
         // This will still parse, though size estimation will be large
         let result = parse_ole_header(&ole);
         assert!(result.is_ok(), "should accept FAT sectors at limit");
+    }
+
+    #[test]
+    fn test_garbage_fat_produces_small_size() {
+        let mut ole = create_minimal_ole();
+
+        // DIFAT[0] = sector 1, so the FAT lives at file offset 512 + 1*512 = 1024.
+        // With num_fat_sectors=1 and sector_size=512, max_addressable = 1 * 128 = 128.
+        // Fill the actual FAT sector with values far beyond max_addressable — garbage.
+        let fat_start = 1024;
+        for i in 0..(512 / 4) {
+            let offset = fat_start + i * 4;
+            ole[offset..offset + 4].copy_from_slice(&50_000u32.to_le_bytes());
+        }
+
+        let evidence = SliceEvidence { data: ole.clone() };
+        let sector_size = 512u64;
+        let max_size = 100 * 1024 * 1024;
+
+        let size = refine_ole_size(&evidence, 0, &ole[..512], sector_size, max_size)
+            .expect("refine should succeed");
+
+        // With corrupt FAT, size should be conservative (not near max_size).
+        // Conservative: header(512) + (1 fat_sector + 2) * 512 = 512 + 1536 = 2048
+        assert!(
+            size < 100_000,
+            "garbage FAT should produce small size, got {size}"
+        );
+    }
+
+    #[test]
+    fn test_corrupted_fat_bounds_check() {
+        let mut ole = create_minimal_ole();
+
+        // Point DIFAT[0] to sector 5000, far beyond max_addressable_sector (128).
+        // This should be rejected as out-of-range, leaving fat_sectors empty.
+        ole[76..80].copy_from_slice(&5000u32.to_le_bytes());
+
+        let evidence = SliceEvidence { data: ole.clone() };
+        let sector_size = 512u64;
+        let max_size = 100 * 1024 * 1024;
+
+        let size = refine_ole_size(&evidence, 0, &ole[..512], sector_size, max_size)
+            .expect("refine should succeed");
+
+        // DIFAT entry was rejected, no FAT sectors found → minimal: header + sector_size = 1024
+        assert!(
+            size < 10_000,
+            "corrupted DIFAT should produce small size, got {size}"
+        );
     }
 }

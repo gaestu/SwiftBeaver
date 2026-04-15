@@ -55,7 +55,7 @@ Complete reference of all file formats supported by SwiftBeaver, organized by ca
 | Format | Extensions | Signature | Max Size (Default) | Validated | Notes |
 |--------|-----------|-----------|-------------------|-----------|-------|
 | **PDF** | pdf | `25 50 44 46 2D` | 500 MB | Yes (%%EOF) | Searches for `%%EOF` marker, preserves structure |
-| **OLE/CFB** | doc, xls, ppt, msg | `D0 CF 11 E0 A1 B1 1A E1` | 200 MB | Yes | MS Office 97-2003, uses FAT-based sectors |
+| **OLE/CFB** | doc, xls, ppt, msg | `D0 CF 11 E0 A1 B1 1A E1` | 100 MB | Yes | MS Office 97-2003, uses FAT-based sectors |
 | **DOCX** | docx | `50 4B 03 04` + ZIP structure | 100 MB | Yes | ZIP-based, validates central directory entries |
 | **XLSX** | xlsx | `50 4B 03 04` + ZIP structure | 100 MB | Yes | ZIP-based, Office Open XML format |
 | **PPTX** | pptx | `50 4B 03 04` + ZIP structure | 100 MB | Yes | ZIP-based, Office Open XML format |
