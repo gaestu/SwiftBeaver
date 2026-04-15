@@ -347,7 +347,7 @@ file_types:
       - id: "eml_received"
         hex: "52656365697665643A"
     footer_patterns: []
-    max_size: 52428800
+    max_size: 10485760
     min_size: 32
     validator: "eml"
   - id: "mobi"

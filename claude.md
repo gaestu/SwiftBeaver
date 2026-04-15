@@ -116,7 +116,7 @@ Launch **all 6 core reviewers in parallel** as subagents. Each receives:
 | **Error Handling** | No `.unwrap()` in lib code, proper `Result` propagation, meaningful error context | Robust error handling confirmed |
 | **Security** | Buffer bounds, path traversal prevention, input validation, no arbitrary file writes outside output dir | No security concerns |
 | **Architecture** | Fits existing patterns, no unnecessary dependencies, code quality, style consistency, no bloat | Clean architecture |
-| **Documentation** | README reflects changes, `/docs/` updated for behavioral changes, examples valid, planning docs updated | Docs in sync with code |
+| **Documentation** | README reflects changes, `/docs/` updated for behavioral changes, examples valid | Docs in sync with code |
 
 Each reviewer returns: **"✅ PASS"** or **"❌ ISSUES: [numbered list]"**
 

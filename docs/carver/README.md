@@ -51,7 +51,7 @@ Each carver document includes:
 | [PDF](pdf.md) | ✅ Complete | Production | Portable Document Format |
 | OLE | ⏳ TBD | Production | OLE/CFB (DOC, XLS, PPT, MSG) |
 | RTF | ⏳ TBD | Production | Rich Text Format |
-| EML | ⏳ TBD | Production | Email message format |
+| EML | [eml.md](eml.md) | Production | Email message format |
 
 ## Multimedia Carvers
 
