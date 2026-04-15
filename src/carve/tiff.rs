@@ -21,6 +21,16 @@ const TAG_TILE_BYTE_COUNTS: u16 = 325;
 const TAG_SUB_IFD: u16 = 330;
 const TAG_EXIF_IFD: u16 = 34665;
 const TAG_GPS_IFD: u16 = 34853;
+const TAG_IMAGE_WIDTH: u16 = 256;
+const TAG_IMAGE_LENGTH: u16 = 257;
+const TAG_BITS_PER_SAMPLE: u16 = 258;
+const TAG_SAMPLES_PER_PIXEL: u16 = 277;
+
+/// If computed file extent exceeds estimated uncompressed size by this factor, cap it.
+const PLAUSIBILITY_FACTOR: u64 = 10;
+
+/// Minimum plausible TIFF extent — prevents capping tiny valid TIFFs.
+const MIN_PLAUSIBLE_TIFF: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 enum Endian {
@@ -64,7 +74,7 @@ impl CarveHandler for TiffCarveHandler {
             Err(CarveError::Invalid(_)) => return Ok(None),
             Err(_) => return Ok(None),
         };
-        if estimate.end == 0 {
+        if estimate.end == 0 || !estimate.has_image_data {
             return Ok(None);
         }
 
@@ -131,9 +141,19 @@ impl CarveHandler for TiffCarveHandler {
     }
 }
 
+#[derive(Default)]
+struct TiffImageInfo {
+    has_strip_or_tile_data: bool,
+    width: Option<u64>,
+    height: Option<u64>,
+    bits_per_sample: Option<u64>,
+    samples_per_pixel: Option<u64>,
+}
+
 struct TiffEstimate {
     end: u64,
     truncated: bool,
+    has_image_data: bool,
 }
 
 fn estimate_tiff_end(
@@ -151,6 +171,7 @@ fn estimate_tiff_end(
     let first_ifd_offset = read_u32(&header[4..8], endian) as u64;
     let mut max_end = TIFF_HEADER_LEN as u64;
     let mut truncated = false;
+    let mut image_info = TiffImageInfo::default();
 
     let mut queue = VecDeque::new();
     if first_ifd_offset >= TIFF_HEADER_LEN as u64 {
@@ -162,7 +183,15 @@ fn estimate_tiff_end(
         if ifd_offset == 0 || !seen.insert(ifd_offset) {
             continue;
         }
-        match parse_ifd(ctx, start, ifd_offset, endian, &mut max_end, &mut queue) {
+        match parse_ifd(
+            ctx,
+            start,
+            ifd_offset,
+            endian,
+            &mut max_end,
+            &mut queue,
+            &mut image_info,
+        ) {
             Ok(()) => {}
             Err(CarveError::Eof) => {
                 truncated = true;
@@ -178,9 +207,36 @@ fn estimate_tiff_end(
         }
     }
 
+    // Apply dimension-based plausibility check
+    if let (Some(w), Some(h)) = (image_info.width, image_info.height)
+        && w > 0
+        && h > 0
+    {
+        let bps = image_info.bits_per_sample.unwrap_or(8);
+        let spp = image_info.samples_per_pixel.unwrap_or(1);
+        let bytes_per_pixel = bps.saturating_mul(spp).saturating_add(7) / 8;
+        let expected_raw = w.saturating_mul(h).saturating_mul(bytes_per_pixel);
+        let plausibility_cap = expected_raw
+            .saturating_mul(PLAUSIBILITY_FACTOR)
+            .max(MIN_PLAUSIBLE_TIFF);
+        if max_end > plausibility_cap {
+            errors.push(format!(
+                "extent {} exceeds plausible size {} ({}x{} @ {} bpp), capped",
+                max_end,
+                plausibility_cap,
+                w,
+                h,
+                bps.saturating_mul(spp),
+            ));
+            max_end = plausibility_cap;
+            truncated = true;
+        }
+    }
+
     Ok(TiffEstimate {
         end: max_end,
         truncated,
+        has_image_data: image_info.has_strip_or_tile_data,
     })
 }
 
@@ -191,6 +247,7 @@ fn parse_ifd(
     endian: Endian,
     max_end: &mut u64,
     queue: &mut VecDeque<u64>,
+    image_info: &mut TiffImageInfo,
 ) -> Result<(), CarveError> {
     let base = start.saturating_add(ifd_offset);
     let count_buf = read_exact_at(ctx, base, 2).ok_or(CarveError::Eof)?;
@@ -239,6 +296,32 @@ fn parse_ifd(
                 if offset >= TIFF_HEADER_LEN as u64 {
                     queue.push_back(offset);
                 }
+            }
+        }
+
+        // Parse dimension tags for plausibility checking
+        if value_count == 1 && matches!(typ, 3 | 4) {
+            let val = match typ {
+                3 => read_u16(&value_bytes[0..2], endian) as u64,
+                4 => read_u32(value_bytes, endian) as u64,
+                _ => unreachable!(),
+            };
+            match tag {
+                TAG_IMAGE_WIDTH => {
+                    image_info.width = Some(image_info.width.map_or(val, |old| old.max(val)));
+                }
+                TAG_IMAGE_LENGTH => {
+                    image_info.height = Some(image_info.height.map_or(val, |old| old.max(val)));
+                }
+                TAG_BITS_PER_SAMPLE => {
+                    image_info.bits_per_sample =
+                        Some(image_info.bits_per_sample.map_or(val, |old| old.max(val)));
+                }
+                TAG_SAMPLES_PER_PIXEL => {
+                    image_info.samples_per_pixel =
+                        Some(image_info.samples_per_pixel.map_or(val, |old| old.max(val)));
+                }
+                _ => {}
             }
         }
 
@@ -291,18 +374,27 @@ fn parse_ifd(
     }
 
     if let (Some(offsets), Some(counts)) = (strip_offsets, strip_counts) {
-        update_max_with_offsets(offsets, counts, max_end);
+        update_max_with_offsets(offsets, counts, max_end, image_info);
     }
     if let (Some(offsets), Some(counts)) = (tile_offsets, tile_counts) {
-        update_max_with_offsets(offsets, counts, max_end);
+        update_max_with_offsets(offsets, counts, max_end, image_info);
     }
 
     Ok(())
 }
 
-fn update_max_with_offsets(offsets: Vec<u64>, counts: Vec<u64>, max_end: &mut u64) {
+fn update_max_with_offsets(
+    offsets: Vec<u64>,
+    counts: Vec<u64>,
+    max_end: &mut u64,
+    image_info: &mut TiffImageInfo,
+) {
     let len = std::cmp::min(offsets.len(), counts.len());
     for i in 0..len {
+        if counts[i] == 0 {
+            continue;
+        }
+        image_info.has_strip_or_tile_data = true;
         let end = offsets[i].saturating_add(counts[i]);
         *max_end = (*max_end).max(end);
     }
@@ -463,5 +555,191 @@ mod tests {
         let carved = carved.expect("carved");
         assert!(carved.validated);
         assert_eq!(carved.size, tiff.len() as u64);
+    }
+
+    #[test]
+    fn rejects_tiff_without_strip_data() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("output root");
+
+        // TIFF with valid header and IFD but no strip/tile tags
+        let mut tiff = Vec::new();
+        tiff.extend_from_slice(&[0x49, 0x49, 0x2A, 0x00]); // LE header
+        tiff.extend_from_slice(&8u32.to_le_bytes()); // IFD at offset 8
+
+        // IFD with 1 entry: ImageWidth only
+        let entry_count = 1u16;
+        tiff.extend_from_slice(&entry_count.to_le_bytes());
+
+        // Tag 256 (ImageWidth), type SHORT, count 1, value 100
+        tiff.extend_from_slice(&256u16.to_le_bytes());
+        tiff.extend_from_slice(&3u16.to_le_bytes());
+        tiff.extend_from_slice(&1u32.to_le_bytes());
+        tiff.extend_from_slice(&100u16.to_le_bytes());
+        tiff.extend_from_slice(&[0u8; 2]); // pad to 4 bytes
+
+        // Next IFD = 0
+        tiff.extend_from_slice(&0u32.to_le_bytes());
+
+        let input_path = temp_dir.path().join("image.bin");
+        std::fs::write(&input_path, &tiff).expect("write tiff");
+
+        let evidence = RawFileSource::open(&input_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "tiff".to_string(),
+            pattern_id: "tiff_header".to_string(),
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("carve");
+        assert!(
+            result.is_none(),
+            "TIFF without strip/tile data should be rejected"
+        );
+    }
+
+    #[test]
+    fn rejects_false_match_header() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("output root");
+
+        // Valid TIFF LE header signature but IFD with unrecognised tags only
+        let mut data = vec![0u8; 512];
+        data[0..4].copy_from_slice(&[0x49, 0x49, 0x2A, 0x00]);
+        data[4..8].copy_from_slice(&8u32.to_le_bytes());
+
+        // IFD: 3 entries with non-standard tags
+        data[8..10].copy_from_slice(&3u16.to_le_bytes());
+        for i in 0..3 {
+            let base = 10 + i * 12;
+            let tag = (999 + i) as u16;
+            data[base..base + 2].copy_from_slice(&tag.to_le_bytes());
+            data[base + 2..base + 4].copy_from_slice(&4u16.to_le_bytes()); // LONG
+            data[base + 4..base + 8].copy_from_slice(&1u32.to_le_bytes()); // count=1
+            data[base + 8..base + 12].copy_from_slice(&0u32.to_le_bytes()); // value=0
+        }
+        // Next IFD = 0
+        data[46..50].copy_from_slice(&0u32.to_le_bytes());
+
+        let input_path = temp_dir.path().join("image.bin");
+        std::fs::write(&input_path, &data).expect("write");
+
+        let evidence = RawFileSource::open(&input_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "tiff".to_string(),
+            pattern_id: "tiff_header".to_string(),
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("carve");
+        assert!(
+            result.is_none(),
+            "false match with no strip/tile data should be rejected"
+        );
+    }
+
+    #[test]
+    fn caps_tiff_with_implausible_extent() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_root = temp_dir.path().join("out");
+        std::fs::create_dir_all(&output_root).expect("output root");
+
+        // TIFF with small dimensions (100x100 @ 8bps/3spp = 30 KB raw)
+        // but strip offset pointing far away (500 KB)
+        let mut tiff = vec![0u8; 700_000];
+
+        // LE header
+        tiff[0..4].copy_from_slice(&[0x49, 0x49, 0x2A, 0x00]);
+        tiff[4..8].copy_from_slice(&8u32.to_le_bytes());
+
+        let entry_count = 6u16;
+        let mut pos = 8;
+        tiff[pos..pos + 2].copy_from_slice(&entry_count.to_le_bytes());
+        pos += 2;
+
+        // Helper: write IFD entry (tag, type SHORT, count 1, value)
+        fn write_short_entry(buf: &mut [u8], pos: &mut usize, tag: u16, value: u16) {
+            buf[*pos..*pos + 2].copy_from_slice(&tag.to_le_bytes());
+            *pos += 2;
+            buf[*pos..*pos + 2].copy_from_slice(&3u16.to_le_bytes());
+            *pos += 2;
+            buf[*pos..*pos + 4].copy_from_slice(&1u32.to_le_bytes());
+            *pos += 4;
+            buf[*pos..*pos + 2].copy_from_slice(&value.to_le_bytes());
+            *pos += 2;
+            buf[*pos..*pos + 2].copy_from_slice(&[0u8; 2]);
+            *pos += 2;
+        }
+
+        fn write_long_entry(buf: &mut [u8], pos: &mut usize, tag: u16, value: u32) {
+            buf[*pos..*pos + 2].copy_from_slice(&tag.to_le_bytes());
+            *pos += 2;
+            buf[*pos..*pos + 2].copy_from_slice(&4u16.to_le_bytes());
+            *pos += 2;
+            buf[*pos..*pos + 4].copy_from_slice(&1u32.to_le_bytes());
+            *pos += 4;
+            buf[*pos..*pos + 4].copy_from_slice(&value.to_le_bytes());
+            *pos += 4;
+        }
+
+        // ImageWidth = 100
+        write_short_entry(&mut tiff, &mut pos, 256, 100);
+        // ImageLength = 100
+        write_short_entry(&mut tiff, &mut pos, 257, 100);
+        // BitsPerSample = 8
+        write_short_entry(&mut tiff, &mut pos, 258, 8);
+        // StripOffsets = 500000 (far beyond plausible extent)
+        write_long_entry(&mut tiff, &mut pos, 273, 500_000);
+        // SamplesPerPixel = 3
+        write_short_entry(&mut tiff, &mut pos, 277, 3);
+        // StripByteCounts = 100000
+        write_long_entry(&mut tiff, &mut pos, 279, 100_000);
+
+        // Next IFD = 0
+        tiff[pos..pos + 4].copy_from_slice(&0u32.to_le_bytes());
+
+        let input_path = temp_dir.path().join("image.bin");
+        std::fs::write(&input_path, &tiff).expect("write tiff");
+
+        let evidence = RawFileSource::open(&input_path).expect("evidence");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: &output_root,
+            evidence: &evidence,
+        };
+        let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "tiff".to_string(),
+            pattern_id: "tiff_header".to_string(),
+        };
+
+        let result = handler.process_hit(&hit, &ctx).expect("carve");
+        let carved = result.expect("should still produce a file (capped)");
+
+        // 100x100 × 3 bytes/pixel = 30000 raw
+        // plausibility_cap = max(30000 × 10, 65536) = 300000
+        // Original extent = 500000 + 100000 = 600000 → capped to 300000
+        assert!(carved.truncated, "should be marked truncated");
+        assert!(
+            carved.size <= 300_000,
+            "should be capped by plausibility: got {}",
+            carved.size
+        );
+        assert!(carved.size > 100, "should still have some content");
     }
 }

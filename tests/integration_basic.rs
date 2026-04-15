@@ -168,7 +168,7 @@ fn sample_tiff() -> Vec<u8> {
     tiff.extend_from_slice(&entry_count.to_le_bytes());
 
     let strip_offset = (ifd_offset + 2 + 12 * 2 + 4) as u32;
-    let strip_len = 4u32;
+    let strip_len = 256u32;
 
     tiff.extend_from_slice(&273u16.to_le_bytes());
     tiff.extend_from_slice(&4u16.to_le_bytes());
@@ -181,7 +181,7 @@ fn sample_tiff() -> Vec<u8> {
     tiff.extend_from_slice(&strip_len.to_le_bytes());
 
     tiff.extend_from_slice(&0u32.to_le_bytes());
-    tiff.extend_from_slice(&[0u8; 4]);
+    tiff.resize(strip_offset as usize + strip_len as usize, 0);
     tiff
 }
 

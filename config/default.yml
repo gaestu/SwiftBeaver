@@ -129,8 +129,8 @@ file_types:
       - id: "tiff_be_header"
         hex: "4D4D002A"
     footer_patterns: []
-    max_size: 104857600
-    min_size: 8
+    max_size: 52428800
+    min_size: 256
     validator: "tiff"
   - id: "heic"
     extensions: ["heic", "heif", "hif"]

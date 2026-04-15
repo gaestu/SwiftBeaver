@@ -109,21 +109,37 @@ let total_size = max_offset - hit.global_offset;
   - Byte order marker valid ("II" or "MM")
   - Magic number == 42
   - At least one IFD parsed successfully
+  - Strip/tile image data present (offset + byte count pairs found)
+  - File extent within dimension-based plausibility limits (if dimensions available)
 - **Truncated**: `true` if:
   - max_size reached before complete file
   - EOF reached before complete file
-- **Invalid**: Removed if:
+  - Extent capped by dimension-based plausibility check
+- **Rejected** (not written): if:
   - Byte order invalid
   - Magic number != 42
   - First IFD offset invalid
   - Entry count > 4096 (safety limit)
+  - No strip or tile image data found in any IFD (no offset+count pairs)
+
+### Plausibility Check
+
+When `ImageWidth`, `ImageLength`, `BitsPerSample`, and/or `SamplesPerPixel` tags are present, the carver computes an expected uncompressed image size and uses it to validate the computed file extent:
+
+```
+expected_raw = width × height × bytes_per_pixel
+plausibility_cap = max(expected_raw × 10, 64 KB)
+```
+
+If the computed file extent exceeds `plausibility_cap`, the extent is capped and the file is marked as truncated. The 10× factor accounts for compression overhead, multi-page content, and embedded metadata. The 64 KB floor prevents false rejection of tiny valid TIFFs.
 
 ## Size Constraints
 
-- **Default min_size**: 100 bytes
-- **Default max_size**: 100 MB
+- **Default min_size**: 256 bytes
+- **Default max_size**: 50 MB
 - Minimum viable TIFF: ~200 bytes (header + minimal IFD + tiny image)
 - Files below min_size are discarded
+- TIFFs without strip/tile data are rejected regardless of size
 
 ## Hash Computation
 
