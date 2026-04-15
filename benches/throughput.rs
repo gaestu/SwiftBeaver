@@ -96,6 +96,26 @@ fn bench_throughput(c: &mut Criterion) {
         });
     });
 
+    group.bench_function("multi_pattern_dense", |b| {
+        b.iter(|| {
+            let temp_dir = tempfile::tempdir().expect("tempdir");
+            let input_path = temp_dir.path().join("multi.bin");
+            let mut file = File::create(&input_path).expect("create");
+            let jpeg = minimal_jpeg();
+            // PNG signature
+            let png_sig: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+            let padding = vec![0u8; 64];
+            for _ in 0..500 {
+                file.write_all(&jpeg).expect("write");
+                file.write_all(&padding).expect("write");
+                file.write_all(&png_sig).expect("write");
+                file.write_all(&padding).expect("write");
+            }
+            file.flush().expect("flush");
+            run_pipeline(&input_path, Some(200));
+        });
+    });
+
     group.finish();
 }
 

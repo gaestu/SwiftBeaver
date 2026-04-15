@@ -8,6 +8,7 @@ This project depends on third-party open-source components. License obligations 
 
 Below is a human-maintained list of the **direct** Rust crate dependencies used by this repository (see Cargo.toml). Licenses shown are the SPDX identifiers as declared by each crate.
 
+- aho-corasick — Unlicense OR MIT
 - anyhow — MIT OR Apache-2.0
 - arrow-array — Apache-2.0
 - arrow-schema — Apache-2.0

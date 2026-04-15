@@ -39,7 +39,7 @@ pub struct CliOptions {
     pub workers: usize,
 
     /// Chunk size, in MiB
-    #[arg(long, default_value_t = 512)]
+    #[arg(long, default_value_t = crate::constants::DEFAULT_CHUNK_SIZE_MIB)]
     pub chunk_size_mib: u64,
 
     /// Chunk overlap, in KiB (overrides config when set)

@@ -13,13 +13,13 @@ pub const MIB: u64 = 1024 * 1024;
 pub const KIB: u64 = 1024;
 
 /// Default channel capacity multiplier for workers
-pub const CHANNEL_CAPACITY_MULTIPLIER: usize = 2;
+pub const CHANNEL_CAPACITY_MULTIPLIER: usize = 4;
 
 /// Minimum channel capacity
 pub const MIN_CHANNEL_CAPACITY: usize = 1;
 
 /// Default chunk size in MiB for scanning
-pub const DEFAULT_CHUNK_SIZE_MIB: u64 = 512;
+pub const DEFAULT_CHUNK_SIZE_MIB: u64 = 64;
 
 /// Default overlap in KiB for chunk scanning
 pub const DEFAULT_OVERLAP_KIB: u64 = 64;

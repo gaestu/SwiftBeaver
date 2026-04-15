@@ -47,6 +47,8 @@ pub struct PipelineStats {
     pub files_carved: u64,
     pub string_spans: u64,
     pub artefacts_extracted: u64,
+    pub scan_time_ms: u64,
+    pub carve_time_ms: u64,
 }
 
 /// Progress snapshot reported during a run.
@@ -71,6 +73,10 @@ pub struct ProgressSnapshot {
     pub validation_pass: u64,
     /// Number of files that failed validation (if validation enabled)
     pub validation_fail: u64,
+    /// Cumulative time spent signature-scanning (milliseconds)
+    pub scan_time_ms: u64,
+    /// Cumulative time spent carving files (milliseconds)
+    pub carve_time_ms: u64,
 }
 
 /// Progress callback trait for long-running scans.
@@ -189,6 +195,8 @@ struct PipelineCounters {
     carve_errors: Arc<AtomicU64>,
     metadata_errors: Arc<AtomicU64>,
     sqlite_errors: Arc<AtomicU64>,
+    scan_time_ms: Arc<AtomicU64>,
+    carve_time_ms: Arc<AtomicU64>,
     carve_limiter: Arc<CarveLimiter>,
 }
 
@@ -203,6 +211,8 @@ impl PipelineCounters {
             carve_errors: Arc::new(AtomicU64::new(0)),
             metadata_errors: Arc::new(AtomicU64::new(0)),
             sqlite_errors: Arc::new(AtomicU64::new(0)),
+            scan_time_ms: Arc::new(AtomicU64::new(0)),
+            carve_time_ms: Arc::new(AtomicU64::new(0)),
             carve_limiter: Arc::new(CarveLimiter::new(max_files)),
         }
     }
@@ -434,6 +444,7 @@ impl<'a> PipelineRunner<'a> {
             counters.hits_found.clone(),
             counters.string_spans.clone(),
             self.cfg.sqlite_page_max_hits_per_chunk,
+            counters.scan_time_ms.clone(),
         );
 
         let carve_handles = workers::spawn_carve_workers(
@@ -446,6 +457,7 @@ impl<'a> PipelineRunner<'a> {
             channels.meta_tx.clone(),
             counters.carve_limiter.clone(),
             counters.carve_errors.clone(),
+            counters.carve_time_ms.clone(),
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
@@ -558,6 +570,8 @@ impl<'a> PipelineRunner<'a> {
                     &counters.carve_errors,
                     &counters.metadata_errors,
                     &counters.sqlite_errors,
+                    &counters.scan_time_ms,
+                    &counters.carve_time_ms,
                 );
                 progress.reporter.on_progress(&snapshot);
                 last_progress = Instant::now();
@@ -656,6 +670,8 @@ impl<'a> PipelineRunner<'a> {
                 &counters.carve_errors,
                 &counters.metadata_errors,
                 &counters.sqlite_errors,
+                &counters.scan_time_ms,
+                &counters.carve_time_ms,
             );
             progress.reporter.on_progress(&snapshot);
         }
@@ -680,16 +696,20 @@ impl<'a> PipelineRunner<'a> {
             files_carved: counters.carve_limiter.carved(),
             string_spans: counters.string_spans.load(Ordering::Relaxed),
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
+            scan_time_ms: counters.scan_time_ms.load(Ordering::Relaxed),
+            carve_time_ms: counters.carve_time_ms.load(Ordering::Relaxed),
         };
 
         info!(
-            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} string_spans={} artefacts_extracted={}",
+            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={}",
             stats.bytes_scanned,
             stats.chunks_processed,
             stats.hits_found,
             stats.files_carved,
             stats.string_spans,
-            stats.artefacts_extracted
+            stats.artefacts_extracted,
+            stats.scan_time_ms,
+            stats.carve_time_ms,
         );
 
         if (outcome.cancelled
@@ -768,6 +788,8 @@ fn build_progress_snapshot(
     carve_errors: &AtomicU64,
     metadata_errors: &AtomicU64,
     sqlite_errors: &AtomicU64,
+    scan_time_ms: &AtomicU64,
+    carve_time_ms: &AtomicU64,
 ) -> ProgressSnapshot {
     let elapsed_seconds = start_time.elapsed().as_secs_f64();
     let scanned = bytes_scanned.load(Ordering::Relaxed);
@@ -811,6 +833,8 @@ fn build_progress_snapshot(
         completion_pct,
         validation_pass: 0, // To be populated when validation is enabled
         validation_fail: 0, // To be populated when validation is enabled
+        scan_time_ms: scan_time_ms.load(Ordering::Relaxed),
+        carve_time_ms: carve_time_ms.load(Ordering::Relaxed),
     }
 }
 

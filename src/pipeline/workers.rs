@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
+use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender};
 use tracing::{debug, warn};
@@ -118,6 +119,7 @@ pub fn spawn_scan_workers(
     hits_found: Arc<AtomicU64>,
     string_spans: Arc<AtomicU64>,
     sqlite_page_max_hits_per_chunk: usize,
+    scan_time_ms: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -132,6 +134,7 @@ pub fn spawn_scan_workers(
         let string_spans = string_spans.clone();
         let meta_tx = meta_tx.clone();
         let run_id = run_id.clone();
+        let scan_time_ms = scan_time_ms.clone();
         let sqlite_page_max_hits_per_chunk = sqlite_page_max_hits_per_chunk.max(1);
 
         handles.push(thread::spawn(move || {
@@ -142,7 +145,10 @@ pub fn spawn_scan_workers(
                 let mut sqlite_page_hits_dropped = 0usize;
 
                 // Scan for file signatures
-                for hit in scanner.scan_chunk(&job.chunk, &job.data) {
+                let scan_start = Instant::now();
+                let scan_hits = scanner.scan_chunk(&job.chunk, &job.data);
+                scan_time_ms.fetch_add(scan_start.elapsed().as_millis() as u64, Ordering::Relaxed);
+                for hit in scan_hits {
                     if hit.local_offset >= effective_valid {
                         continue;
                     }
@@ -235,6 +241,7 @@ pub fn spawn_carve_workers(
     meta_tx: Sender<MetadataEvent>,
     carve_limiter: Arc<CarveLimiter>,
     carve_errors: Arc<AtomicU64>,
+    carve_time_ms: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -248,6 +255,7 @@ pub fn spawn_carve_workers(
         let meta_tx = meta_tx.clone();
         let carve_limiter = carve_limiter.clone();
         let carve_errors = carve_errors.clone();
+        let carve_time_ms = carve_time_ms.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -270,7 +278,11 @@ pub fn spawn_carve_workers(
                     continue;
                 }
 
-                match handler.process_hit(&hit, &ctx) {
+                let carve_start = Instant::now();
+                let result = handler.process_hit(&hit, &ctx);
+                carve_time_ms
+                    .fetch_add(carve_start.elapsed().as_millis() as u64, Ordering::Relaxed);
+                match result {
                     Ok(Some(file)) => {
                         carve_limiter.commit();
                         if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {

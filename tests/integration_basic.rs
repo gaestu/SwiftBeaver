@@ -345,3 +345,68 @@ fn integration_carves_basic_formats() {
     assert!(types.contains(&"rar".to_string()));
     assert!(types.contains(&"7z".to_string()));
 }
+
+#[test]
+fn pipeline_reports_timing_metrics() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let input_path = temp_dir.path().join("image.bin");
+
+    // Create a simple image with a JPEG to trigger carving
+    let mut image = vec![0u8; 64_000];
+    insert_bytes(&mut image, 1024, &sample_jpeg());
+
+    fs::write(&input_path, &image).expect("write input");
+
+    let loaded = config::load_config(None).expect("config");
+    let mut cfg = loaded.config;
+    cfg.run_id = "metrics_test".to_string();
+
+    for ft in cfg.file_types.iter_mut() {
+        if ft.id == "jpeg" {
+            ft.min_size = 16;
+        }
+    }
+
+    let evidence = RawFileSource::open(&input_path).expect("evidence");
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
+
+    let run_output_dir = temp_dir.path().join("run");
+    fs::create_dir_all(&run_output_dir).expect("output dir");
+
+    let meta_sink = metadata::build_sink(
+        MetadataBackendKind::Jsonl,
+        &cfg,
+        &cfg.run_id,
+        "test",
+        &loaded.config_hash,
+        &input_path,
+        "",
+        &run_output_dir,
+    )
+    .expect("metadata sink");
+
+    let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
+
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg, false).expect("registry"));
+
+    let stats = pipeline::run_pipeline(
+        &cfg,
+        evidence,
+        sig_scanner,
+        None,
+        meta_sink,
+        &run_output_dir,
+        2,
+        64 * 1024,
+        64,
+        None,
+        None,
+        carve_registry,
+    )
+    .expect("pipeline");
+
+    assert!(stats.scan_time_ms > 0, "scan_time_ms should be > 0");
+    // carve_time_ms may be 0 for very fast carves (sub-millisecond on small files)
+    // so we only check scan_time_ms is populated
+}
