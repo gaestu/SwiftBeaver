@@ -20,7 +20,9 @@ use crate::carve::CarveRegistry;
 use crate::checkpoint::{CheckpointState, save_checkpoint};
 use crate::chunk::{ChunkIter, ScanChunk, chunk_count};
 use crate::config::Config;
-use crate::constants::{CHANNEL_CAPACITY_MULTIPLIER, MIN_CHANNEL_CAPACITY};
+use crate::constants::{
+    CHANNEL_CAPACITY_MULTIPLIER, METADATA_FLUSH_INTERVAL_SECS, MIN_CHANNEL_CAPACITY,
+};
 use crate::evidence::EvidenceSource;
 use crate::metadata::{MetadataSink, RunSummary};
 use crate::scanner::SignatureScanner;
@@ -397,7 +399,7 @@ impl<'a> PipelineRunner<'a> {
             .max(MIN_CHANNEL_CAPACITY);
         let (scan_tx, scan_rx) = bounded::<ScanJob>(channel_cap);
         let (hit_tx, hit_rx) = bounded(channel_cap * 2);
-        let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 2);
+        let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 16);
 
         let (string_tx, string_rx) = if string_enabled {
             let (tx, rx) = bounded::<StringJob>(channel_cap);
@@ -503,6 +505,9 @@ impl<'a> PipelineRunner<'a> {
         let mut cancelled = false;
         let start_time = Instant::now();
         let mut last_progress = Instant::now();
+        let mut last_flush = Instant::now()
+            .checked_sub(Duration::from_secs(METADATA_FLUSH_INTERVAL_SECS))
+            .unwrap_or(start_time);
         let mut next_offset = resume_offset;
 
         for chunk in ChunkIter::new(total_bytes, self.chunk_size, self.overlap) {
@@ -576,7 +581,10 @@ impl<'a> PipelineRunner<'a> {
                 progress.reporter.on_progress(&snapshot);
                 last_progress = Instant::now();
 
-                let _ = channels.meta_tx.send(MetadataEvent::Flush);
+                if last_flush.elapsed() >= Duration::from_secs(METADATA_FLUSH_INTERVAL_SECS) {
+                    let _ = channels.meta_tx.try_send(MetadataEvent::Flush);
+                    last_flush = Instant::now();
+                }
             }
             let scanned_total = counters
                 .bytes_scanned
