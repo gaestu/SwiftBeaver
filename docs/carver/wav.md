@@ -63,6 +63,18 @@ The carver validates the `fmt ` subchunk to prevent false positives:
 
 Files with invalid audio parameters are rejected as false positives.
 
+### Size and Duration Validation
+
+Additional checks prevent false positives from corrupt or implausible size fields:
+
+| Check | Threshold | Description |
+|-------|-----------|-------------|
+| Near-max RIFF size | chunk_size ≥ 0xFFFFFF00 | Rejects sentinel/placeholder values near u32::MAX |
+| Data subchunk consistency | data_size > RIFF total_size | Rejects data chunks larger than their container |
+| Duration plausibility | > 3 hours | Rejects unreasonably long implied audio duration |
+
+Duration is calculated from the `data` subchunk size and `fmt` byte rate. The 3-hour limit matches the MP3 carver's maximum duration.
+
 ### Validation Status
 
 - **Truncated**: `true` if:
@@ -72,6 +84,9 @@ Files with invalid audio parameters are rejected as false positives.
   - "RIFF" signature mismatch
   - "WAVE" form type mismatch
   - Size field < 4 bytes
+  - RIFF chunk_size near u32::MAX (corrupt/sentinel)
+  - `data` subchunk size exceeds RIFF container
+  - Implied audio duration exceeds 3 hours
 
 ## Size Constraints
 
