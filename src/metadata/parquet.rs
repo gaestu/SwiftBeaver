@@ -1684,14 +1684,13 @@ fn parse_url_parts(
 
     let mut host = base.to_string();
     let mut port = None;
-    if let Some(pos) = base.rfind(':') {
-        let candidate = &base[pos + 1..];
-        if !candidate.is_empty() && candidate.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(parsed) = candidate.parse::<i32>() {
-                port = Some(parsed);
-                host = base[..pos].to_string();
-            }
-        }
+    if let Some(pos) = base.rfind(':')
+        && !base[pos + 1..].is_empty()
+        && base[pos + 1..].chars().all(|c| c.is_ascii_digit())
+        && let Ok(parsed) = base[pos + 1..].parse::<i32>()
+    {
+        port = Some(parsed);
+        host = base[..pos].to_string();
     }
 
     (scheme, host, port, path, query, fragment)

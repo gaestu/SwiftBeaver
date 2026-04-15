@@ -41,7 +41,7 @@ pub fn extract_history_from_pages(
         return Ok(Vec::new());
     }
 
-    let page_count = (file_len + page_size - 1) / page_size;
+    let page_count = file_len.div_ceil(page_size);
     let mut records: HashMap<String, BrowserHistoryRecord> = HashMap::new();
 
     for page_index in 0..page_count {
@@ -292,7 +292,7 @@ fn choose_title(texts: &[String], urls: &[String]) -> Option<String> {
         if text.len() > 512 {
             continue;
         }
-        if best.map_or(true, |current| text.len() > current.len()) {
+        if best.is_none_or(|current| text.len() > current.len()) {
             best = Some(text);
         }
     }
@@ -301,15 +301,15 @@ fn choose_title(texts: &[String], urls: &[String]) -> Option<String> {
 
 fn extract_visit_time(values: &[i64]) -> Option<chrono::NaiveDateTime> {
     for value in values {
-        if let Some(dt) = webkit_timestamp_to_datetime(*value) {
-            if is_plausible_time(&dt) {
-                return Some(dt);
-            }
+        if let Some(dt) = webkit_timestamp_to_datetime(*value)
+            && is_plausible_time(&dt)
+        {
+            return Some(dt);
         }
-        if let Some(dt) = unix_micro_to_datetime(*value) {
-            if is_plausible_time(&dt) {
-                return Some(dt);
-            }
+        if let Some(dt) = unix_micro_to_datetime(*value)
+            && is_plausible_time(&dt)
+        {
+            return Some(dt);
         }
     }
     None

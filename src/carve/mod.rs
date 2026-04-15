@@ -151,7 +151,7 @@ pub fn output_path(
     let safe_ext = sanitize_extension(extension);
     let dir = output_root.join(&safe_type);
     std::fs::create_dir_all(&dir)?;
-    let base = format!("{}_{}", safe_type, format!("{:012X}", global_start));
+    let base = format!("{safe_type}_{global_start:012X}");
     let filename = if safe_ext.is_empty() {
         base
     } else {
@@ -193,6 +193,7 @@ pub fn sanitize_extension(ext: &str) -> String {
 }
 
 /// Helper to build a CarvedFile result, reducing boilerplate in handlers
+#[allow(clippy::too_many_arguments)]
 pub fn build_carved_file(
     run_id: &str,
     file_type: &str,

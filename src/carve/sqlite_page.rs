@@ -294,10 +294,10 @@ fn validate_freeblock_chain(page: &[u8], first_freeblock: usize, cell_content: u
             return false;
         }
 
-        if next != 0 {
-            if next < cell_content || next.saturating_add(4) > page_size || next <= current {
-                return false;
-            }
+        if next != 0
+            && (next < cell_content || next.saturating_add(4) > page_size || next <= current)
+        {
+            return false;
         }
 
         current = next;

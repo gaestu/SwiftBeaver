@@ -183,7 +183,7 @@ impl CsvSink {
             .has_headers(false)
             .from_writer(entropy_file);
 
-        files_writer.write_record(&[
+        files_writer.write_record([
             "run_id",
             "file_type",
             "path",
@@ -203,7 +203,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        strings_writer.write_record(&[
+        strings_writer.write_record([
             "run_id",
             "artefact_kind",
             "content",
@@ -216,7 +216,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        history_writer.write_record(&[
+        history_writer.write_record([
             "run_id",
             "browser",
             "profile",
@@ -231,7 +231,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        cookies_writer.write_record(&[
+        cookies_writer.write_record([
             "run_id",
             "browser",
             "profile",
@@ -251,7 +251,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        downloads_writer.write_record(&[
+        downloads_writer.write_record([
             "run_id",
             "browser",
             "profile",
@@ -268,7 +268,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        run_writer.write_record(&[
+        run_writer.write_record([
             "run_id",
             "bytes_scanned",
             "chunks_processed",
@@ -282,7 +282,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        entropy_writer.write_record(&[
+        entropy_writer.write_record([
             "run_id",
             "global_start",
             "global_end",

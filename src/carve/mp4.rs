@@ -115,10 +115,11 @@ impl CarveHandler for Mp4CarveHandler {
                 if box_type != b"ftyp" {
                     return Ok(None);
                 }
-                if let Some(brand) = read_exact_at(ctx, offset.saturating_add(header_len), 4) {
-                    if brand == b"qt  " && !self.allow_quicktime {
-                        return Ok(None);
-                    }
+                if let Some(brand) = read_exact_at(ctx, offset.saturating_add(header_len), 4)
+                    && brand == b"qt  "
+                    && !self.allow_quicktime
+                {
+                    return Ok(None);
                 }
                 seen_ftyp = true;
             }

@@ -256,15 +256,14 @@ fn parse_rar5(
             return Err(CarveError::Invalid("rar5 header size invalid".to_string()));
         }
 
-        let header_buf =
-            match read_exact_at(ctx, offset + 4 + size_len as u64, header_size as usize) {
-                Some(buf) => buf,
-                None => {
-                    truncated = true;
-                    errors.push("eof while reading RAR header".to_string());
-                    break;
-                }
-            };
+        let header_buf = match read_exact_at(ctx, offset + 4 + size_len, header_size as usize) {
+            Some(buf) => buf,
+            None => {
+                truncated = true;
+                errors.push("eof while reading RAR header".to_string());
+                break;
+            }
+        };
 
         let mut idx = 0usize;
         let header_type = read_varint_buf(&header_buf, &mut idx)

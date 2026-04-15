@@ -104,6 +104,7 @@ pub fn spawn_metadata_thread(
 }
 
 /// Spawn signature scanning worker threads
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_scan_workers(
     workers: usize,
     scanner: Arc<dyn SignatureScanner>,
@@ -131,7 +132,6 @@ pub fn spawn_scan_workers(
         let string_spans = string_spans.clone();
         let meta_tx = meta_tx.clone();
         let run_id = run_id.clone();
-        let entropy_cfg = entropy_cfg;
         let sqlite_page_max_hits_per_chunk = sqlite_page_max_hits_per_chunk.max(1);
 
         handles.push(thread::spawn(move || {
@@ -199,22 +199,20 @@ pub fn spawn_scan_workers(
                 }
 
                 // Detect high entropy regions if enabled
-                if let Some(cfg) = entropy_cfg {
-                    if valid_len >= cfg.window_size {
-                        let regions = entropy::detect_entropy_regions(
-                            &run_id,
-                            job.chunk.start,
-                            &job.data[..valid_len],
-                            cfg.window_size,
-                            cfg.threshold,
-                        );
-                        for region in regions {
-                            if let Err(err) = meta_tx.send(MetadataEvent::Entropy(region)) {
-                                warn!(
-                                    "metadata channel closed while sending entropy region: {err}"
-                                );
-                                break;
-                            }
+                if let Some(cfg) = entropy_cfg
+                    && valid_len >= cfg.window_size
+                {
+                    let regions = entropy::detect_entropy_regions(
+                        &run_id,
+                        job.chunk.start,
+                        &job.data[..valid_len],
+                        cfg.window_size,
+                        cfg.threshold,
+                    );
+                    for region in regions {
+                        if let Err(err) = meta_tx.send(MetadataEvent::Entropy(region)) {
+                            warn!("metadata channel closed while sending entropy region: {err}");
+                            break;
                         }
                     }
                 }
@@ -226,6 +224,7 @@ pub fn spawn_scan_workers(
 }
 
 /// Spawn file carving worker threads
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_carve_workers(
     workers: usize,
     registry: Arc<CarveRegistry>,

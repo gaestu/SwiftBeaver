@@ -288,9 +288,7 @@ impl CarveHandler for Mp3CarveHandler {
             // - ID3v2 tag: valid even with 0 frames (metadata-only is rare but possible)
             // - Sync word only: require MIN_FRAMES_FOR_SYNC_VALIDATION consecutive valid frames
             //   to avoid false positives from random 0xFFFB/0xFFFA occurrences
-            if started_with_id3 {
-                validated = true;
-            } else if frame_count >= MIN_FRAMES_FOR_SYNC_VALIDATION {
+            if started_with_id3 || frame_count >= MIN_FRAMES_FOR_SYNC_VALIDATION {
                 validated = true;
             }
 

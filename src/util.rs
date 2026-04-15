@@ -77,6 +77,7 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
     match OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(&probe_path)
     {
         Ok(_) => {

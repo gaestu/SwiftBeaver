@@ -27,6 +27,9 @@ pub enum EvidenceError {
 /// ```
 pub trait EvidenceSource: Send + Sync {
     fn len(&self) -> u64;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, EvidenceError>;
 }
 
@@ -97,12 +100,12 @@ impl DeviceSource {
 
             let file = OpenOptions::new().read(true).open(path)?;
             let len = device_len(&file, metadata.len())?;
-            return Ok(Self {
+            Ok(Self {
                 file,
                 len,
                 #[cfg(not(unix))]
                 lock: std::sync::Mutex::new(()),
-            });
+            })
         }
         #[cfg(not(unix))]
         {

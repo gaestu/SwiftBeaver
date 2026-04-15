@@ -144,7 +144,7 @@ impl CarveHandler for SqliteCarveHandler {
 }
 
 fn is_valid_page_size(page_size: u32) -> bool {
-    if page_size < 512 || page_size > 65536 {
+    if !(512..=65536).contains(&page_size) {
         return false;
     }
     page_size.is_power_of_two()

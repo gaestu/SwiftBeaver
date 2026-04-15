@@ -29,7 +29,7 @@ const MIN_HEADERS_REQUIRED: usize = 2;
 /// Check if byte slice contains an @ character (basic email indicator)
 fn contains_email_pattern(data: &[u8]) -> bool {
     // Look for patterns like "user@domain" in From: or To: lines
-    data.iter().any(|&b| b == b'@')
+    data.contains(&b'@')
 }
 
 /// Check if data has CRLF or LF line endings typical of email

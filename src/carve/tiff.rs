@@ -64,7 +64,7 @@ impl CarveHandler for TiffCarveHandler {
             Err(CarveError::Invalid(_)) => return Ok(None),
             Err(_) => return Ok(None),
         };
-        if estimate.end <= 0 {
+        if estimate.end == 0 {
             return Ok(None);
         }
 

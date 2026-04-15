@@ -97,6 +97,7 @@ pub struct CheckpointConfig {
 /// - Optional string scanning and artefact extraction
 /// - Optional entropy detection
 /// - Metadata recording
+#[allow(clippy::too_many_arguments)]
 pub fn run_pipeline(
     cfg: &Config,
     evidence: Arc<dyn EvidenceSource>,
@@ -131,6 +132,7 @@ pub fn run_pipeline(
 }
 
 /// Run the pipeline with an external cancellation flag (e.g., Ctrl+C).
+#[allow(clippy::too_many_arguments)]
 pub fn run_pipeline_with_cancel(
     cfg: &Config,
     evidence: Arc<dyn EvidenceSource>,
@@ -241,6 +243,7 @@ struct PipelineRunner<'a> {
 }
 
 impl<'a> PipelineRunner<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         cfg: &'a Config,
         evidence: Arc<dyn EvidenceSource>,
@@ -501,11 +504,11 @@ impl<'a> PipelineRunner<'a> {
                 hit_max_files = true;
                 break;
             }
-            if let Some(flag) = &self.cancel_flag {
-                if flag.load(Ordering::Relaxed) {
-                    cancelled = true;
-                    break;
-                }
+            if let Some(flag) = &self.cancel_flag
+                && flag.load(Ordering::Relaxed)
+            {
+                cancelled = true;
+                break;
             }
             let chunks_seen_total = chunks_seen.saturating_add(resume_chunks);
             if chunks_seen_total >= max_chunks {
@@ -539,27 +542,27 @@ impl<'a> PipelineRunner<'a> {
                     data: Arc::new(data),
                 })
                 .with_context(|| format!("scan channel closed while sending chunk {chunk_id}"))?;
-            if let Some(progress) = &self.progress {
-                if progress.interval.is_zero() || last_progress.elapsed() >= progress.interval {
-                    let snapshot = build_progress_snapshot(
-                        total_bytes,
-                        resume_offset,
-                        &start_time,
-                        &counters.bytes_scanned,
-                        &counters.chunks_processed,
-                        &counters.hits_found,
-                        counters.carve_limiter.carved_counter(),
-                        &counters.string_spans,
-                        &counters.artefacts_found,
-                        &counters.carve_errors,
-                        &counters.metadata_errors,
-                        &counters.sqlite_errors,
-                    );
-                    progress.reporter.on_progress(&snapshot);
-                    last_progress = Instant::now();
+            if let Some(progress) = &self.progress
+                && (progress.interval.is_zero() || last_progress.elapsed() >= progress.interval)
+            {
+                let snapshot = build_progress_snapshot(
+                    total_bytes,
+                    resume_offset,
+                    &start_time,
+                    &counters.bytes_scanned,
+                    &counters.chunks_processed,
+                    &counters.hits_found,
+                    counters.carve_limiter.carved_counter(),
+                    &counters.string_spans,
+                    &counters.artefacts_found,
+                    &counters.carve_errors,
+                    &counters.metadata_errors,
+                    &counters.sqlite_errors,
+                );
+                progress.reporter.on_progress(&snapshot);
+                last_progress = Instant::now();
 
-                    let _ = channels.meta_tx.send(MetadataEvent::Flush);
-                }
+                let _ = channels.meta_tx.send(MetadataEvent::Flush);
             }
             let scanned_total = counters
                 .bytes_scanned
@@ -581,6 +584,7 @@ impl<'a> PipelineRunner<'a> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn finalize(
         &self,
         total_bytes: u64,
@@ -688,24 +692,23 @@ impl<'a> PipelineRunner<'a> {
             stats.artefacts_extracted
         );
 
-        if outcome.cancelled
+        if (outcome.cancelled
             || outcome.hit_max_bytes
             || outcome.hit_max_chunks
-            || outcome.hit_max_files
+            || outcome.hit_max_files)
+            && let Some(path) = checkpoint_path
         {
-            if let Some(path) = checkpoint_path {
-                let state = CheckpointState::new(
-                    &self.cfg.run_id,
-                    self.chunk_size,
-                    self.overlap,
-                    outcome.next_offset.min(total_bytes),
-                    total_bytes,
-                );
-                if let Err(err) = save_checkpoint(&path, &state) {
-                    warn!("failed to write checkpoint {}: {err}", path.display());
-                } else {
-                    info!("checkpoint saved to {}", path.display());
-                }
+            let state = CheckpointState::new(
+                &self.cfg.run_id,
+                self.chunk_size,
+                self.overlap,
+                outcome.next_offset.min(total_bytes),
+                total_bytes,
+            );
+            if let Err(err) = save_checkpoint(&path, &state) {
+                warn!("failed to write checkpoint {}: {err}", path.display());
+            } else {
+                info!("checkpoint saved to {}", path.display());
             }
         }
 
@@ -713,6 +716,7 @@ impl<'a> PipelineRunner<'a> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_pipeline_inner(
     cfg: &Config,
     evidence: Arc<dyn EvidenceSource>,
@@ -750,6 +754,7 @@ fn run_pipeline_inner(
     .run()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_progress_snapshot(
     total_bytes: u64,
     baseline_bytes: u64,

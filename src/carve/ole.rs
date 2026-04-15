@@ -333,7 +333,7 @@ fn classify_ole_kind(
                 continue;
             }
             let name_len = u16::from_le_bytes([entry[64], entry[65]]) as usize;
-            if name_len < 2 || name_len > 64 {
+            if !(2..=64).contains(&name_len) {
                 continue;
             }
             let entry_type = entry[66];
@@ -545,23 +545,21 @@ impl CarveHandler for OleCarveHandler {
         if let Some(kind) = classified_kind {
             file_type = kind.to_string();
             extension = kind.to_string();
-            if file_type != self.file_type() {
-                if let Ok((new_path, new_rel)) =
+            if file_type != self.file_type()
+                && let Ok((new_path, new_rel)) =
                     output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
-                {
-                    if std::fs::rename(&full_path, &new_path).is_ok() {
-                        full_path = new_path;
-                        rel_path = new_rel;
-                    }
-                }
+                && std::fs::rename(&full_path, &new_path).is_ok()
+            {
+                full_path = new_path;
+                rel_path = new_rel;
             }
         }
 
-        if let Some(allowed) = &self.allowed_kinds {
-            if !allowed.contains(&file_type) {
-                let _ = std::fs::remove_file(&full_path);
-                return Ok(None);
-            }
+        if let Some(allowed) = &self.allowed_kinds
+            && !allowed.contains(&file_type)
+        {
+            let _ = std::fs::remove_file(&full_path);
+            return Ok(None);
         }
 
         // Check if we hit max_size

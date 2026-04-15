@@ -150,7 +150,7 @@ pub mod artifacts {
                         run_id,
                         ArtefactKind::Url,
                         &value,
-                        &encoding,
+                        encoding,
                         chunk_start + local_start + mat.start() as u64,
                     ));
                 }
@@ -164,7 +164,7 @@ pub mod artifacts {
                         run_id,
                         ArtefactKind::Email,
                         &value,
-                        &encoding,
+                        encoding,
                         chunk_start + local_start + mat.start() as u64,
                     ));
                 }
@@ -179,7 +179,7 @@ pub mod artifacts {
                         run_id,
                         ArtefactKind::Phone,
                         value,
-                        &encoding,
+                        encoding,
                         chunk_start + local_start + mat.start() as u64,
                     ));
                 }
@@ -202,7 +202,7 @@ pub mod artifacts {
     fn is_plausible_phone(value: &str) -> bool {
         let digits: Vec<char> = value.chars().filter(|c| c.is_ascii_digit()).collect();
         let len = digits.len();
-        if len < 10 || len > 15 {
+        if !(10..=15).contains(&len) {
             return false;
         }
         if digits.is_empty() {
@@ -224,7 +224,7 @@ pub mod artifacts {
         encoding: &str,
         global_start: u64,
     ) -> StringArtefact {
-        let len = content.as_bytes().len() as u64;
+        let len = content.len() as u64;
         let global_end = if len == 0 {
             global_start
         } else {
@@ -282,8 +282,8 @@ pub mod artifacts {
             (&trimmed[7..], trimmed.to_string())
         } else if lower.starts_with("www.") {
             (&trimmed[4..], format!("http://{trimmed}"))
-        } else if trimmed.starts_with("//") {
-            (&trimmed[2..], format!("http:{trimmed}"))
+        } else if let Some(stripped) = trimmed.strip_prefix("//") {
+            (stripped, format!("http:{trimmed}"))
         } else {
             return None;
         };

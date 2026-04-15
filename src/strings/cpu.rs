@@ -203,11 +203,7 @@ pub(crate) fn scan_utf16_runs(
                 });
             }
 
-            if len >= max_len {
-                i = j + 2;
-            } else {
-                i = j + 2;
-            }
+            i = j + 2;
         }
         start_offset += 1;
     }
@@ -241,7 +237,7 @@ fn contains_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
     for window in haystack.windows(needle.len()) {
         let mut matched = true;
         for (b, n) in window.iter().zip(needle.iter()) {
-            if b.to_ascii_lowercase() != n.to_ascii_lowercase() {
+            if !b.eq_ignore_ascii_case(n) {
                 matched = false;
                 break;
             }

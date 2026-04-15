@@ -126,6 +126,7 @@ impl MetadataSink for DryRunSink {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_sink(
     backend: MetadataBackendKind,
     cfg: &crate::config::Config,

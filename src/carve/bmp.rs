@@ -116,7 +116,7 @@ impl CarveHandler for BmpCarveHandler {
 
                 // Sanity check: file size should be reasonable for dimensions
                 // Row size is padded to 4 bytes
-                let row_size = ((abs_width * bits_per_pixel as u32 + 31) / 32) * 4;
+                let row_size = (abs_width * bits_per_pixel as u32).div_ceil(32) * 4;
                 let pixel_data_size = row_size as u64 * abs_height as u64;
                 let min_expected_size = pixel_offset + pixel_data_size;
 

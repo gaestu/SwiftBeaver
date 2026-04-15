@@ -206,7 +206,7 @@ fn parse_wal_header(bytes: &[u8]) -> Option<WalHeader> {
     } else {
         raw_page_size
     };
-    if page_size < 512 || page_size > 65536 || !page_size.is_power_of_two() {
+    if !(512..=65536).contains(&page_size) || !page_size.is_power_of_two() {
         return None;
     }
 
@@ -376,7 +376,7 @@ fn wal_checksum_bytes(
     data: &[u8],
     mut checksum: [u32; 2],
 ) -> Option<[u32; 2]> {
-    if data.len() < 8 || data.len() % 8 != 0 {
+    if data.len() < 8 || !data.len().is_multiple_of(8) {
         return None;
     }
 

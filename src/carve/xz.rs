@@ -110,16 +110,16 @@ impl CarveHandler for XzCarveHandler {
                     search_start = absolute + 1;
                     continue;
                 }
-                if let Some(footer) = read_exact_at(ctx, footer_start, 12) {
-                    if footer[10..12] == XZ_FOOTER_MAGIC {
-                        let footer_crc =
-                            u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
-                        let computed = crc32(&footer[4..10]);
-                        if footer_crc == computed {
-                            end_offset = Some(footer_end);
-                            validated = true;
-                            break;
-                        }
+                if let Some(footer) = read_exact_at(ctx, footer_start, 12)
+                    && footer[10..12] == XZ_FOOTER_MAGIC
+                {
+                    let footer_crc =
+                        u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
+                    let computed = crc32(&footer[4..10]);
+                    if footer_crc == computed {
+                        end_offset = Some(footer_end);
+                        validated = true;
+                        break;
                     }
                 }
                 search_start = absolute + 1;

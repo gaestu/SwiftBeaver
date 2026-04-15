@@ -144,28 +144,26 @@ impl CarveHandler for ZipCarveHandler {
             let mut file_type = self.file_type().to_string();
             let mut extension = self.extension.clone();
 
-            if let Some(parsed) = &eocd {
-                if let Some(kind) = classify_zip(&full_path, parsed.cd_offset, parsed.cd_size) {
-                    file_type = kind.file_type().to_string();
-                    extension = kind.extension().to_string();
-                    if file_type != self.file_type() {
-                        if let Ok((new_path, new_rel)) =
-                            output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
-                        {
-                            if std::fs::rename(&full_path, &new_path).is_ok() {
-                                rel_path = new_rel;
-                                full_path = new_path;
-                            }
-                        }
-                    }
+            if let Some(parsed) = &eocd
+                && let Some(kind) = classify_zip(&full_path, parsed.cd_offset, parsed.cd_size)
+            {
+                file_type = kind.file_type().to_string();
+                extension = kind.extension().to_string();
+                if file_type != self.file_type()
+                    && let Ok((new_path, new_rel)) =
+                        output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                    && std::fs::rename(&full_path, &new_path).is_ok()
+                {
+                    rel_path = new_rel;
+                    full_path = new_path;
                 }
             }
 
-            if let Some(allowed) = &self.allowed_kinds {
-                if !allowed.contains(&file_type) {
-                    let _ = std::fs::remove_file(&full_path);
-                    return Ok(None);
-                }
+            if let Some(allowed) = &self.allowed_kinds
+                && !allowed.contains(&file_type)
+            {
+                let _ = std::fs::remove_file(&full_path);
+                return Ok(None);
             }
 
             return Ok(Some(CarvedFile {
@@ -225,11 +223,12 @@ impl CarveHandler for ZipCarveHandler {
             }
             buf.truncate(n);
 
-            if bytes_written == 0 && buf.len() >= ZIP_HEADER.len() {
-                if &buf[..ZIP_HEADER.len()] != ZIP_HEADER {
-                    let _ = std::fs::remove_file(&full_path);
-                    return Ok(None);
-                }
+            if bytes_written == 0
+                && buf.len() >= ZIP_HEADER.len()
+                && &buf[..ZIP_HEADER.len()] != ZIP_HEADER
+            {
+                let _ = std::fs::remove_file(&full_path);
+                return Ok(None);
             }
 
             let mut search_buf = carry.clone();
@@ -338,19 +337,17 @@ impl CarveHandler for ZipCarveHandler {
         let mut file_type = self.file_type().to_string();
         let mut extension = self.extension.clone();
 
-        if let Some(parsed) = &eocd {
-            if let Some(kind) = classify_zip(&full_path, parsed.cd_offset, parsed.cd_size) {
-                file_type = kind.file_type().to_string();
-                extension = kind.extension().to_string();
-                if file_type != self.file_type() {
-                    if let Ok((new_path, new_rel)) =
-                        output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
-                    {
-                        if std::fs::rename(&full_path, &new_path).is_ok() {
-                            rel_path = new_rel;
-                        }
-                    }
-                }
+        if let Some(parsed) = &eocd
+            && let Some(kind) = classify_zip(&full_path, parsed.cd_offset, parsed.cd_size)
+        {
+            file_type = kind.file_type().to_string();
+            extension = kind.extension().to_string();
+            if file_type != self.file_type()
+                && let Ok((new_path, new_rel)) =
+                    output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                && std::fs::rename(&full_path, &new_path).is_ok()
+            {
+                rel_path = new_rel;
             }
         }
 
@@ -511,10 +508,11 @@ fn find_eocd(
         }
         buf.truncate(n);
 
-        if bytes_scanned == 0 && buf.len() >= ZIP_HEADER.len() {
-            if &buf[..ZIP_HEADER.len()] != ZIP_HEADER {
-                return Ok(None);
-            }
+        if bytes_scanned == 0
+            && buf.len() >= ZIP_HEADER.len()
+            && &buf[..ZIP_HEADER.len()] != ZIP_HEADER
+        {
+            return Ok(None);
         }
 
         let mut search_buf = carry.clone();
@@ -942,21 +940,21 @@ fn classify_zip(path: &Path, cd_offset: u64, cd_size: u64) -> Option<ZipKind> {
         idx = name_end + extra_len + comment_len;
     }
 
-    if let Some(entry) = mimetype_entry {
-        if let Some(mime) = read_stored_entry(path, &entry) {
-            let mime = trim_ascii(&mime);
-            if mime == b"application/vnd.oasis.opendocument.text" {
-                return Some(ZipKind::Odt);
-            }
-            if mime == b"application/vnd.oasis.opendocument.spreadsheet" {
-                return Some(ZipKind::Ods);
-            }
-            if mime == b"application/vnd.oasis.opendocument.presentation" {
-                return Some(ZipKind::Odp);
-            }
-            if mime == b"application/epub+zip" {
-                return Some(ZipKind::Epub);
-            }
+    if let Some(entry) = mimetype_entry
+        && let Some(mime) = read_stored_entry(path, &entry)
+    {
+        let mime = trim_ascii(&mime);
+        if mime == b"application/vnd.oasis.opendocument.text" {
+            return Some(ZipKind::Odt);
+        }
+        if mime == b"application/vnd.oasis.opendocument.spreadsheet" {
+            return Some(ZipKind::Ods);
+        }
+        if mime == b"application/vnd.oasis.opendocument.presentation" {
+            return Some(ZipKind::Odp);
+        }
+        if mime == b"application/epub+zip" {
+            return Some(ZipKind::Epub);
         }
     }
 

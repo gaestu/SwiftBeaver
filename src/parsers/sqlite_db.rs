@@ -53,16 +53,16 @@ pub fn extract_browser_cookies(
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
 
-    if has_table(&conn, "cookies")? {
-        if let Ok(records) = extract_chrome_cookies(&conn, run_id, source_relative) {
-            out.extend(records);
-        }
+    if has_table(&conn, "cookies")?
+        && let Ok(records) = extract_chrome_cookies(&conn, run_id, source_relative)
+    {
+        out.extend(records);
     }
 
-    if has_table(&conn, "moz_cookies")? {
-        if let Ok(records) = extract_firefox_cookies(&conn, run_id, source_relative) {
-            out.extend(records);
-        }
+    if has_table(&conn, "moz_cookies")?
+        && let Ok(records) = extract_firefox_cookies(&conn, run_id, source_relative)
+    {
+        out.extend(records);
     }
 
     Ok(out)
@@ -79,16 +79,16 @@ pub fn extract_browser_downloads(
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
 
-    if has_table(&conn, "downloads")? {
-        if let Ok(records) = extract_chrome_downloads(&conn, run_id, source_relative) {
-            out.extend(records);
-        }
+    if has_table(&conn, "downloads")?
+        && let Ok(records) = extract_chrome_downloads(&conn, run_id, source_relative)
+    {
+        out.extend(records);
     }
 
-    if has_table(&conn, "moz_downloads")? {
-        if let Ok(records) = extract_firefox_downloads(&conn, run_id, source_relative) {
-            out.extend(records);
-        }
+    if has_table(&conn, "moz_downloads")?
+        && let Ok(records) = extract_firefox_downloads(&conn, run_id, source_relative)
+    {
+        out.extend(records);
     }
 
     Ok(out)

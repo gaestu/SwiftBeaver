@@ -84,11 +84,12 @@ impl CarveHandler for PdfCarveHandler {
             }
             buf.truncate(n);
 
-            if bytes_written == 0 && buf.len() >= PDF_HEADER.len() {
-                if &buf[..PDF_HEADER.len()] != PDF_HEADER {
-                    let _ = std::fs::remove_file(&full_path);
-                    return Ok(None);
-                }
+            if bytes_written == 0
+                && buf.len() >= PDF_HEADER.len()
+                && &buf[..PDF_HEADER.len()] != PDF_HEADER
+            {
+                let _ = std::fs::remove_file(&full_path);
+                return Ok(None);
             }
 
             let mut search_buf = carry.clone();
@@ -125,24 +126,22 @@ impl CarveHandler for PdfCarveHandler {
             };
         }
 
-        if validated {
-            if let Some(next) = read_byte(ctx, hit.global_offset + bytes_written) {
-                if next == b'\n' || next == b'\r' {
-                    writer.write_all(&[next])?;
-                    md5.consume(&[next]);
-                    sha256.update(&[next]);
-                    bytes_written = bytes_written.saturating_add(1);
-                    if next == b'\r' {
-                        if let Some(next2) = read_byte(ctx, hit.global_offset + bytes_written) {
-                            if next2 == b'\n' {
-                                writer.write_all(&[next2])?;
-                                md5.consume(&[next2]);
-                                sha256.update(&[next2]);
-                                bytes_written = bytes_written.saturating_add(1);
-                            }
-                        }
-                    }
-                }
+        if validated
+            && let Some(next) = read_byte(ctx, hit.global_offset + bytes_written)
+            && (next == b'\n' || next == b'\r')
+        {
+            writer.write_all(&[next])?;
+            md5.consume([next]);
+            sha256.update([next]);
+            bytes_written = bytes_written.saturating_add(1);
+            if next == b'\r'
+                && let Some(next2) = read_byte(ctx, hit.global_offset + bytes_written)
+                && next2 == b'\n'
+            {
+                writer.write_all(&[next2])?;
+                md5.consume([next2]);
+                sha256.update([next2]);
+                bytes_written = bytes_written.saturating_add(1);
             }
         }
 

@@ -92,7 +92,7 @@ impl CarveHandler for TarCarveHandler {
                 }
 
                 let size = parse_octal(&header[124..136])?;
-                let blocks = (size + (TAR_BLOCK_SIZE as u64 - 1)) / TAR_BLOCK_SIZE as u64;
+                let blocks = size.div_ceil(TAR_BLOCK_SIZE as u64);
                 let data_len = blocks.saturating_mul(TAR_BLOCK_SIZE as u64);
                 if data_len > 0 {
                     stream.read_exact(data_len as usize)?;
