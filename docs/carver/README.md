@@ -76,7 +76,7 @@ Each carver document includes:
 | ELF | ⏳ TBD | Production | Executable and Linkable Format |
 | MOBI | ⏳ TBD | Production | Mobipocket ebook format |
 | FB2 | ⏳ TBD | Production | FictionBook 2.0 ebook format |
-| LRF | ⏳ TBD | Production | Sony Portable Reader format |
+| [LRF](lrf.md) | ✅ Complete | Production | Sony Portable Reader format |
 
 ## Quick Reference by Signature
 

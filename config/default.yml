@@ -374,6 +374,6 @@ file_types:
       - id: "lrf_header"
         hex: "4C524600"
     footer_patterns: []
-    max_size: 104857600
+    max_size: 20971520        # 20 MiB
     min_size: 64
     validator: "lrf"
