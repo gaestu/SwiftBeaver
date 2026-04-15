@@ -454,8 +454,28 @@ fn read_local_header(
 fn is_supported_zip_method(method: u16) -> bool {
     matches!(
         method,
-        0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 12 | 14 | 18 | 19 | 20 | 93 | 94 | 95
-            | 96 | 97 | 98 | 99
+        0 | 1
+            | 2
+            | 3
+            | 4
+            | 5
+            | 6
+            | 7
+            | 8
+            | 9
+            | 10
+            | 12
+            | 14
+            | 18
+            | 19
+            | 20
+            | 93
+            | 94
+            | 95
+            | 96
+            | 97
+            | 98
+            | 99
     )
 }
 
@@ -588,7 +608,9 @@ fn validate_zip_archive(path: &Path) -> Result<(), CarveError> {
 
 fn find_archive_eocd(file: &mut File, file_len: u64) -> Result<(u64, ZipEocd), CarveError> {
     if file_len < ZIP_EOCD_FIXED_LEN as u64 {
-        return Err(CarveError::Invalid("zip file too small for EOCD".to_string()));
+        return Err(CarveError::Invalid(
+            "zip file too small for EOCD".to_string(),
+        ));
     }
 
     let scan_len = file_len.min(ZIP_EOCD_FIXED_LEN as u64 + ZIP_MAX_COMMENT_LEN);
@@ -1311,10 +1333,12 @@ mod tests {
         let result = handler.process_hit(&hit, &ctx).expect("process");
         let carved = result.expect("carved");
         assert!(!carved.validated);
-        assert!(carved
-            .errors
-            .iter()
-            .any(|e| e.contains("zip archive validation failed")));
+        assert!(
+            carved
+                .errors
+                .iter()
+                .any(|e| e.contains("zip archive validation failed"))
+        );
     }
 
     #[test]

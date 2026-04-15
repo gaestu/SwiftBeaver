@@ -48,7 +48,7 @@ cargo run -- --input /path/to/image.dd --output ./output --scan-strings --scan-u
 
 This creates a run directory under `./output/<run_id>/` with:
 
-- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/sqlite_wal/sqlite_page/bmp/tiff/mp4/mov/rar/7z/wav/avi/mp3/ogg/tar/gz/bz2/xz/doc/xls/ppt/rtf/ico/elf/eml/mobi/fb2/lrf/webm/wmv). ZIPs are classified into docx/xlsx/pptx/odt/ods/odp/epub when entries match. OLE compound documents are classified as doc/xls/ppt.
+- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/sqlite_wal/sqlite_page/bmp/tiff/heic/mp4/mov/rar/7z/wav/avi/mp3/ogg/tar/gz/bz2/xz/doc/xls/ppt/rtf/ico/elf/eml/mobi/fb2/lrf/webm/wmv). ZIPs are classified into docx/xlsx/pptx/odt/ods/odp/epub when entries match. OLE compound documents are classified as doc/xls/ppt.
 - `metadata/` - JSONL records for carved files, string artefacts, and browser history
 
 ## Configuration
@@ -132,7 +132,7 @@ The Phase 2 pipeline:
 2. Chunk scheduler + reader
 3. CPU signature scanner
 4. Optional CPU string scanner + artefact extraction
-5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite/BMP/TIFF/MP4/RAR/7z)
+5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite/BMP/TIFF/HEIC/MP4/RAR/7z)
 6. SQLite parser for browser history
 7. JSONL/CSV metadata sink
 

@@ -298,6 +298,9 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
     simple_builders.insert("lrf", |ext, min, max| {
         boxed(carve::lrf::LrfCarveHandler::new(ext, min, max))
     });
+    simple_builders.insert("heic", |ext, min, max| {
+        boxed(carve::heic::HeicCarveHandler::new(ext, min, max))
+    });
 
     for file_type in &cfg.file_types {
         let validator = if file_type.validator.trim().is_empty() {

@@ -1,6 +1,6 @@
 # Carver Documentation Index
 
-This directory contains detailed documentation for all 34 file format carvers implemented in SwiftBeaver.
+This directory contains detailed documentation for all 35 file format carvers implemented in SwiftBeaver.
 
 ## Documentation Structure
 
@@ -29,6 +29,7 @@ Each carver document includes:
 | [BMP](bmp.md) | ✅ Complete | Production | Windows Bitmap images |
 | [TIFF](tiff.md) | ✅ Complete | Production | Tagged Image File Format (IFD-based) |
 | [WEBP](webp.md) | ✅ Complete | Production | WebP images (RIFF container) |
+| [HEIC](heic.md) | ✅ Complete | Production | HEIC/HEIF images (ISOBMFF container) |
 | ICO | ⏳ TBD | Production | Windows Icon Format |
 
 ## Archive Format Carvers

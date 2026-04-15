@@ -7,6 +7,7 @@ pub mod fb2;
 pub mod footer;
 pub mod gif;
 pub mod gzip;
+pub mod heic;
 pub mod ico;
 pub mod jpeg;
 pub mod lrf;

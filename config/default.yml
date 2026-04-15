@@ -132,6 +132,31 @@ file_types:
     max_size: 104857600
     min_size: 8
     validator: "tiff"
+  - id: "heic"
+    extensions: ["heic", "heif", "hif"]
+    header_patterns:
+      # HEIC with ftyp size 24 (0x18)
+      - id: "heic_ftyp_18"
+        hex: "000000186674797068656963"
+      # HEIC with ftyp size 28 (0x1C)
+      - id: "heic_ftyp_1c"
+        hex: "0000001C6674797068656963"
+      # HEIC with ftyp size 32 (0x20)
+      - id: "heic_ftyp_20"
+        hex: "000000206674797068656963"
+      # HEIF mif1 brand with ftyp size 24 (0x18)
+      - id: "mif1_ftyp_18"
+        hex: "00000018667479706D696631"
+      # HEIF mif1 brand with ftyp size 28 (0x1C)
+      - id: "mif1_ftyp_1c"
+        hex: "0000001C667479706D696631"
+      # HEIF mif1 brand with ftyp size 32 (0x20)
+      - id: "mif1_ftyp_20"
+        hex: "00000020667479706D696631"
+    footer_patterns: []
+    max_size: 104857600
+    min_size: 100
+    validator: "heic"
   - id: "mp4"
     extensions: ["mp4", "m4a", "m4v"]
     header_patterns:
