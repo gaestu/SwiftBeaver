@@ -132,6 +132,7 @@ Each line in `metadata/run_summary.jsonl` is a JSON object with:
 - `chunks_processed`
 - `hits_found`
 - `files_carved`
+- `files_rejected`
 - `string_spans`
 - `artefacts_extracted`
 - `tool_version`

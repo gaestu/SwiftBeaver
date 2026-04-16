@@ -108,6 +108,7 @@ fn parquet_writes_expected_files() {
         chunks_processed: 1,
         hits_found: 2,
         files_carved: 1,
+        files_rejected: 0,
         string_spans: 3,
         artefacts_extracted: 4,
     };

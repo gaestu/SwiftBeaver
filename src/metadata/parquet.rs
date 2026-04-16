@@ -196,6 +196,7 @@ struct RunSummaryRow {
     chunks_processed: i64,
     hits_found: i64,
     files_carved: i64,
+    files_rejected: i64,
     string_spans: i64,
     artefacts_extracted: i64,
 }
@@ -808,6 +809,7 @@ impl MetadataSink for ParquetSink {
             chunks_processed: to_i64(summary.chunks_processed)?,
             hits_found: to_i64(summary.hits_found)?,
             files_carved: to_i64(summary.files_carved)?,
+            files_rejected: to_i64(summary.files_rejected)?,
             string_spans: to_i64(summary.string_spans)?,
             artefacts_extracted: to_i64(summary.artefacts_extracted)?,
         };
@@ -1058,6 +1060,7 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("chunks_processed", DataType::Int64, false),
             Field::new("hits_found", DataType::Int64, false),
             Field::new("files_carved", DataType::Int64, false),
+            Field::new("files_rejected", DataType::Int64, false),
             Field::new("string_spans", DataType::Int64, false),
             Field::new("artefacts_extracted", DataType::Int64, false),
         ])),
@@ -1552,6 +1555,7 @@ fn build_summary_batch(
     let mut chunks_processed = Int64Builder::new();
     let mut hits_found = Int64Builder::new();
     let mut files_carved = Int64Builder::new();
+    let mut files_rejected = Int64Builder::new();
     let mut string_spans = Int64Builder::new();
     let mut artefacts_extracted = Int64Builder::new();
 
@@ -1565,6 +1569,7 @@ fn build_summary_batch(
         chunks_processed.append_value(row.chunks_processed);
         hits_found.append_value(row.hits_found);
         files_carved.append_value(row.files_carved);
+        files_rejected.append_value(row.files_rejected);
         string_spans.append_value(row.string_spans);
         artefacts_extracted.append_value(row.artefacts_extracted);
     }
@@ -1579,6 +1584,7 @@ fn build_summary_batch(
         Arc::new(chunks_processed.finish()),
         Arc::new(hits_found.finish()),
         Arc::new(files_carved.finish()),
+        Arc::new(files_rejected.finish()),
         Arc::new(string_spans.finish()),
         Arc::new(artefacts_extracted.finish()),
     ];

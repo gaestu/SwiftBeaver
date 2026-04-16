@@ -242,6 +242,7 @@ pub fn spawn_carve_workers(
     carve_limiter: Arc<CarveLimiter>,
     carve_errors: Arc<AtomicU64>,
     carve_time_ms: Arc<AtomicU64>,
+    files_rejected: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -256,6 +257,7 @@ pub fn spawn_carve_workers(
         let carve_limiter = carve_limiter.clone();
         let carve_errors = carve_errors.clone();
         let carve_time_ms = carve_time_ms.clone();
+        let files_rejected = files_rejected.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -291,6 +293,7 @@ pub fn spawn_carve_workers(
                     }
                     Ok(None) => {
                         carve_limiter.release();
+                        files_rejected.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(err) => {
                         carve_limiter.release();
