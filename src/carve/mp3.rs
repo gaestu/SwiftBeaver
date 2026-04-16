@@ -341,6 +341,44 @@ fn detect_mp3_candidate(
     Err(CarveError::Invalid("mp3: signature mismatch".to_string()))
 }
 
+/// Maximum MPEG frame size (320kbps, 32kHz, MPEG1 Layer III with padding):
+/// 144 * 320000 / 32000 + 1 = 1441 bytes
+const MAX_FRAME_SIZE: u64 = 1441;
+
+/// Check whether the hit at `offset` is an interior frame within an existing MP3 stream.
+///
+/// Reads up to MAX_FRAME_SIZE bytes before the hit offset and looks for a valid MPEG
+/// audio frame header whose computed frame size lands exactly at `offset`.
+/// If found, this hit is interior (not the start of a stream) and should be rejected.
+fn is_interior_frame(evidence: &dyn EvidenceSource, offset: u64) -> Result<bool, CarveError> {
+    if offset < 4 {
+        return Ok(false);
+    }
+
+    let lookback = offset.min(MAX_FRAME_SIZE);
+    let start = offset - lookback;
+
+    let buf = match read_exact_at(evidence, start, lookback as usize)? {
+        Some(buf) => buf,
+        None => return Ok(false),
+    };
+
+    // Scan for sync words in the buffer
+    for i in 0..buf.len().saturating_sub(3) {
+        if buf[i] == 0xFF
+            && (buf[i + 1] & 0xE0) == 0xE0
+            && let Some(frame) = extract_frame_params(&buf[i..i + 4])
+        {
+            let candidate_start = start + i as u64;
+            if candidate_start + frame.frame_size as u64 == offset {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 fn probe_mp3_candidate(
     evidence: &dyn EvidenceSource,
     offset: u64,
@@ -415,7 +453,18 @@ impl CarveHandler for Mp3CarveHandler {
         offset: u64,
     ) -> Result<PreValidation, CarveError> {
         match probe_mp3_candidate(evidence, offset) {
-            Ok(probe) if probe.is_valid() => Ok(PreValidation::Proceed),
+            Ok(probe) if probe.is_valid() => {
+                // For sync-word candidates, check if this is an interior frame
+                // within an existing MP3 stream (not the start of a new file).
+                if probe.candidate.kind == Mp3CandidateKind::SyncOnly
+                    && is_interior_frame(evidence, offset)?
+                {
+                    return Ok(PreValidation::Reject(
+                        "mp3: interior frame within existing stream".to_string(),
+                    ));
+                }
+                Ok(PreValidation::Proceed)
+            }
             Ok(probe) => Ok(PreValidation::Reject(probe_rejection_reason(probe))),
             Err(CarveError::Invalid(reason)) => Ok(PreValidation::Reject(reason)),
             Err(other) => Err(other),
@@ -1005,5 +1054,99 @@ mod tests {
             42 + create_mp3_frame(9, 0, false).len() as u64
                 + create_mp3_frame(11, 0, false).len() as u64
         );
+    }
+
+    #[test]
+    fn rejects_interior_frame_at_second_offset() {
+        // Create a multi-frame MP3 (no ID3)
+        let mut mp3_data = Vec::new();
+        for _ in 0..10 {
+            mp3_data.extend_from_slice(&create_mp3_frame(9, 0, false)); // 128kbps, 44100Hz, size=417
+        }
+
+        let evidence = SliceEvidence { data: mp3_data };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+
+        // First frame (offset 0) should be accepted
+        assert!(matches!(
+            handler.pre_validate(&evidence, 0),
+            Ok(PreValidation::Proceed)
+        ));
+
+        // Second frame (offset 417) should be rejected as interior frame
+        assert!(matches!(
+            handler.pre_validate(&evidence, 417),
+            Ok(PreValidation::Reject(_))
+        ));
+
+        // Third frame (offset 834) should also be rejected
+        assert!(matches!(
+            handler.pre_validate(&evidence, 834),
+            Ok(PreValidation::Reject(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_first_frame_of_stream() {
+        let mut mp3_data = Vec::new();
+        // Put some non-MP3 data first
+        mp3_data.extend_from_slice(&[0x00; 500]);
+        // Then valid MP3 frames
+        for _ in 0..5 {
+            mp3_data.extend_from_slice(&create_mp3_frame(9, 0, false));
+        }
+
+        let evidence = SliceEvidence { data: mp3_data };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+
+        // Frame at offset 500 should be accepted (no preceding frame points to it)
+        assert!(matches!(
+            handler.pre_validate(&evidence, 500),
+            Ok(PreValidation::Proceed)
+        ));
+    }
+
+    #[test]
+    fn id3_backed_not_affected_by_backward_check() {
+        // Create ID3-backed MP3 with valid frames
+        let mut mp3_data = create_id3v2_header(100);
+        mp3_data.resize(110, 0x00); // ID3 tag data
+        for _ in 0..5 {
+            mp3_data.extend_from_slice(&create_mp3_frame(9, 0, false));
+        }
+
+        let evidence = SliceEvidence { data: mp3_data };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+
+        // ID3-backed hit at offset 0 should always be accepted
+        assert!(matches!(
+            handler.pre_validate(&evidence, 0),
+            Ok(PreValidation::Proceed)
+        ));
+    }
+
+    #[test]
+    fn accepts_frame_after_gap() {
+        let mut data = Vec::new();
+        // First: some valid MP3 frames
+        for _ in 0..5 {
+            data.extend_from_slice(&create_mp3_frame(9, 0, false));
+        }
+        // Gap: random non-frame data (not aligned to any frame boundary)
+        data.extend_from_slice(&[0x42; 200]);
+        // Second stream: more valid MP3 frames
+        let second_stream_offset = data.len();
+        for _ in 0..5 {
+            data.extend_from_slice(&create_mp3_frame(9, 0, false));
+        }
+
+        let evidence = SliceEvidence { data };
+        let handler = Mp3CarveHandler::new("mp3".to_string(), 0, 0);
+
+        // Frame at second_stream_offset should be accepted (gap breaks the chain)
+        assert!(matches!(
+            handler.pre_validate(&evidence, second_stream_offset as u64),
+            Ok(PreValidation::Proceed)
+        ));
     }
 }

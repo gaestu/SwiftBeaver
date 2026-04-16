@@ -120,6 +120,8 @@ if duration > MAX_DURATION_SECONDS {
 }
 ```
 
+4. **Interior frame rejection**: For sync-word-only candidates, a backward lookback reads up to 1441 bytes (the maximum MPEG frame size) before the hit offset. If a valid MPEG frame header is found whose computed frame size lands exactly at the hit offset, the candidate is an interior frame within an existing MP3 stream and is rejected. This eliminates massive over-carving (~814x duplicates per real file) caused by the scanner matching the sync word at every frame boundary. ID3-backed candidates are not affected by this check.
+
 ## Validation
 
 - **Validated**: `true` if:
@@ -132,6 +134,7 @@ if duration > MAX_DURATION_SECONDS {
   - The probe finds too few consistent frames for the candidate type
   - MPEG version, layer, or sample rate becomes inconsistent before the candidate reaches its validation threshold
   - Frame header validation fails
+  - Sync-word candidate is an interior frame within an existing MP3 stream (backward lookback check)
 
 ## Size Constraints
 
@@ -188,6 +191,7 @@ Unit tests in `src/carve/mp3.rs` also cover:
 4. **Padding frames**: Frames with padding bit set
 5. **CRC protection**: Frames with 16-bit CRC after header
 6. **Free bitrate**: Bitrate index 0000 (not commonly used)
+7. **Interior frames**: Sync-word hits that fall inside an existing MP3 stream are rejected via backward lookback, preventing per-frame duplication
 
 ## Performance Characteristics
 
