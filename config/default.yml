@@ -274,7 +274,7 @@ file_types:
       - id: "ogg_sync"
         hex: "4F676753"
     footer_patterns: []
-    max_size: 524288000
+    max_size: 104857600
     min_size: 28
     validator: "ogg"
   - id: "mov"
