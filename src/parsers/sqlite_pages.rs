@@ -12,6 +12,10 @@ use crate::strings::artifacts::extract_urls_from_text;
 const SQLITE_HEADER: &[u8] = b"SQLite format 3\0";
 const MAX_TEXT_LEN: usize = 4096;
 
+/// Hard cap on SQLite cell payload size to prevent OOM from garbage varints.
+/// No legitimate single cell payload should approach 100 MB.
+const MAX_PAYLOAD: usize = 100 * 1024 * 1024;
+
 pub fn extract_history_from_pages(
     path: &Path,
     run_id: &str,
@@ -138,6 +142,9 @@ fn extract_payload(
     let (_, rowid_size) = read_varint(page.get(cell_offset + len_size..)?)?;
     let payload_start = cell_offset + len_size + rowid_size;
     let payload_len = usize::try_from(payload_len).ok()?;
+    if payload_len > MAX_PAYLOAD {
+        return None;
+    }
     let local_len = local_payload_len(payload_len, usable_size);
     let local_end = payload_start.checked_add(local_len)?;
     if local_end > page.len() {
@@ -439,6 +446,58 @@ mod tests {
             records
                 .iter()
                 .any(|r| r.url == "https://overflow.example.com")
+        );
+    }
+
+    #[test]
+    fn rejects_garbage_varint_payload_length() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("corrupted.sqlite");
+        let conn = Connection::open(&path).expect("open");
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, url TEXT)", [])
+            .expect("create");
+        conn.execute("INSERT INTO t (url) VALUES (?1)", ("https://example.com",))
+            .expect("insert");
+        drop(conn);
+
+        // Read the SQLite file and corrupt the cell payload varint on the data page.
+        let mut data = std::fs::read(&path).expect("read");
+        let page_size = u16::from_be_bytes([data[16], data[17]]) as usize;
+        let page_size = if page_size == 1 { 65536 } else { page_size };
+
+        // Find the first leaf table page (0x0D) after the header page.
+        let mut corrupted = false;
+        for page_index in 1..(data.len() / page_size) {
+            let page_start = page_index * page_size;
+            if data[page_start] != 0x0D {
+                continue;
+            }
+            let cell_count =
+                u16::from_be_bytes([data[page_start + 3], data[page_start + 4]]) as usize;
+            if cell_count == 0 {
+                continue;
+            }
+            let ptr_offset = page_start + 8;
+            let cell_offset = u16::from_be_bytes([data[ptr_offset], data[ptr_offset + 1]]) as usize;
+            let abs_offset = page_start + cell_offset;
+            // Overwrite the cell payload varint with 9 bytes of 0xFF.
+            // This decodes to u64::MAX (~18 exabytes), which previously caused OOM.
+            for i in 0..9 {
+                if abs_offset + i < data.len() {
+                    data[abs_offset + i] = 0xFF;
+                }
+            }
+            corrupted = true;
+            break;
+        }
+        assert!(corrupted, "could not find a leaf table page to corrupt");
+        std::fs::write(&path, &data).expect("write corrupted file");
+
+        // This must not OOM — the MAX_PAYLOAD guard should reject the garbage varint.
+        let records = extract_history_from_pages(&path, "run1", "corrupted.sqlite").expect("pages");
+        assert!(
+            !records.iter().any(|r| r.url == "https://example.com"),
+            "corrupted cell should not produce the original URL"
         );
     }
 }
