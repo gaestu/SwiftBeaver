@@ -103,6 +103,8 @@ pub struct ExtractionContext<'a> {
     pub output_root: &'a Path,
     pub evidence: &'a dyn EvidenceSource,
     pub deferred_buffer_bytes: usize,
+    /// When true, skip all file I/O (metadata-only mode).
+    pub metadata_only: bool,
     /// Per-worker reusable I/O buffer for carve operations.
     /// Persists across hits within the same worker thread.
     pub(crate) io_buf: RefCell<Vec<u8>>,
@@ -119,6 +121,7 @@ impl<'a> std::fmt::Debug for ExtractionContext<'a> {
             .field("output_root", &self.output_root)
             .field("evidence", &"<dyn EvidenceSource>")
             .field("deferred_buffer_bytes", &self.deferred_buffer_bytes)
+            .field("metadata_only", &self.metadata_only)
             .field("io_buf_capacity", &self.io_buf.borrow().capacity())
             .field("chunk_data_len", &self.chunk_data.as_ref().map(|d| d.len()))
             .field("chunk_start", &self.chunk_start)
@@ -138,6 +141,7 @@ impl<'a> ExtractionContext<'a> {
             output_root,
             evidence,
             deferred_buffer_bytes,
+            metadata_only: false,
             io_buf: RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
@@ -205,7 +209,6 @@ pub fn output_path(
     let safe_type = sanitize_component(file_type);
     let safe_ext = sanitize_extension(extension);
     let dir = output_root.join(&safe_type);
-    std::fs::create_dir_all(&dir)?;
     let base = format!("{safe_type}_{global_start:012X}");
     let filename = if safe_ext.is_empty() {
         base
@@ -306,25 +309,34 @@ pub(crate) struct DeferredWriter {
     buffer_limit: usize,
     buffer: Vec<u8>,
     writer: Option<BufWriter<File>>,
+    /// When true, all I/O operations are skipped (metadata-only mode).
+    skip_io: bool,
 }
 
 impl DeferredWriter {
-    pub(crate) fn new(path: PathBuf, buffer_limit: usize) -> Self {
+    pub(crate) fn new(path: PathBuf, buffer_limit: usize, skip_io: bool) -> Self {
         Self {
             path,
             buffer_limit,
             buffer: Vec::new(),
             writer: None,
+            skip_io,
         }
     }
 
     pub(crate) fn write_all(&mut self, data: &[u8]) -> Result<(), CarveError> {
+        if self.skip_io {
+            return Ok(());
+        }
         if let Some(ref mut writer) = self.writer {
             writer.write_all(data)?;
         } else if self.buffer.len() + data.len() <= self.buffer_limit {
             self.buffer.extend_from_slice(data);
         } else {
             // Transition: create file, flush buffer, write new data
+            if let Some(parent) = self.path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             let mut writer = BufWriter::new(File::create(&self.path)?);
             if !self.buffer.is_empty() {
                 writer.write_all(&self.buffer)?;
@@ -338,9 +350,15 @@ impl DeferredWriter {
 
     /// Materialize the file (if still buffering with data) and flush.
     pub(crate) fn flush_to_disk(&mut self) -> Result<(), CarveError> {
+        if self.skip_io {
+            return Ok(());
+        }
         if let Some(ref mut writer) = self.writer {
             writer.flush()?;
         } else if !self.buffer.is_empty() {
+            if let Some(parent) = self.path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             let mut file = File::create(&self.path)?;
             file.write_all(&self.buffer)?;
             file.flush()?;
@@ -351,6 +369,9 @@ impl DeferredWriter {
     /// Discard buffered data without creating a file. If the file was already
     /// created (buffer overflowed), close and remove it.
     pub(crate) fn discard(&mut self) {
+        if self.skip_io {
+            return;
+        }
         if let Some(writer) = self.writer.take() {
             drop(writer);
             let _ = std::fs::remove_file(&self.path);
@@ -405,7 +426,7 @@ impl<'a> CarveStream<'a> {
             offset,
             max_size,
             written: 0,
-            writer: DeferredWriter::new(path, ctx.deferred_buffer_bytes),
+            writer: DeferredWriter::new(path, ctx.deferred_buffer_bytes, ctx.metadata_only),
             md5: md5::Context::new(),
             sha256: Sha256::new(),
             reuse_buf,
@@ -472,6 +493,33 @@ impl<'a> CarveStream<'a> {
         self.written
     }
 
+    /// Read and hash `len` bytes in fixed-size chunks without allocating the full buffer.
+    /// Use this for the "consume remainder" case where the returned data isn't needed.
+    pub(crate) fn consume_remaining(&mut self, len: u64) -> Result<(), CarveError> {
+        if self.max_size > 0 && self.written.saturating_add(len) > self.max_size {
+            return Err(CarveError::Truncated);
+        }
+
+        let chunk_size = 64 * 1024;
+        let mut buf = std::mem::take(&mut self.reuse_buf);
+        if buf.len() < chunk_size {
+            buf.resize(chunk_size, 0);
+        }
+        let mut left = len;
+        while left > 0 {
+            let to_read = (left as usize).min(chunk_size);
+            let n = self.read_from_source(self.offset, &mut buf[..to_read])?;
+            if n == 0 {
+                self.reuse_buf = buf;
+                return Err(CarveError::Eof);
+            }
+            self.write_bytes(&buf[..n])?;
+            left = left.saturating_sub(n as u64);
+        }
+        self.reuse_buf = buf;
+        Ok(())
+    }
+
     /// Read data from current offset without advancing or writing.
     /// Used to peek ahead for validation without consuming data.
     pub(crate) fn peek_exact(&self, len: usize) -> Result<Vec<u8>, CarveError> {
@@ -507,7 +555,11 @@ pub(crate) fn write_range(
     md5: &mut md5::Context,
     sha256: &mut Sha256,
 ) -> Result<(u64, bool), CarveError> {
-    let mut writer = DeferredWriter::new(path.to_path_buf(), ctx.deferred_buffer_bytes);
+    let mut writer = DeferredWriter::new(
+        path.to_path_buf(),
+        ctx.deferred_buffer_bytes,
+        ctx.metadata_only,
+    );
     let mut offset = start;
     let mut remaining = end.saturating_sub(start);
     let mut bytes_written = 0u64;
@@ -564,7 +616,7 @@ mod tests {
         let path = dir.path().join("small.bin");
         let data = b"hello world";
 
-        let mut writer = DeferredWriter::new(path.clone(), 1024);
+        let mut writer = DeferredWriter::new(path.clone(), 1024, false);
         writer.write_all(data).expect("write");
         // File should NOT exist yet (still buffering)
         assert!(!path.exists());
@@ -579,7 +631,7 @@ mod tests {
         let path = dir.path().join("large.bin");
         let limit = 16;
 
-        let mut writer = DeferredWriter::new(path.clone(), limit);
+        let mut writer = DeferredWriter::new(path.clone(), limit, false);
         // Write within limit
         writer.write_all(&[0xAA; 10]).expect("write1");
         assert!(!path.exists());
@@ -602,7 +654,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("discarded.bin");
 
-        let mut writer = DeferredWriter::new(path.clone(), 1024);
+        let mut writer = DeferredWriter::new(path.clone(), 1024, false);
         writer.write_all(b"data").expect("write");
         assert!(!path.exists());
         writer.discard();
@@ -614,7 +666,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("discarded_streaming.bin");
 
-        let mut writer = DeferredWriter::new(path.clone(), 4);
+        let mut writer = DeferredWriter::new(path.clone(), 4, false);
         writer.write_all(b"exceeds limit").expect("write");
         assert!(path.exists());
         writer.discard();
@@ -627,7 +679,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("empty.bin");
 
-        let mut writer = DeferredWriter::new(path.clone(), 1024);
+        let mut writer = DeferredWriter::new(path.clone(), 1024, false);
         writer.discard();
         assert!(!path.exists());
     }
@@ -637,7 +689,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("empty.bin");
 
-        let mut writer = DeferredWriter::new(path.clone(), 1024);
+        let mut writer = DeferredWriter::new(path.clone(), 1024, false);
         writer.flush_to_disk().expect("flush");
         // No data written → no file should be created
         assert!(!path.exists());
@@ -648,11 +700,33 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("eager.bin");
 
-        let mut writer = DeferredWriter::new(path.clone(), 0);
+        let mut writer = DeferredWriter::new(path.clone(), 0, false);
         // With limit=0, any data triggers immediate file creation
         writer.write_all(b"eager").expect("write");
         assert!(path.exists());
         writer.flush_to_disk().expect("flush");
         assert_eq!(std::fs::read(&path).expect("read"), b"eager");
+    }
+
+    #[test]
+    fn deferred_writer_skip_io_no_file_created() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("skipped.bin");
+
+        let mut writer = DeferredWriter::new(path.clone(), 1024, true);
+        writer.write_all(b"should not be written").expect("write");
+        writer.flush_to_disk().expect("flush");
+        assert!(!path.exists(), "skip_io should prevent file creation");
+    }
+
+    #[test]
+    fn deferred_writer_skip_io_discard_is_noop() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("skipped_discard.bin");
+
+        let mut writer = DeferredWriter::new(path.clone(), 1024, true);
+        writer.write_all(b"data").expect("write");
+        writer.discard();
+        assert!(!path.exists());
     }
 }

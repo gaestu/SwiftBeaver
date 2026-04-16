@@ -404,6 +404,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = RarCarveHandler::new("rar".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -449,6 +450,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = RarCarveHandler::new("rar".to_string(), 8, 0);
         let hit = NormalizedHit {

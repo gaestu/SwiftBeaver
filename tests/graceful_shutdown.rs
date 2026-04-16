@@ -59,6 +59,7 @@ fn cancel_flag_stops_pipeline_early() {
         cancel_flag,
         None,
         None,
+        false,
     )
     .expect("pipeline");
 

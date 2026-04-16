@@ -276,6 +276,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = BmpCarveHandler::new("bmp".to_string(), 10, 0);
         let hit = NormalizedHit {
@@ -319,6 +320,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = BmpCarveHandler::new("bmp".to_string(), 10, 0);
         let hit = NormalizedHit {
@@ -364,6 +366,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = BmpCarveHandler::new("bmp".to_string(), 10, 0);
         let hit = NormalizedHit {

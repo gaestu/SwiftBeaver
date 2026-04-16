@@ -137,6 +137,7 @@ fn cli_opts_for_input(path: PathBuf) -> CliOptions {
         types: None,
         enable_types: None,
         dry_run: false,
+        metadata_only: false,
         validate_carved: false,
         remove_invalid: false,
     }

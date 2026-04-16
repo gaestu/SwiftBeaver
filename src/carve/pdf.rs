@@ -64,7 +64,11 @@ impl CarveHandler for PdfCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut writer = DeferredWriter::new(full_path.clone(), ctx.deferred_buffer_bytes);
+        let mut writer = DeferredWriter::new(
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+            ctx.metadata_only,
+        );
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 

@@ -292,6 +292,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let carved = handler
@@ -318,6 +319,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -342,6 +344,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -366,6 +369,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -390,6 +394,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -414,6 +419,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -438,6 +444,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -463,6 +470,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -487,6 +495,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -511,6 +520,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(
             handler
@@ -536,6 +546,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         // 0xFFFF version = 65535 > MAX_VERSION → rejected
         assert!(
@@ -560,6 +571,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         assert!(handler.process_hit(&hit_at(0), &ctx).is_err());
     }

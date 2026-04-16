@@ -82,7 +82,11 @@ impl CarveHandler for JpegCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut writer = DeferredWriter::new(full_path.clone(), ctx.deferred_buffer_bytes);
+        let mut writer = DeferredWriter::new(
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+            ctx.metadata_only,
+        );
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -216,6 +220,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = JpegCarveHandler::new("jpg".to_string(), 10, 0);
         let hit = NormalizedHit {
@@ -251,6 +256,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = JpegCarveHandler::new("jpg".to_string(), 10, 0);
         let hit = NormalizedHit {

@@ -96,6 +96,7 @@ CLI overrides:
 - `--enable-types jpeg,png`: enable only listed types (inclusion mode, conflicts with `--types`)
 - `--disable-zip`: disable ZIP carving (skips zip/docx/xlsx/pptx/odt/ods/odp/epub)
 - `--dry-run`: scan and report hits without writing carved files (useful for estimating output size)
+- `--metadata-only` / `--no-carve`: scan, validate, and record metadata (with hashes) but skip writing carved files to disk
 - `--validate-carved`: validate carved files after carving (checks file integrity)
 - `--remove-invalid`: remove invalid carved files (requires `--validate-carved`)
 

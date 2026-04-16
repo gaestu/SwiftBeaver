@@ -53,6 +53,22 @@ impl CarveHandler for AviCarveHandler {
         if &buf[8..12] != b"AVI " {
             return Ok(PreValidation::Reject("avi AVI marker mismatch".to_string()));
         }
+
+        // Size sanity check: RIFF chunk_size (bytes 4-7) + 8 = total file size
+        let chunk_size = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as u64;
+        let total_size = chunk_size.saturating_add(8);
+        let remaining = evidence.len().saturating_sub(offset);
+        if total_size > remaining {
+            return Ok(PreValidation::Reject(
+                "avi RIFF size exceeds remaining evidence".to_string(),
+            ));
+        }
+        if self.max_size > 0 && total_size > self.max_size {
+            return Ok(PreValidation::Reject(
+                "avi RIFF size exceeds max_size".to_string(),
+            ));
+        }
+
         Ok(PreValidation::Proceed)
     }
 
@@ -93,6 +109,27 @@ impl CarveHandler for AviCarveHandler {
                 return Err(CarveError::Invalid("avi size too small".to_string()));
             }
 
+            // Validate first sub-chunk is LIST/hdrl
+            let sub_header = stream.read_exact(12)?;
+            if &sub_header[0..4] != b"LIST" {
+                return Err(CarveError::Invalid(
+                    "avi first sub-chunk is not LIST".to_string(),
+                ));
+            }
+            let list_size =
+                u32::from_le_bytes([sub_header[4], sub_header[5], sub_header[6], sub_header[7]])
+                    as u64;
+            if &sub_header[8..12] != b"hdrl" {
+                return Err(CarveError::Invalid(
+                    "avi first LIST chunk is not hdrl".to_string(),
+                ));
+            }
+            if list_size == 0 || list_size > total_size {
+                return Err(CarveError::Invalid(
+                    "avi hdrl LIST chunk size invalid".to_string(),
+                ));
+            }
+
             // Apply max_size limit
             let max_size = if self.max_size > 0 {
                 self.max_size
@@ -101,10 +138,10 @@ impl CarveHandler for AviCarveHandler {
             };
             let target_size = total_size.min(max_size);
 
-            // Read remaining data
-            let remaining = target_size.saturating_sub(12);
+            // Read remaining data (header 12 + sub-chunk header 12 already read)
+            let remaining = target_size.saturating_sub(24);
             if remaining > 0 {
-                stream.read_exact(remaining as usize)?;
+                stream.consume_remaining(remaining)?;
             }
 
             validated = true;
@@ -265,6 +302,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -309,6 +347,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -338,6 +377,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -370,6 +410,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");

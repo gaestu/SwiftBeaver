@@ -505,6 +505,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = SqliteWalCarveHandler::new("sqlite-wal".to_string(), 32, 0, 2);
         let hit = NormalizedHit {
@@ -545,6 +546,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = SqliteWalCarveHandler::new("sqlite-wal".to_string(), 32, 0, 0);
         let hit = NormalizedHit {

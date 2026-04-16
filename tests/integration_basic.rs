@@ -410,3 +410,132 @@ fn pipeline_reports_timing_metrics() {
     // carve_time_ms may be 0 for very fast carves (sub-millisecond on small files)
     // so we only check scan_time_ms is populated
 }
+
+#[test]
+fn metadata_only_mode_records_metadata_without_writing_files() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let input_path = temp_dir.path().join("image.bin");
+
+    let mut image = vec![0u8; 200_000];
+    insert_bytes(&mut image, 1024, &sample_jpeg());
+    insert_bytes(&mut image, 65_536, &sample_png());
+    insert_bytes(&mut image, 131_072, &sample_gif());
+
+    fs::write(&input_path, &image).expect("write input");
+
+    let loaded = config::load_config(None).expect("config");
+    let mut cfg = loaded.config;
+    cfg.run_id = "test_metadata_only".to_string();
+
+    for ft in cfg.file_types.iter_mut() {
+        if ft.id == "jpeg" || ft.id == "gif" || ft.id == "png" {
+            ft.min_size = 16;
+        }
+    }
+
+    let evidence = RawFileSource::open(&input_path).expect("evidence");
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
+
+    let run_output_dir = temp_dir.path().join("run");
+    fs::create_dir_all(&run_output_dir).expect("output dir");
+
+    let meta_sink = metadata::build_sink(
+        MetadataBackendKind::Jsonl,
+        &cfg,
+        &cfg.run_id,
+        "test",
+        &loaded.config_hash,
+        &input_path,
+        "",
+        &run_output_dir,
+    )
+    .expect("metadata sink");
+
+    let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
+
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg, false).expect("registry"));
+
+    let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    pipeline::run_pipeline_with_cancel(
+        &cfg,
+        evidence,
+        sig_scanner,
+        None,
+        meta_sink,
+        &run_output_dir,
+        2,
+        64 * 1024,
+        64,
+        None,
+        None,
+        carve_registry,
+        cancel_flag,
+        None,
+        None,
+        true, // metadata_only = true
+    )
+    .expect("pipeline");
+
+    // Verify: no carved files on disk
+    let carved_root = run_output_dir.join("carved");
+    if carved_root.exists() {
+        let mut file_count = 0usize;
+        fn count_files(dir: &std::path::Path, count: &mut usize) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        count_files(&path, count);
+                    } else if path.is_file() {
+                        *count += 1;
+                    }
+                }
+            }
+        }
+        count_files(&carved_root, &mut file_count);
+        assert_eq!(
+            file_count, 0,
+            "metadata-only mode should not write any carved files"
+        );
+    }
+
+    // Verify: metadata records exist with hashes
+    let meta_path = run_output_dir.join("metadata").join("carved_files.jsonl");
+    let contents = fs::read_to_string(&meta_path).expect("metadata read");
+    let lines: Vec<&str> = contents.lines().collect();
+    assert!(
+        lines.len() >= 2,
+        "expected at least 2 metadata records, got {}",
+        lines.len()
+    );
+
+    for line in &lines {
+        let v: serde_json::Value = serde_json::from_str(line).expect("json");
+        assert!(
+            v.get("sha256").and_then(|v| v.as_str()).is_some(),
+            "metadata record should have sha256 hash"
+        );
+        assert!(
+            v.get("md5").and_then(|v| v.as_str()).is_some(),
+            "metadata record should have md5 hash"
+        );
+        assert!(
+            v.get("run_id").and_then(|v| v.as_str()).is_some(),
+            "metadata record should have run_id"
+        );
+        assert!(
+            v.get("tool_version").and_then(|v| v.as_str()).is_some(),
+            "metadata record should have tool_version"
+        );
+        assert!(
+            v.get("config_hash").and_then(|v| v.as_str()).is_some(),
+            "metadata record should have config_hash"
+        );
+        assert!(
+            v.get("evidence_path").and_then(|v| v.as_str()).is_some(),
+            "metadata record should have evidence_path"
+        );
+    }
+}

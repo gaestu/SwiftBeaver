@@ -221,6 +221,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

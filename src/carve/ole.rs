@@ -625,6 +625,9 @@ impl CarveHandler for OleCarveHandler {
             if file_type != self.file_type()
                 && let Ok((new_path, new_rel)) =
                     output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                && new_path
+                    .parent()
+                    .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
                 && std::fs::rename(&full_path, &new_path).is_ok()
             {
                 full_path = new_path;
@@ -805,6 +808,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -836,6 +840,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -867,6 +872,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
 
         // Should reject due to excessive FAT sectors

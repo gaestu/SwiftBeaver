@@ -323,6 +323,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -358,6 +359,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -402,6 +404,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -435,6 +438,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         // Set max_size smaller than the file
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 30);
@@ -479,6 +483,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {

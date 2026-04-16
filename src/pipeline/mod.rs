@@ -142,6 +142,7 @@ pub fn run_pipeline(
         None,
         None,
         None,
+        false,
     )
 }
 
@@ -163,6 +164,7 @@ pub fn run_pipeline_with_cancel(
     cancel_flag: Arc<AtomicBool>,
     progress: Option<ProgressConfig>,
     checkpoint: Option<CheckpointConfig>,
+    metadata_only: bool,
 ) -> Result<PipelineStats> {
     run_pipeline_inner(
         cfg,
@@ -180,6 +182,7 @@ pub fn run_pipeline_with_cancel(
         Some(cancel_flag),
         progress,
         checkpoint,
+        metadata_only,
     )
 }
 
@@ -262,6 +265,7 @@ struct PipelineRunner<'a> {
     cancel_flag: Option<Arc<AtomicBool>>,
     progress: Option<ProgressConfig>,
     checkpoint: Option<CheckpointConfig>,
+    metadata_only: bool,
 }
 
 impl<'a> PipelineRunner<'a> {
@@ -282,6 +286,7 @@ impl<'a> PipelineRunner<'a> {
         cancel_flag: Option<Arc<AtomicBool>>,
         progress: Option<ProgressConfig>,
         checkpoint: Option<CheckpointConfig>,
+        metadata_only: bool,
     ) -> Self {
         Self {
             cfg,
@@ -299,6 +304,7 @@ impl<'a> PipelineRunner<'a> {
             cancel_flag,
             progress,
             checkpoint,
+            metadata_only,
         }
     }
 
@@ -477,6 +483,7 @@ impl<'a> PipelineRunner<'a> {
             counters.files_rejected.clone(),
             counters.files_prevalidation_rejected.clone(),
             self.cfg.deferred_buffer_kb * 1024,
+            self.metadata_only,
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
@@ -850,6 +857,7 @@ fn run_pipeline_inner(
     cancel_flag: Option<Arc<AtomicBool>>,
     progress: Option<ProgressConfig>,
     checkpoint: Option<CheckpointConfig>,
+    metadata_only: bool,
 ) -> Result<PipelineStats> {
     PipelineRunner::new(
         cfg,
@@ -867,6 +875,7 @@ fn run_pipeline_inner(
         cancel_flag,
         progress,
         checkpoint,
+        metadata_only,
     )
     .run()
 }

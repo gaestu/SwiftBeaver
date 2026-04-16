@@ -271,6 +271,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = Mp4CarveHandler::new("mp4".to_string(), 8, 0, false);
         let hit = NormalizedHit {
@@ -315,6 +316,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = Mp4CarveHandler::new("mp4".to_string(), 8, 0, false);
         let hit = NormalizedHit {
@@ -357,6 +359,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = Mp4CarveHandler::new("mp4".to_string(), 8, 0, true);
         let hit = NormalizedHit {

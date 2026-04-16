@@ -14,6 +14,9 @@ use crate::scanner::NormalizedHit;
 const EBML_ID: u64 = 0x1A45DFA3;
 const SEGMENT_ID: u64 = 0x18538067;
 const DOCTYPE_ID: u64 = 0x4282;
+/// Maximum allowed allocation size for any single EBML element read (1 MiB).
+/// EBML headers are typically small; anything larger indicates corrupt data.
+const MAX_EBML_ELEMENT_SIZE: u64 = 1024 * 1024;
 
 pub struct WebmCarveHandler {
     extension: String,
@@ -72,6 +75,11 @@ impl CarveHandler for WebmCarveHandler {
             read_vint_size(ctx, hit.global_offset + ebml_id_len as u64)
                 .ok_or_else(|| CarveError::Invalid("ebml size missing".to_string()))?;
         let ebml_header_start = hit.global_offset + ebml_id_len as u64 + ebml_size_len as u64;
+        if ebml_size > MAX_EBML_ELEMENT_SIZE {
+            return Err(CarveError::Invalid(format!(
+                "ebml header size too large: {ebml_size}"
+            )));
+        }
         let ebml_header = read_exact_at(ctx, ebml_header_start, ebml_size as usize)
             .ok_or_else(|| CarveError::Invalid("ebml header truncated".to_string()))?;
 
@@ -309,6 +317,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = WebmCarveHandler::new("webm".to_string(), 0, 0);
         let hit = NormalizedHit {

@@ -170,6 +170,9 @@ impl CarveHandler for ZipCarveHandler {
                 if file_type != self.file_type()
                     && let Ok((new_path, new_rel)) =
                         output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                    && new_path
+                        .parent()
+                        .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
                     && std::fs::rename(&full_path, &new_path).is_ok()
                 {
                     rel_path = new_rel;
@@ -208,7 +211,11 @@ impl CarveHandler for ZipCarveHandler {
             )?
         };
 
-        let mut writer = DeferredWriter::new(full_path.clone(), ctx.deferred_buffer_bytes);
+        let mut writer = DeferredWriter::new(
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+            ctx.metadata_only,
+        );
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -363,6 +370,9 @@ impl CarveHandler for ZipCarveHandler {
             if file_type != self.file_type()
                 && let Ok((new_path, new_rel)) =
                     output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                && new_path
+                    .parent()
+                    .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
                 && std::fs::rename(&full_path, &new_path).is_ok()
             {
                 rel_path = new_rel;
@@ -1216,6 +1226,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1249,6 +1260,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let hit = NormalizedHit {
             global_offset: 0,
@@ -1285,6 +1297,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = ZipCarveHandler::new(
             "zip".to_string(),
@@ -1330,6 +1343,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1364,6 +1378,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1403,6 +1418,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 2048, true, None);
         let hit = NormalizedHit {

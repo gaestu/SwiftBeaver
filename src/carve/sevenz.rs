@@ -210,6 +210,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -250,6 +251,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -299,6 +301,7 @@ mod tests {
             io_buf: std::cell::RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
+            metadata_only: false,
         };
         let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
         let hit = NormalizedHit {

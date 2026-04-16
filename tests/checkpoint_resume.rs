@@ -105,6 +105,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
         cancel_flag,
         None,
         checkpoint_cfg,
+        false,
     )
     .expect("pipeline");
 
@@ -155,6 +156,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
         cancel_flag,
         None,
         checkpoint_cfg,
+        false,
     )
     .expect("pipeline");
 

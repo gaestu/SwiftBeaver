@@ -158,6 +158,10 @@ pub struct CliOptions {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Metadata-only mode: scan and record metadata but don't write carved files
+    #[arg(long, alias = "no-carve", conflicts_with_all = ["validate_carved", "remove_invalid", "dry_run"])]
+    pub metadata_only: bool,
+
     /// Validate carved files after extraction (runs file magic check)
     #[arg(long)]
     pub validate_carved: bool,

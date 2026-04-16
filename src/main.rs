@@ -62,6 +62,9 @@ fn main() -> Result<()> {
     if cli_opts.dry_run {
         info!("dry-run mode enabled: no files will be written");
     }
+    if cli_opts.metadata_only {
+        info!("metadata-only mode enabled: carved files will not be written to disk");
+    }
     if cli_opts.validate_carved {
         info!("post-carving validation enabled");
     }
@@ -198,6 +201,7 @@ fn main() -> Result<()> {
         cancel_flag,
         progress,
         checkpoint_cfg,
+        cli_opts.metadata_only,
     )?;
 
     info!("SwiftBeaver run finished");

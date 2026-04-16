@@ -212,7 +212,7 @@ file_types:
         hex: "52494646"
     footer_patterns: []
     max_size: 4294967296
-    min_size: 128
+    min_size: 4096
     validator: "avi"
   - id: "mp3"
     extensions: ["mp3"]
