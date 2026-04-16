@@ -2,7 +2,7 @@
 
 ## Overview
 
-The MP3 carver extracts MPEG Audio Layer III files by detecting ID3 tags and/or MPEG frame sync words, then parsing frames sequentially until end of valid audio data.
+The MP3 carver extracts MPEG Audio Layer III files by detecting ID3 tags and/or MPEG frame sync words, probing the candidate in-memory, then parsing frames sequentially until end of valid audio data.
 
 ## Signature Detection
 
@@ -73,9 +73,16 @@ let frame_size = (144 * bitrate * 1000) / sample_rate + padding;
 let frame_size = (72 * bitrate * 1000) / sample_rate + padding;
 ```
 
-### 4. Frame Validation
+### 4. Read-Only Candidate Probe
 
-For sync-word detection (no ID3), requires minimum **5** consecutive valid frames:
+Before any output file is created, the carver probes the candidate directly from evidence:
+
+- **ID3-backed candidates**: require a valid ID3v2 header plus at least **2** consecutive audio frames after the tag.
+- **Sync-word-only candidates**: require at least **5** consecutive audio frames.
+- In both cases, the accepted frames must agree on **MPEG version**, **layer**, and **sample rate**.
+- **Bitrate is allowed to vary**, so normal VBR files are still accepted.
+
+For sync-word-only detection, the probe still requires a minimum **5** consecutive valid frames:
 
 ```rust
 let mut valid_frames = 0;
@@ -99,9 +106,11 @@ if valid_frames < MIN_FRAMES_FOR_SYNC_VALIDATION {  // MIN_FRAMES = 5
 
 The MP3 carver includes additional checks to reduce false positives:
 
-1. **Sample rate consistency**: All frames must have the same sample rate. If a frame has a different sample rate than previous frames, carving stops.
+1. **Version, layer, and sample-rate consistency**: All accepted frames must match the same MPEG version, layer, and sample rate. If any of those values changes, carving stops before the mismatched frame is written.
 
-2. **Maximum duration**: Files with estimated duration > 1 hour are rejected as implausible.
+2. **VBR preserved**: Bitrate changes are allowed, so normal variable-bitrate streams are not rejected just because adjacent frames use different bitrates.
+
+3. **Maximum duration**: Files with estimated duration > 1 hour are rejected as implausible.
 
 ```rust
 const MAX_DURATION_SECONDS: u64 = 60 * 60;  // 1 hour
@@ -114,18 +123,21 @@ if duration > MAX_DURATION_SECONDS {
 ## Validation
 
 - **Validated**: `true` if:
-  - At least **5** consecutive valid MPEG frames found (applies to all detections, including ID3-based)
+  - ID3-backed candidates reach at least **2** consecutive consistent audio frames after the tag
+  - Sync-word-only candidates reach at least **5** consecutive consistent audio frames
 - **Truncated**: `true` if:
   - max_size reached during frame parsing
   - EOF reached mid-frame
 - **Invalid**: Removed if:
-  - Less than **5** valid frames (all detection methods)
+  - The probe finds too few consistent frames for the candidate type
+  - MPEG version, layer, or sample rate becomes inconsistent before the candidate reaches its validation threshold
   - Frame header validation fails
 
 ## Size Constraints
 
 - **Default min_size**: 128 bytes
 - **Default max_size**: 50 MB
+- **Maximum frames per file**: 100,000 (carving stops after this limit; file is kept if already validated)
 - Minimum viable MP3: ~200 bytes (ID3 tag + few frames)
 - Files below min_size are discarded
 
@@ -161,6 +173,12 @@ Golden image framework with various MP3 types:
    - Sizes match manifest
    - Valid frame count correct
    - Files playable in media players
+
+Unit tests in `src/carve/mp3.rs` also cover:
+
+- rejecting weak sync-word hits during `pre_validate()`
+- rejecting mixed-version and mixed-layer sync candidates during the read-only probe
+- accepting short ID3-backed VBR streams without requiring constant bitrate
 
 ## Edge Cases Handled
 
