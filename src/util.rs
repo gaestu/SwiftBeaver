@@ -222,9 +222,6 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
     simple_builders.insert("gif", |ext, min, max| {
         boxed(carve::gif::GifCarveHandler::new(ext, min, max))
     });
-    simple_builders.insert("sqlite", |ext, min, max| {
-        boxed(carve::sqlite::SqliteCarveHandler::new(ext, min, max))
-    });
     simple_builders.insert("sqlite_page", |ext, min, max| {
         boxed(carve::sqlite_page::SqlitePageCarveHandler::new(
             ext, min, max,
@@ -375,6 +372,18 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                     ))
                 };
                 handlers.insert(file_type.id.clone(), handler);
+            }
+            "sqlite" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::sqlite::SqliteCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                        cfg.sqlite_max_consecutive_invalid_pages,
+                        cfg.sqlite_min_valid_page_ratio,
+                    )),
+                );
             }
             "sqlite_wal" => {
                 handlers.insert(

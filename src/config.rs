@@ -69,6 +69,10 @@ pub struct Config {
     pub sqlite_page_max_hits_per_chunk: usize,
     #[serde(default = "default_sqlite_wal_max_consecutive_checksum_failures")]
     pub sqlite_wal_max_consecutive_checksum_failures: u32,
+    #[serde(default = "default_sqlite_max_consecutive_invalid_pages")]
+    pub sqlite_max_consecutive_invalid_pages: u32,
+    #[serde(default = "default_sqlite_min_valid_page_ratio")]
+    pub sqlite_min_valid_page_ratio: f64,
     pub opencl_platform_index: Option<usize>,
     pub opencl_device_index: Option<usize>,
     #[serde(default)]
@@ -165,6 +169,14 @@ fn default_sqlite_page_max_hits_per_chunk() -> usize {
 
 fn default_sqlite_wal_max_consecutive_checksum_failures() -> u32 {
     2
+}
+
+fn default_sqlite_max_consecutive_invalid_pages() -> u32 {
+    3
+}
+
+fn default_sqlite_min_valid_page_ratio() -> f64 {
+    0.5
 }
 
 fn default_true() -> bool {

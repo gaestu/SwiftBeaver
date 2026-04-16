@@ -18,6 +18,8 @@ entropy_window_size: 4096
 entropy_threshold: 7.5
 sqlite_page_max_hits_per_chunk: 2048
 sqlite_wal_max_consecutive_checksum_failures: 2
+sqlite_max_consecutive_invalid_pages: 3
+sqlite_min_valid_page_ratio: 0.5
 opencl_platform_index:
 opencl_device_index:
 zip_allowed_kinds:
@@ -59,7 +61,7 @@ file_types:
       - id: "sqlite_header"
         hex: "53514C69746520666F726D6174203300"
     footer_patterns: []
-    max_size: 536870912
+    max_size: 104857600
     min_size: 100
     validator: "sqlite"
   - id: "sqlite_wal"
