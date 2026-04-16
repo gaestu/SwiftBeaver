@@ -346,8 +346,11 @@ evidence_sha256: Option<String>
 ## 9. Quick Reference
 
 ### Github interaction
+
 ```
-For interacting with github use if possible gh (github cli)
+For interacting with github use if possible 
+1. github mcp
+2. gh (github cli)
 ```
 
 ### Before Starting Work
