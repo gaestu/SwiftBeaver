@@ -35,10 +35,12 @@ pub mod wmv;
 pub mod xz;
 pub mod zip;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -101,6 +103,13 @@ pub struct ExtractionContext<'a> {
     pub output_root: &'a Path,
     pub evidence: &'a dyn EvidenceSource,
     pub deferred_buffer_bytes: usize,
+    /// Per-worker reusable I/O buffer for carve operations.
+    /// Persists across hits within the same worker thread.
+    pub(crate) io_buf: RefCell<Vec<u8>>,
+    /// Scan chunk buffer for the current hit (set per-hit by carve worker).
+    pub(crate) chunk_data: Option<Arc<Vec<u8>>>,
+    /// Global byte offset where chunk_data begins.
+    pub(crate) chunk_start: u64,
 }
 
 impl<'a> std::fmt::Debug for ExtractionContext<'a> {
@@ -110,7 +119,29 @@ impl<'a> std::fmt::Debug for ExtractionContext<'a> {
             .field("output_root", &self.output_root)
             .field("evidence", &"<dyn EvidenceSource>")
             .field("deferred_buffer_bytes", &self.deferred_buffer_bytes)
+            .field("io_buf_capacity", &self.io_buf.borrow().capacity())
+            .field("chunk_data_len", &self.chunk_data.as_ref().map(|d| d.len()))
+            .field("chunk_start", &self.chunk_start)
             .finish()
+    }
+}
+
+impl<'a> ExtractionContext<'a> {
+    pub fn new(
+        run_id: &'a str,
+        output_root: &'a Path,
+        evidence: &'a dyn EvidenceSource,
+        deferred_buffer_bytes: usize,
+    ) -> Self {
+        Self {
+            run_id,
+            output_root,
+            evidence,
+            deferred_buffer_bytes,
+            io_buf: RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+        }
     }
 }
 
@@ -306,8 +337,8 @@ impl DeferredWriter {
     }
 
     /// Materialize the file (if still buffering with data) and flush.
-    pub(crate) fn flush_to_disk(self) -> Result<(), CarveError> {
-        if let Some(mut writer) = self.writer {
+    pub(crate) fn flush_to_disk(&mut self) -> Result<(), CarveError> {
+        if let Some(ref mut writer) = self.writer {
             writer.flush()?;
         } else if !self.buffer.is_empty() {
             let mut file = File::create(&self.path)?;
@@ -319,42 +350,71 @@ impl DeferredWriter {
 
     /// Discard buffered data without creating a file. If the file was already
     /// created (buffer overflowed), close and remove it.
-    pub(crate) fn discard(self) {
-        if let Some(writer) = self.writer {
+    pub(crate) fn discard(&mut self) {
+        if let Some(writer) = self.writer.take() {
             drop(writer);
             let _ = std::fs::remove_file(&self.path);
         }
-        // If still buffering, just drop — no file exists on disk
+        self.buffer.clear();
     }
 }
 
+/// Read from chunk data if available and covers the range, otherwise from evidence.
+fn read_from_ctx(
+    ctx: &ExtractionContext,
+    offset: u64,
+    buf: &mut [u8],
+) -> Result<usize, CarveError> {
+    if let Some(chunk) = &ctx.chunk_data
+        && offset >= ctx.chunk_start
+    {
+        let local = (offset - ctx.chunk_start) as usize;
+        if local < chunk.len() {
+            let available = chunk.len() - local;
+            let n = buf.len().min(available);
+            buf[..n].copy_from_slice(&chunk[local..local + n]);
+            return Ok(n);
+        }
+    }
+    ctx.evidence
+        .read_at(offset, buf)
+        .map_err(|e| CarveError::Evidence(e.to_string()))
+}
+
 pub(crate) struct CarveStream<'a> {
-    evidence: &'a dyn EvidenceSource,
+    ctx: &'a ExtractionContext<'a>,
     offset: u64,
     max_size: u64,
     written: u64,
     writer: DeferredWriter,
     md5: md5::Context,
     sha256: Sha256,
+    reuse_buf: Vec<u8>,
 }
 
 impl<'a> CarveStream<'a> {
     pub(crate) fn new(
-        evidence: &'a dyn EvidenceSource,
+        ctx: &'a ExtractionContext<'a>,
         offset: u64,
         max_size: u64,
         path: PathBuf,
-        buffer_limit: usize,
     ) -> Self {
+        let reuse_buf = std::mem::take(&mut *ctx.io_buf.borrow_mut());
         Self {
-            evidence,
+            ctx,
             offset,
             max_size,
             written: 0,
-            writer: DeferredWriter::new(path, buffer_limit),
+            writer: DeferredWriter::new(path, ctx.deferred_buffer_bytes),
             md5: md5::Context::new(),
             sha256: Sha256::new(),
+            reuse_buf,
         }
+    }
+
+    /// Read from chunk data if the requested range is covered, otherwise fall back to evidence.
+    fn read_from_source(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CarveError> {
+        read_from_ctx(self.ctx, offset, buf)
     }
 
     pub(crate) fn read_exact(&mut self, len: usize) -> Result<Vec<u8>, CarveError> {
@@ -362,21 +422,23 @@ impl<'a> CarveStream<'a> {
             return Err(CarveError::Truncated);
         }
 
-        let mut buf = vec![0u8; len];
+        let mut buf = std::mem::take(&mut self.reuse_buf);
+        buf.clear();
+        buf.resize(len, 0);
         let mut read = 0usize;
         while read < len {
-            let n = self
-                .evidence
-                .read_at(self.offset, &mut buf[read..])
-                .map_err(|e| CarveError::Evidence(e.to_string()))?;
+            let n = self.read_from_source(self.offset, &mut buf[read..])?;
             if n == 0 {
+                self.reuse_buf = buf;
                 return Err(CarveError::Eof);
             }
             self.write_bytes(&buf[read..read + n])?;
             read += n;
         }
 
-        Ok(buf)
+        let result = buf.clone();
+        self.reuse_buf = buf;
+        Ok(result)
     }
 
     pub(crate) fn write_bytes(&mut self, buf: &[u8]) -> Result<(), CarveError> {
@@ -391,15 +453,17 @@ impl<'a> CarveStream<'a> {
         Ok(())
     }
 
-    pub(crate) fn finish(self) -> Result<(u64, String, String), CarveError> {
+    pub(crate) fn finish(mut self) -> Result<(u64, String, String), CarveError> {
         self.writer.flush_to_disk()?;
-        let md5 = format!("{:x}", self.md5.compute());
-        let sha256 = hex::encode(self.sha256.finalize());
+        let md5_ctx = std::mem::replace(&mut self.md5, md5::Context::new());
+        let sha_ctx = std::mem::replace(&mut self.sha256, Sha256::new());
+        let md5 = format!("{:x}", md5_ctx.compute());
+        let sha256 = hex::encode(sha_ctx.finalize());
         Ok((self.written, md5, sha256))
     }
 
     /// Discard the stream without creating a file (for validation failures).
-    pub(crate) fn discard(self) {
+    pub(crate) fn discard(mut self) {
         self.writer.discard();
     }
 
@@ -415,10 +479,7 @@ impl<'a> CarveStream<'a> {
         let mut read = 0usize;
         let mut offset = self.offset;
         while read < len {
-            let n = self
-                .evidence
-                .read_at(offset, &mut buf[read..])
-                .map_err(|e| CarveError::Evidence(e.to_string()))?;
+            let n = self.read_from_source(offset, &mut buf[read..])?;
             if n == 0 {
                 return Err(CarveError::Eof);
             }
@@ -426,6 +487,15 @@ impl<'a> CarveStream<'a> {
             offset += n as u64;
         }
         Ok(buf)
+    }
+}
+
+impl Drop for CarveStream<'_> {
+    fn drop(&mut self) {
+        let buf = std::mem::take(&mut self.reuse_buf);
+        if !buf.is_empty() || buf.capacity() > 0 {
+            *self.ctx.io_buf.borrow_mut() = buf;
+        }
     }
 }
 
@@ -442,25 +512,21 @@ pub(crate) fn write_range(
     let mut remaining = end.saturating_sub(start);
     let mut bytes_written = 0u64;
     let buf_size = 64 * 1024;
+    let mut buf = vec![0u8; buf_size];
 
     while remaining > 0 {
         let read_len = remaining.min(buf_size as u64) as usize;
-        let mut buf = vec![0u8; read_len];
-        let n = ctx
-            .evidence
-            .read_at(offset, &mut buf)
-            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        let n = read_from_ctx(ctx, offset, &mut buf[..read_len])?;
         if n == 0 {
             writer.flush_to_disk()?;
             return Ok((bytes_written, true));
         }
-        buf.truncate(n);
-        writer.write_all(&buf)?;
-        md5.consume(&buf);
-        sha256.update(&buf);
-        bytes_written = bytes_written.saturating_add(buf.len() as u64);
-        offset = offset.saturating_add(buf.len() as u64);
-        remaining = remaining.saturating_sub(buf.len() as u64);
+        writer.write_all(&buf[..n])?;
+        md5.consume(&buf[..n]);
+        sha256.update(&buf[..n]);
+        bytes_written = bytes_written.saturating_add(n as u64);
+        offset = offset.saturating_add(n as u64);
+        remaining = remaining.saturating_sub(n as u64);
         if n < read_len {
             writer.flush_to_disk()?;
             return Ok((bytes_written, true));
@@ -561,7 +627,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("empty.bin");
 
-        let writer = DeferredWriter::new(path.clone(), 1024);
+        let mut writer = DeferredWriter::new(path.clone(), 1024);
         writer.discard();
         assert!(!path.exists());
     }
@@ -571,7 +637,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("empty.bin");
 
-        let writer = DeferredWriter::new(path.clone(), 1024);
+        let mut writer = DeferredWriter::new(path.clone(), 1024);
         writer.flush_to_disk().expect("flush");
         // No data written → no file should be created
         assert!(!path.exists());

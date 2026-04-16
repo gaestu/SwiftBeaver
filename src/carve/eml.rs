@@ -410,6 +410,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "eml".to_string(),
             pattern_id: "eml_from".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         }
     }
 
@@ -428,6 +430,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -447,6 +452,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -464,6 +472,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -481,6 +492,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -510,6 +524,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -549,6 +566,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -592,6 +612,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -622,6 +645,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -662,6 +688,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");

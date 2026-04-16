@@ -502,12 +502,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = SqliteWalCarveHandler::new("sqlite-wal".to_string(), 32, 0, 2);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "sqlite_wal".to_string(),
             pattern_id: "sqlite_wal_magic_82".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -537,12 +542,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = SqliteWalCarveHandler::new("sqlite-wal".to_string(), 32, 0, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "sqlite_wal".to_string(),
             pattern_id: "sqlite_wal_magic_82".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

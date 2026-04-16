@@ -475,6 +475,122 @@ pub fn compute_sha256(
     Ok(hex::encode(hasher.finalize()))
 }
 
+/// Read-through LRU segment cache for any `EvidenceSource`.
+///
+/// Each cached segment is `segment_size` bytes aligned to segment boundaries.
+/// Thread-safe: the cache uses a `Mutex` but inner source reads are
+/// performed WITHOUT holding the lock to avoid serializing I/O.
+pub struct CachedEwfSource {
+    inner: Box<dyn EvidenceSource>,
+    cache: std::sync::Mutex<lru::LruCache<u64, Vec<u8>>>,
+    segment_size: usize,
+}
+
+impl CachedEwfSource {
+    pub fn new(inner: Box<dyn EvidenceSource>, segments: usize, segment_size: usize) -> Self {
+        let cap =
+            std::num::NonZeroUsize::new(segments.max(1)).unwrap_or(std::num::NonZeroUsize::MIN);
+        Self {
+            inner,
+            cache: std::sync::Mutex::new(lru::LruCache::new(cap)),
+            segment_size,
+        }
+    }
+
+    fn read_segment(&self, segment_start: u64) -> Result<Vec<u8>, EvidenceError> {
+        let total = self.inner.len();
+        let remaining = total.saturating_sub(segment_start);
+        let read_len = (self.segment_size as u64).min(remaining) as usize;
+        if read_len == 0 {
+            return Ok(Vec::new());
+        }
+        let mut buf = vec![0u8; read_len];
+        let mut filled = 0usize;
+        while filled < read_len {
+            let n = self
+                .inner
+                .read_at(segment_start + filled as u64, &mut buf[filled..])?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+        buf.truncate(filled);
+        Ok(buf)
+    }
+}
+
+impl EvidenceSource for CachedEwfSource {
+    fn len(&self) -> u64 {
+        self.inner.len()
+    }
+
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, EvidenceError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let seg_size = self.segment_size as u64;
+        let mut dst_offset = 0usize;
+        let mut cur_offset = offset;
+
+        while dst_offset < buf.len() {
+            let segment_start = (cur_offset / seg_size) * seg_size;
+            let offset_in_segment = (cur_offset - segment_start) as usize;
+
+            // Try cache first (hold lock briefly)
+            let cached = {
+                let mut cache = self.cache.lock().map_err(|_| {
+                    EvidenceError::Unsupported("segment cache lock poisoned".to_string())
+                })?;
+                cache.get(&segment_start).cloned()
+            };
+
+            let segment_data = if let Some(data) = cached {
+                data
+            } else {
+                // Read from inner source WITHOUT holding cache lock
+                let data = self.read_segment(segment_start)?;
+                let mut cache = self.cache.lock().map_err(|_| {
+                    EvidenceError::Unsupported("segment cache lock poisoned".to_string())
+                })?;
+                cache.put(segment_start, data.clone());
+                data
+            };
+
+            if offset_in_segment >= segment_data.len() {
+                break; // past end of evidence
+            }
+
+            let available = segment_data.len() - offset_in_segment;
+            let needed = buf.len() - dst_offset;
+            let copy_len = available.min(needed);
+            buf[dst_offset..dst_offset + copy_len]
+                .copy_from_slice(&segment_data[offset_in_segment..offset_in_segment + copy_len]);
+            dst_offset += copy_len;
+            cur_offset += copy_len as u64;
+        }
+
+        Ok(dst_offset)
+    }
+}
+
+/// Wrap an evidence source with an LRU segment cache.
+/// If `segments` is 0, returns the source unwrapped.
+pub fn wrap_with_cache(
+    source: Box<dyn EvidenceSource>,
+    segments: usize,
+) -> Box<dyn EvidenceSource> {
+    if segments == 0 {
+        return source;
+    }
+    Box::new(CachedEwfSource::new(
+        source,
+        segments,
+        crate::constants::DEFAULT_IO_BUFFER_SIZE,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{RawFileSource, compute_sha256, is_ewf_path};

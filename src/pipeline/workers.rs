@@ -165,6 +165,8 @@ pub fn spawn_scan_workers(
                         global_offset,
                         file_type_id: hit.file_type_id,
                         pattern_id: hit.pattern_id,
+                        chunk_data: Some(Arc::clone(&job.data)),
+                        chunk_start: job.chunk.start,
                     };
                     if let Err(err) = hit_tx.send(normalized) {
                         warn!("hit channel closed while sending hit: {err}");
@@ -264,14 +266,19 @@ pub fn spawn_carve_workers(
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
-            let ctx = ExtractionContext {
+            let mut ctx = ExtractionContext {
                 run_id: &run_id,
                 output_root: &carved_root,
                 evidence: evidence.as_ref(),
                 deferred_buffer_bytes,
+                io_buf: std::cell::RefCell::new(Vec::new()),
+                chunk_data: None,
+                chunk_start: 0,
             };
 
             for hit in rx {
+                ctx.chunk_data = hit.chunk_data.clone();
+                ctx.chunk_start = hit.chunk_start;
                 let handler = match registry.get(&hit.file_type_id) {
                     Some(handler) => handler,
                     None => {

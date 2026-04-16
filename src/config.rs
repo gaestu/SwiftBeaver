@@ -83,6 +83,8 @@ pub struct Config {
     pub quicktime_mode: QuicktimeMode,
     #[serde(default = "default_deferred_buffer_kb")]
     pub deferred_buffer_kb: usize,
+    #[serde(default = "default_ewf_cache_segments")]
+    pub ewf_cache_segments: usize,
     pub file_types: Vec<FileTypeConfig>,
 }
 
@@ -183,6 +185,10 @@ fn default_sqlite_min_valid_page_ratio() -> f64 {
 
 fn default_deferred_buffer_kb() -> usize {
     64
+}
+
+fn default_ewf_cache_segments() -> usize {
+    256
 }
 
 fn default_true() -> bool {

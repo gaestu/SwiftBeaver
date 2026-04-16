@@ -273,6 +273,8 @@ mod tests {
             global_offset: offset,
             file_type_id: "lrf".to_string(),
             pattern_id: "lrf_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         }
     }
 
@@ -287,6 +289,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler
@@ -310,6 +315,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -331,6 +339,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -352,6 +363,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -373,6 +387,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -394,6 +411,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -415,6 +435,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -437,6 +460,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -458,6 +484,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -479,6 +508,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(
             handler
@@ -501,6 +533,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         // 0xFFFF version = 65535 > MAX_VERSION → rejected
         assert!(
@@ -522,6 +557,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         assert!(handler.process_hit(&hit_at(0), &ctx).is_err());
     }

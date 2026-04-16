@@ -258,6 +258,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let handler = FooterCarveHandler::new(
@@ -273,6 +276,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "custom".to_string(),
             pattern_id: "header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler

@@ -1213,12 +1213,17 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "zip".to_string(),
             pattern_id: "zip_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -1241,11 +1246,16 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "zip".to_string(),
             pattern_id: "zip_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let handler = ZipCarveHandler::new(
@@ -1272,6 +1282,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = ZipCarveHandler::new(
             "zip".to_string(),
@@ -1314,12 +1327,17 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "zip".to_string(),
             pattern_id: "zip_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -1343,12 +1361,17 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "zip".to_string(),
             pattern_id: "zip_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -1377,12 +1400,17 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 2048, true, None);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "zip".to_string(),
             pattern_id: "zip_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");

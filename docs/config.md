@@ -30,6 +30,7 @@ The default config is `config/default.yml`.
 - `ole_allowed_kinds` (list, optional): restrict OLE outputs to `doc`, `xls`, `ppt` when set.
 - `quicktime_mode` (string): handling for QuickTime; `mov` (default) keeps MOV separate, `mp4` treats QuickTime as MP4.
 - `deferred_buffer_kb` (usize): kilobytes to buffer in memory before creating an output file on disk. Deferred creation avoids the create-write-delete I/O cycle for candidates that fail structural validation during carving. Set to `0` to disable deferral (eager file creation, matching pre-deferred behavior). Default: `64`.
+- `ewf_cache_segments` (usize): number of 64 KiB segments to cache in the EWF read-through LRU cache. Each segment consumes 64 KiB of memory. Default: `256` (16 MiB total cache). Set to `0` to disable caching.
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.

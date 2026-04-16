@@ -439,13 +439,7 @@ impl CarveHandler for Mp3CarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut stream = CarveStream::new(
-            ctx.evidence,
-            hit.global_offset,
-            self.max_size,
-            full_path.clone(),
-            ctx.deferred_buffer_bytes,
-        );
+        let mut stream = CarveStream::new(ctx, hit.global_offset, self.max_size, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;
@@ -691,6 +685,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_id3v2".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -698,6 +694,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -724,6 +723,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_sync".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -731,6 +732,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -750,6 +754,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_id3v2".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -757,6 +763,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -778,6 +787,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_sync".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -785,6 +796,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         assert!(matches!(
@@ -815,6 +829,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_sync".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -822,6 +838,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -848,6 +867,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_id3v2".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -855,6 +876,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -874,6 +898,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_id3v2".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -881,6 +907,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         assert!(matches!(
@@ -940,6 +969,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "mp3".to_string(),
             pattern_id: "mp3_id3v2".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -947,6 +978,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         assert!(matches!(

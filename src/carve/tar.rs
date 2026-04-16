@@ -57,13 +57,7 @@ impl CarveHandler for TarCarveHandler {
             &self.extension,
             start_offset,
         )?;
-        let mut stream = CarveStream::new(
-            ctx.evidence,
-            start_offset,
-            self.max_size,
-            full_path.clone(),
-            ctx.deferred_buffer_bytes,
-        );
+        let mut stream = CarveStream::new(ctx, start_offset, self.max_size, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;
@@ -264,6 +258,8 @@ mod tests {
             global_offset: 257,
             file_type_id: "tar".to_string(),
             pattern_id: "tar_ustar".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
@@ -271,6 +267,9 @@ mod tests {
             output_root: dir.path(),
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

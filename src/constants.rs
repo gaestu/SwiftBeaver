@@ -24,6 +24,10 @@ pub const DEFAULT_CHUNK_SIZE_MIB: u64 = 64;
 /// Default overlap in KiB for chunk scanning
 pub const DEFAULT_OVERLAP_KIB: u64 = 64;
 
+/// Hit channel capacity multiplier (relative to base channel capacity).
+/// Higher values reduce scan-worker stalls when carve workers are slow.
+pub const HIT_CHANNEL_MULTIPLIER: usize = 8;
+
 /// Minimum interval in seconds between metadata flush events sent from the
 /// scan loop.  This prevents flush storms when progress reporting fires
 /// frequently (e.g. every chunk with `--progress-interval-secs 0`).

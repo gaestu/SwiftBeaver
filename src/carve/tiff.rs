@@ -562,12 +562,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "tiff".to_string(),
             pattern_id: "tiff_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
@@ -610,12 +615,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "tiff".to_string(),
             pattern_id: "tiff_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("carve");
@@ -658,12 +668,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "tiff".to_string(),
             pattern_id: "tiff_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("carve");
@@ -742,12 +757,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "tiff".to_string(),
             pattern_id: "tiff_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("carve");

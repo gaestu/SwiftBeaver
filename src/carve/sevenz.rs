@@ -207,12 +207,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "7z".to_string(),
             pattern_id: "7z_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
@@ -242,12 +247,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "7z".to_string(),
             pattern_id: "7z_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         // Should reject due to invalid CRC
@@ -286,12 +296,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = SevenZCarveHandler::new("7z".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "7z".to_string(),
             pattern_id: "7z_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         // Should reject due to excessive offset

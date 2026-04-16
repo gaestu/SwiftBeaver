@@ -97,17 +97,19 @@ fn carve_with_buffer(
     let evidence = RawFileSource::open(evidence_path).expect("open evidence");
     let output_dir = tempfile::tempdir().expect("tmpdir");
 
-    let ctx = ExtractionContext {
-        run_id: "test_deferred",
-        output_root: output_dir.path(),
-        evidence: &evidence,
+    let ctx = ExtractionContext::new(
+        "test_deferred",
+        output_dir.path(),
+        &evidence,
         deferred_buffer_bytes,
-    };
+    );
 
     let hit = NormalizedHit {
         global_offset: offset,
         file_type_id: handler.file_type().to_string(),
         pattern_id: pattern_id.to_string(),
+        chunk_data: None,
+        chunk_start: 0,
     };
 
     let result = handler.process_hit(&hit, &ctx).expect("process_hit");
@@ -230,17 +232,19 @@ fn deferred_invalid_png_no_file_created() {
     let output_dir = tempfile::tempdir().expect("tmpdir");
 
     let handler = make_handler("png");
-    let ctx = ExtractionContext {
-        run_id: "test",
-        output_root: output_dir.path(),
-        evidence: &evidence,
-        deferred_buffer_bytes: 64 * 1024, // Large buffer, so file stays buffered
-    };
+    let ctx = ExtractionContext::new(
+        "test",
+        output_dir.path(),
+        &evidence,
+        64 * 1024, // Large buffer, so file stays buffered
+    );
 
     let hit = NormalizedHit {
         global_offset: 0,
         file_type_id: "png".to_string(),
         pattern_id: "png_sig".to_string(),
+        chunk_data: None,
+        chunk_start: 0,
     };
 
     let result = handler.process_hit(&hit, &ctx);

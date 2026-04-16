@@ -97,6 +97,7 @@ fn main() -> Result<()> {
     );
 
     let evidence_source = evidence::open_source(&cli_opts)?;
+    let evidence_source = evidence::wrap_with_cache(evidence_source, cfg.ewf_cache_segments);
     let evidence_source: Arc<dyn evidence::EvidenceSource> = Arc::from(evidence_source);
 
     if cli_opts.evidence_sha256.is_some() && cli_opts.compute_evidence_sha256 {

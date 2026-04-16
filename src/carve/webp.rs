@@ -69,13 +69,7 @@ impl CarveHandler for WebpCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut stream = CarveStream::new(
-            ctx.evidence,
-            hit.global_offset,
-            self.max_size,
-            full_path.clone(),
-            ctx.deferred_buffer_bytes,
-        );
+        let mut stream = CarveStream::new(ctx, hit.global_offset, self.max_size, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;

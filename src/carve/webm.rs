@@ -306,12 +306,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = WebmCarveHandler::new("webm".to_string(), 0, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "webm".to_string(),
             pattern_id: "webm_ebml".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");

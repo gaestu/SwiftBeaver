@@ -320,12 +320,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "heic".to_string(),
             pattern_id: "heic_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
@@ -350,12 +355,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "heic".to_string(),
             pattern_id: "mif1_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
@@ -389,12 +399,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "heic".to_string(),
             pattern_id: "heic_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
@@ -417,6 +432,9 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         // Set max_size smaller than the file
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 30);
@@ -424,6 +442,8 @@ mod tests {
             global_offset: 0,
             file_type_id: "heic".to_string(),
             pattern_id: "heic_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
@@ -456,12 +476,17 @@ mod tests {
             output_root: &output_root,
             evidence: &evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let handler = HeicCarveHandler::new("heic".to_string(), 8, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "heic".to_string(),
             pattern_id: "heic_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");

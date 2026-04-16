@@ -88,13 +88,7 @@ impl CarveHandler for SqliteCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut stream = CarveStream::new(
-            ctx.evidence,
-            hit.global_offset,
-            self.max_size,
-            full_path.clone(),
-            ctx.deferred_buffer_bytes,
-        );
+        let mut stream = CarveStream::new(ctx, hit.global_offset, self.max_size, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;
@@ -381,11 +375,16 @@ mod tests {
             output_root: tmp.path(),
             evidence,
             deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let hit = crate::scanner::NormalizedHit {
             global_offset: 0,
             pattern_id: "sqlite_header".to_string(),
             file_type_id: "sqlite".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         handler
             .process_hit(&hit, &ctx)

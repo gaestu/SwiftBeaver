@@ -4,6 +4,8 @@ pub mod cuda;
 #[cfg(feature = "gpu-opencl")]
 pub mod opencl;
 
+use std::sync::Arc;
+
 use crate::chunk::ScanChunk;
 
 #[derive(Debug, Clone)]
@@ -19,6 +21,12 @@ pub struct NormalizedHit {
     pub global_offset: u64,
     pub file_type_id: String,
     pub pattern_id: String,
+    /// Scan chunk buffer shared from scan workers. Allows carve workers to
+    /// read data without additional evidence I/O when the target range falls
+    /// within this chunk.
+    pub chunk_data: Option<Arc<Vec<u8>>>,
+    /// Global byte offset where `chunk_data` begins in the evidence.
+    pub chunk_start: u64,
 }
 
 /// Signature scanner for file headers within a scan chunk.

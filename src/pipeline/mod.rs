@@ -10,6 +10,7 @@ pub mod workers;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -21,7 +22,8 @@ use crate::checkpoint::{CheckpointState, save_checkpoint};
 use crate::chunk::{ChunkIter, ScanChunk, chunk_count};
 use crate::config::Config;
 use crate::constants::{
-    CHANNEL_CAPACITY_MULTIPLIER, METADATA_FLUSH_INTERVAL_SECS, MIN_CHANNEL_CAPACITY,
+    CHANNEL_CAPACITY_MULTIPLIER, HIT_CHANNEL_MULTIPLIER, METADATA_FLUSH_INTERVAL_SECS,
+    MIN_CHANNEL_CAPACITY,
 };
 use crate::evidence::EvidenceSource;
 use crate::metadata::{MetadataSink, RunSummary};
@@ -406,7 +408,11 @@ impl<'a> PipelineRunner<'a> {
             .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
             .max(MIN_CHANNEL_CAPACITY);
         let (scan_tx, scan_rx) = bounded::<ScanJob>(channel_cap);
-        let (hit_tx, hit_rx) = bounded(channel_cap * 2);
+        let (hit_tx, hit_rx) = bounded(
+            channel_cap
+                .saturating_mul(HIT_CHANNEL_MULTIPLIER)
+                .max(MIN_CHANNEL_CAPACITY),
+        );
         let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 16);
 
         let (string_tx, string_rx) = if string_enabled {
@@ -521,13 +527,52 @@ impl<'a> PipelineRunner<'a> {
             .unwrap_or(start_time);
         let mut next_offset = resume_offset;
 
-        for chunk in ChunkIter::new(total_bytes, self.chunk_size, self.overlap) {
-            if hit_max_bytes || hit_max_chunks {
-                break;
+        // Early exit if already at limits from checkpoint resume
+        if hit_max_bytes || hit_max_chunks {
+            return Ok(ScanOutcome {
+                hit_max_bytes,
+                hit_max_chunks,
+                hit_max_files,
+                cancelled,
+                start_time,
+                next_offset,
+            });
+        }
+
+        // Prefetch channel: reader thread → scan loop
+        let prefetch_cap = self.workers.max(2);
+        let (prefetch_tx, prefetch_rx) = bounded::<(ScanChunk, Arc<Vec<u8>>)>(prefetch_cap);
+
+        // Clone what the reader thread needs
+        let evidence = self.evidence.clone();
+        let chunk_size = self.chunk_size;
+        let overlap = self.overlap;
+        let cancel_flag = self.cancel_flag.clone();
+
+        // Spawn dedicated reader thread to decouple I/O from dispatch
+        let reader_handle = thread::spawn(move || -> Result<()> {
+            for chunk in ChunkIter::new(total_bytes, chunk_size, overlap) {
+                if chunk.start < resume_offset {
+                    continue;
+                }
+                if let Some(flag) = &cancel_flag
+                    && flag.load(Ordering::Relaxed)
+                {
+                    break;
+                }
+                let data = read_chunk_limited(evidence.as_ref(), &chunk, chunk.length as usize)?;
+                if data.is_empty() {
+                    break;
+                }
+                if prefetch_tx.send((chunk, Arc::new(data))).is_err() {
+                    break; // receiver dropped (scan loop exited early)
+                }
             }
-            if chunk.start < resume_offset {
-                continue;
-            }
+            Ok(())
+        });
+
+        // Scan loop: receive pre-read chunks and dispatch to workers
+        for (chunk, data) in &prefetch_rx {
             if counters.carve_limiter.should_stop() {
                 hit_max_files = true;
                 break;
@@ -552,10 +597,15 @@ impl<'a> PipelineRunner<'a> {
                 break;
             }
             let remaining = (max_bytes - scanned_total).min(chunk.length) as usize;
-            let data = read_chunk_limited(self.evidence.as_ref(), &chunk, remaining)?;
-            if data.is_empty() {
+            let effective_len = data.len().min(remaining);
+            if effective_len == 0 {
                 break;
             }
+            let data = if effective_len < data.len() {
+                Arc::new(data[..effective_len].to_vec())
+            } else {
+                data
+            };
             counters
                 .bytes_scanned
                 .fetch_add(data.len() as u64, Ordering::Relaxed);
@@ -565,10 +615,7 @@ impl<'a> PipelineRunner<'a> {
             let chunk_id = chunk.id;
             channels
                 .scan_tx
-                .send(ScanJob {
-                    chunk,
-                    data: Arc::new(data),
-                })
+                .send(ScanJob { chunk, data })
                 .with_context(|| format!("scan channel closed while sending chunk {chunk_id}"))?;
             if let Some(progress) = &self.progress
                 && (progress.interval.is_zero() || last_progress.elapsed() >= progress.interval)
@@ -606,6 +653,23 @@ impl<'a> PipelineRunner<'a> {
             if scanned_total >= max_bytes {
                 hit_max_bytes = true;
                 break;
+            }
+        }
+
+        // Drop receiver to unblock reader thread if it's waiting on send
+        drop(prefetch_rx);
+
+        // Wait for reader thread to finish
+        match reader_handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                // If we stopped early, reader errors from channel closure are expected
+                if !cancelled && !hit_max_files && !hit_max_bytes && !hit_max_chunks {
+                    return Err(err);
+                }
+            }
+            Err(_) => {
+                warn!("prefetch reader thread panicked");
             }
         }
 
