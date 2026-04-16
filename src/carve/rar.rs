@@ -4,8 +4,10 @@ use std::io::Write;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const RAR4_MAGIC: [u8; 7] = [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00];
@@ -41,6 +43,29 @@ impl CarveHandler for RarCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 7];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0..6] != [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07] {
+            return Ok(PreValidation::Reject("rar magic mismatch".to_string()));
+        }
+        if buf[6] != 0x00 && buf[6] != 0x01 {
+            return Ok(PreValidation::Reject(
+                "rar version byte invalid".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

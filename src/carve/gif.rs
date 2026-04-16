@@ -1,8 +1,10 @@
 use std::fs::File;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
+    output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const GIF87A: &[u8] = b"GIF87a";
@@ -31,6 +33,24 @@ impl CarveHandler for GifCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 6];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[..] != GIF87A && &buf[..] != GIF89A {
+            return Ok(PreValidation::Reject("gif header mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

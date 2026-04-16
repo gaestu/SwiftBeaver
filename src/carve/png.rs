@@ -1,8 +1,10 @@
 use std::fs::File;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
+    output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
@@ -30,6 +32,24 @@ impl CarveHandler for PngCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 8];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf != PNG_SIGNATURE {
+            return Ok(PreValidation::Reject("png signature mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

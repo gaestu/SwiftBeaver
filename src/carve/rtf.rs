@@ -5,8 +5,10 @@
 use std::fs::File;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
+    output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 pub struct RtfCarveHandler {
@@ -32,6 +34,24 @@ impl CarveHandler for RtfCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 5];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf != b"{\\rtf" {
+            return Ok(PreValidation::Reject("rtf header mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

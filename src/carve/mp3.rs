@@ -9,8 +9,10 @@
 use std::fs::File;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
+    output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 /// MPEG audio version IDs
@@ -213,6 +215,27 @@ impl CarveHandler for Mp3CarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 3];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[..] == b"ID3" {
+            return Ok(PreValidation::Proceed);
+        }
+        if buf[0] == 0xFF && (buf[1] & 0xE0) == 0xE0 {
+            return Ok(PreValidation::Proceed);
+        }
+        Ok(PreValidation::Reject("mp3 signature mismatch".to_string()))
     }
 
     fn process_hit(

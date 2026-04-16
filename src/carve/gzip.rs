@@ -10,8 +10,10 @@ use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const GZIP_MAGIC: [u8; 3] = [0x1F, 0x8B, 0x08];
@@ -39,6 +41,24 @@ impl CarveHandler for GzipCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 3];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf != GZIP_MAGIC {
+            return Ok(PreValidation::Reject("gzip magic mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

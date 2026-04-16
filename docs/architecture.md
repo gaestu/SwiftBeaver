@@ -30,7 +30,7 @@ Both backends compile kernels at scanner initialization and fall back to CPU if 
 2. **Chunk scheduler** streams the image into overlapping chunks.
 3. **CPU signature scanner** searches for file headers within each chunk.
 4. **CPU string scanner** (optional) extracts printable spans and artefacts.
-5. **Carve workers** validate and extract files from the evidence source.
+5. **Carve workers** pre-validate hits in-memory (header/magic checks), then validate and extract files from the evidence source.
 6. **Metadata sink** writes JSONL, CSV, or Parquet records.
 
 ## Concurrency model

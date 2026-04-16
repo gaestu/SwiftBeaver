@@ -4,8 +4,10 @@ use std::io::Write;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 /// BMP file header is 14 bytes
@@ -49,6 +51,34 @@ impl CarveHandler for BmpCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 18];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0..2] != BMP_MAGIC {
+            return Ok(PreValidation::Reject("bmp magic mismatch".to_string()));
+        }
+        let file_size = u32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]);
+        if file_size == 0 {
+            return Ok(PreValidation::Reject("bmp file size is zero".to_string()));
+        }
+        let dib_header_size = u32::from_le_bytes([buf[14], buf[15], buf[16], buf[17]]);
+        if !VALID_DIB_SIZES.contains(&dib_header_size) {
+            return Ok(PreValidation::Reject(
+                "bmp DIB header size invalid".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

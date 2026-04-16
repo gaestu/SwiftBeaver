@@ -3,7 +3,10 @@ use std::io::{BufWriter, Write};
 
 use sha2::{Digest, Sha256};
 
-use crate::carve::{CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path};
+use crate::carve::{
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+};
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 fn is_valid_first_marker(marker: u8) -> bool {
@@ -36,6 +39,24 @@ impl CarveHandler for JpegCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 4];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0] != 0xFF || buf[1] != 0xD8 || buf[2] != 0xFF || !is_valid_first_marker(buf[3]) {
+            return Ok(PreValidation::Reject("jpeg signature mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

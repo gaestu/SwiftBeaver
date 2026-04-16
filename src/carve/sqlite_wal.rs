@@ -4,8 +4,10 @@ use std::io::Write;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const WAL_HEADER_LEN: u64 = 32;
@@ -68,6 +70,27 @@ impl CarveHandler for SqliteWalCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 4];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        let magic = u32::from_be_bytes(buf);
+        if magic != WAL_MAGIC_1 && magic != WAL_MAGIC_2 {
+            return Ok(PreValidation::Reject(
+                "sqlite wal magic mismatch".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

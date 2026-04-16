@@ -7,8 +7,10 @@ use std::fs::File;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const BZIP2_MAGIC: [u8; 3] = [0x42, 0x5A, 0x68];
@@ -39,6 +41,29 @@ impl CarveHandler for Bzip2CarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 4];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0..3] != BZIP2_MAGIC {
+            return Ok(PreValidation::Reject("bzip2 magic mismatch".to_string()));
+        }
+        if !(b'1'..=b'9').contains(&buf[3]) {
+            return Ok(PreValidation::Reject(
+                "bzip2 block size invalid".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

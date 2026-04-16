@@ -47,6 +47,15 @@ use thiserror::Error;
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
+/// Result of lightweight pre-validation before disk I/O.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreValidation {
+    /// Candidate looks plausible — proceed to full carving.
+    Proceed,
+    /// Candidate is definitely invalid — skip without disk I/O.
+    Reject(String),
+}
+
 /// Metadata about a carved file.
 ///
 /// # Example
@@ -120,6 +129,19 @@ pub enum CarveError {
 pub trait CarveHandler: Send + Sync {
     fn file_type(&self) -> &str;
     fn extension(&self) -> &str;
+
+    /// Quick in-memory validation of a signature hit.
+    /// Default returns `Proceed` (backward compatible).
+    /// Implementations should read minimal bytes from evidence
+    /// and validate magic/structure before any disk I/O.
+    fn pre_validate(
+        &self,
+        _evidence: &dyn EvidenceSource,
+        _offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,

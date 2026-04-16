@@ -8,8 +8,10 @@ use std::fs::File;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 /// BMP signature at start of image data within ICO
@@ -78,6 +80,36 @@ impl CarveHandler for IcoCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 6];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0] != 0x00 || buf[1] != 0x00 {
+            return Ok(PreValidation::Reject(
+                "ico reserved bytes invalid".to_string(),
+            ));
+        }
+        let icon_type = u16::from_le_bytes([buf[2], buf[3]]);
+        if icon_type != 1 && icon_type != 2 {
+            return Ok(PreValidation::Reject("ico type invalid".to_string()));
+        }
+        let count = u16::from_le_bytes([buf[4], buf[5]]);
+        if count == 0 || count > 255 {
+            return Ok(PreValidation::Reject(
+                "ico image count implausible".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

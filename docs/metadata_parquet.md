@@ -175,6 +175,7 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `hits_found` (int64)
 - `files_carved` (int64)
 - `files_rejected` (int64)
+- `files_prevalidation_rejected` (int64)
 - `string_spans` (int64)
 - `artefacts_extracted` (int64)
 

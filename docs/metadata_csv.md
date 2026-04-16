@@ -113,6 +113,7 @@ Columns:
 - `hits_found`
 - `files_carved`
 - `files_rejected`
+- `files_prevalidation_rejected`
 - `string_spans`
 - `artefacts_extracted`
 - `tool_version`

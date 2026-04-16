@@ -1,8 +1,10 @@
 use std::fs::File;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
+    output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
@@ -30,6 +32,35 @@ impl CarveHandler for SqliteCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 18];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[..16] != SQLITE_HEADER.as_slice() {
+            return Ok(PreValidation::Reject("sqlite header mismatch".to_string()));
+        }
+        let page_size_raw = u16::from_be_bytes([buf[16], buf[17]]);
+        let page_size = if page_size_raw == 1 {
+            65536
+        } else {
+            page_size_raw as u32
+        };
+        if !is_valid_page_size(page_size) {
+            return Ok(PreValidation::Reject(
+                "sqlite page size invalid".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

@@ -4,8 +4,10 @@ use std::io::Write;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const BOX_HEADER_LEN: usize = 8;
@@ -36,6 +38,32 @@ impl CarveHandler for Mp4CarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 12];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[4..8] != b"ftyp" {
+            return Ok(PreValidation::Reject(
+                "mp4 ftyp marker mismatch".to_string(),
+            ));
+        }
+        let size32 = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+        if size32 <= 7 || size32 > 1024 * 1024 {
+            return Ok(PreValidation::Reject(
+                "mp4 ftyp box size implausible".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

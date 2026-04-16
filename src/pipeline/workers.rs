@@ -243,6 +243,7 @@ pub fn spawn_carve_workers(
     carve_errors: Arc<AtomicU64>,
     carve_time_ms: Arc<AtomicU64>,
     files_rejected: Arc<AtomicU64>,
+    files_prevalidation_rejected: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -258,6 +259,7 @@ pub fn spawn_carve_workers(
         let carve_errors = carve_errors.clone();
         let carve_time_ms = carve_time_ms.clone();
         let files_rejected = files_rejected.clone();
+        let files_prevalidation_rejected = files_prevalidation_rejected.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -278,6 +280,28 @@ pub fn spawn_carve_workers(
 
                 if !carve_limiter.try_reserve() {
                     continue;
+                }
+
+                match handler.pre_validate(evidence.as_ref(), hit.global_offset) {
+                    Ok(crate::carve::PreValidation::Proceed) => { /* continue to process_hit */ }
+                    Ok(crate::carve::PreValidation::Reject(reason)) => {
+                        carve_limiter.release();
+                        files_prevalidation_rejected.fetch_add(1, Ordering::Relaxed);
+                        debug!(
+                            "pre_validate rejected {} at offset {}: {reason}",
+                            hit.file_type_id, hit.global_offset
+                        );
+                        continue;
+                    }
+                    Err(err) => {
+                        carve_limiter.release();
+                        carve_errors.fetch_add(1, Ordering::Relaxed);
+                        warn!(
+                            "pre_validate error for {} at offset {}: {err}",
+                            hit.file_type_id, hit.global_offset
+                        );
+                        continue;
+                    }
                 }
 
                 let carve_start = Instant::now();

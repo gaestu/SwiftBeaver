@@ -109,6 +109,7 @@ fn parquet_writes_expected_files() {
         hits_found: 2,
         files_carved: 1,
         files_rejected: 0,
+        files_prevalidation_rejected: 0,
         string_spans: 3,
         artefacts_extracted: 4,
     };

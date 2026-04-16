@@ -7,8 +7,10 @@ use std::fs::File;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const ELF_MAGIC: [u8; 4] = [0x7F, 0x45, 0x4C, 0x46];
@@ -36,6 +38,33 @@ impl CarveHandler for ElfCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 7];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0..4] != ELF_MAGIC {
+            return Ok(PreValidation::Reject("elf magic mismatch".to_string()));
+        }
+        if buf[4] != 1 && buf[4] != 2 {
+            return Ok(PreValidation::Reject("elf class invalid".to_string()));
+        }
+        if buf[5] != 1 && buf[5] != 2 {
+            return Ok(PreValidation::Reject("elf endianness invalid".to_string()));
+        }
+        if buf[6] != 1 {
+            return Ok(PreValidation::Reject("elf version invalid".to_string()));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(

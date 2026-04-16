@@ -18,6 +18,7 @@ pub struct RunSummary {
     pub hits_found: u64,
     pub files_carved: u64,
     pub files_rejected: u64,
+    pub files_prevalidation_rejected: u64,
     pub string_spans: u64,
     pub artefacts_extracted: u64,
 }
@@ -81,6 +82,7 @@ pub enum MetadataError {
 ///     hits_found: 0,
 ///     files_carved: 0,
 ///     files_rejected: 0,
+///     files_prevalidation_rejected: 0,
 ///     string_spans: 0,
 ///     artefacts_extracted: 0,
 /// };

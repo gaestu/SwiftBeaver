@@ -48,6 +48,7 @@ pub struct PipelineStats {
     pub hits_found: u64,
     pub files_carved: u64,
     pub files_rejected: u64,
+    pub files_prevalidation_rejected: u64,
     pub string_spans: u64,
     pub artefacts_extracted: u64,
     pub scan_time_ms: u64,
@@ -63,6 +64,7 @@ pub struct ProgressSnapshot {
     pub hits_found: u64,
     pub files_carved: u64,
     pub files_rejected: u64,
+    pub files_prevalidation_rejected: u64,
     pub string_spans: u64,
     pub artefacts_extracted: u64,
     pub carve_errors: u64,
@@ -195,6 +197,7 @@ struct PipelineCounters {
     chunks_processed: Arc<AtomicU64>,
     hits_found: Arc<AtomicU64>,
     files_rejected: Arc<AtomicU64>,
+    files_prevalidation_rejected: Arc<AtomicU64>,
     string_spans: Arc<AtomicU64>,
     artefacts_found: Arc<AtomicU64>,
     carve_errors: Arc<AtomicU64>,
@@ -212,6 +215,7 @@ impl PipelineCounters {
             chunks_processed: Arc::new(AtomicU64::new(0)),
             hits_found: Arc::new(AtomicU64::new(0)),
             files_rejected: Arc::new(AtomicU64::new(0)),
+            files_prevalidation_rejected: Arc::new(AtomicU64::new(0)),
             string_spans: Arc::new(AtomicU64::new(0)),
             artefacts_found: Arc::new(AtomicU64::new(0)),
             carve_errors: Arc::new(AtomicU64::new(0)),
@@ -465,6 +469,7 @@ impl<'a> PipelineRunner<'a> {
             counters.carve_errors.clone(),
             counters.carve_time_ms.clone(),
             counters.files_rejected.clone(),
+            counters.files_prevalidation_rejected.clone(),
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
@@ -576,6 +581,7 @@ impl<'a> PipelineRunner<'a> {
                     &counters.hits_found,
                     counters.carve_limiter.carved_counter(),
                     &counters.files_rejected,
+                    &counters.files_prevalidation_rejected,
                     &counters.string_spans,
                     &counters.artefacts_found,
                     &counters.carve_errors,
@@ -661,6 +667,9 @@ impl<'a> PipelineRunner<'a> {
             hits_found: counters.hits_found.load(Ordering::Relaxed),
             files_carved: counters.carve_limiter.carved(),
             files_rejected: counters.files_rejected.load(Ordering::Relaxed),
+            files_prevalidation_rejected: counters
+                .files_prevalidation_rejected
+                .load(Ordering::Relaxed),
             string_spans: counters.string_spans.load(Ordering::Relaxed),
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
         };
@@ -681,6 +690,7 @@ impl<'a> PipelineRunner<'a> {
                 &counters.hits_found,
                 counters.carve_limiter.carved_counter(),
                 &counters.files_rejected,
+                &counters.files_prevalidation_rejected,
                 &counters.string_spans,
                 &counters.artefacts_found,
                 &counters.carve_errors,
@@ -711,6 +721,9 @@ impl<'a> PipelineRunner<'a> {
             hits_found: counters.hits_found.load(Ordering::Relaxed),
             files_carved: counters.carve_limiter.carved(),
             files_rejected: counters.files_rejected.load(Ordering::Relaxed),
+            files_prevalidation_rejected: counters
+                .files_prevalidation_rejected
+                .load(Ordering::Relaxed),
             string_spans: counters.string_spans.load(Ordering::Relaxed),
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
             scan_time_ms: counters.scan_time_ms.load(Ordering::Relaxed),
@@ -718,12 +731,13 @@ impl<'a> PipelineRunner<'a> {
         };
 
         info!(
-            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={}",
+            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={}",
             stats.bytes_scanned,
             stats.chunks_processed,
             stats.hits_found,
             stats.files_carved,
             stats.files_rejected,
+            stats.files_prevalidation_rejected,
             stats.string_spans,
             stats.artefacts_extracted,
             stats.scan_time_ms,
@@ -802,6 +816,7 @@ fn build_progress_snapshot(
     hits_found: &AtomicU64,
     files_carved: &AtomicU64,
     files_rejected: &AtomicU64,
+    files_prevalidation_rejected: &AtomicU64,
     string_spans: &AtomicU64,
     artefacts_found: &AtomicU64,
     carve_errors: &AtomicU64,
@@ -842,6 +857,7 @@ fn build_progress_snapshot(
         hits_found: hits_found.load(Ordering::Relaxed),
         files_carved: files_carved.load(Ordering::Relaxed),
         files_rejected: files_rejected.load(Ordering::Relaxed),
+        files_prevalidation_rejected: files_prevalidation_rejected.load(Ordering::Relaxed),
         string_spans: string_spans.load(Ordering::Relaxed),
         artefacts_extracted: artefacts_found.load(Ordering::Relaxed),
         carve_errors: carve_errors.load(Ordering::Relaxed),

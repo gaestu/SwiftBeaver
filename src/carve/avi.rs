@@ -6,8 +6,10 @@
 use std::fs::File;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path, riff,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
+    output_path, riff,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 pub struct AviCarveHandler {
@@ -33,6 +35,27 @@ impl CarveHandler for AviCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 12];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[0..4] != b"RIFF" {
+            return Ok(PreValidation::Reject("avi RIFF magic mismatch".to_string()));
+        }
+        if &buf[8..12] != b"AVI " {
+            return Ok(PreValidation::Reject("avi AVI marker mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(
