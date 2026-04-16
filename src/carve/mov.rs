@@ -3,9 +3,6 @@
 //! QuickTime files use the same atom/box structure as MP4, but typically use
 //! the 'qt  ' brand in the ftyp box.
 
-use std::fs::File;
-use std::io::Write;
-
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
@@ -179,7 +176,6 @@ impl CarveHandler for MovCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -192,7 +188,7 @@ impl CarveHandler for MovCarveHandler {
             ctx,
             hit.global_offset,
             total_end,
-            &mut file,
+            &full_path,
             &mut md5,
             &mut sha256,
         )?;
@@ -200,7 +196,6 @@ impl CarveHandler for MovCarveHandler {
             truncated = true;
             errors.push("eof before MOV end".to_string());
         }
-        file.flush()?;
 
         if written < self.min_size {
             let _ = std::fs::remove_file(&full_path);
@@ -273,6 +268,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = MovCarveHandler::new("mov".to_string(), 8, 0);
         let hit = NormalizedHit {

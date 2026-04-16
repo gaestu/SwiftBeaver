@@ -691,6 +691,7 @@ mod tests {
             run_id: "dry_run_test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let hit = NormalizedHit {
             global_offset: 0,

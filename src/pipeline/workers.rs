@@ -244,6 +244,7 @@ pub fn spawn_carve_workers(
     carve_time_ms: Arc<AtomicU64>,
     files_rejected: Arc<AtomicU64>,
     files_prevalidation_rejected: Arc<AtomicU64>,
+    deferred_buffer_bytes: usize,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -267,6 +268,7 @@ pub fn spawn_carve_workers(
                 run_id: &run_id,
                 output_root: &carved_root,
                 evidence: evidence.as_ref(),
+                deferred_buffer_bytes,
             };
 
             for hit in rx {

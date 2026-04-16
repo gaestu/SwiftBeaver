@@ -29,6 +29,7 @@ The default config is `config/default.yml`.
 - `zip_allowed_kinds` (list, optional): restrict ZIP outputs to `zip`, `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`, `epub` when set.
 - `ole_allowed_kinds` (list, optional): restrict OLE outputs to `doc`, `xls`, `ppt` when set.
 - `quicktime_mode` (string): handling for QuickTime; `mov` (default) keeps MOV separate, `mp4` treats QuickTime as MP4.
+- `deferred_buffer_kb` (usize): kilobytes to buffer in memory before creating an output file on disk. Deferred creation avoids the create-write-delete I/O cycle for candidates that fail structural validation during carving. Set to `0` to disable deferral (eager file creation, matching pre-deferred behavior). Default: `64`.
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.

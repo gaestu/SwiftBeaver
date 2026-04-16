@@ -1,5 +1,3 @@
-use std::fs::File;
-
 use crate::carve::{
     CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
     output_path,
@@ -90,8 +88,13 @@ impl CarveHandler for SqliteCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
+        let mut stream = CarveStream::new(
+            ctx.evidence,
+            hit.global_offset,
+            self.max_size,
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+        );
 
         let mut validated = false;
         let mut truncated = false;
@@ -217,7 +220,7 @@ impl CarveHandler for SqliteCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_msg) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
@@ -377,6 +380,7 @@ mod tests {
             run_id: "test_run",
             output_root: tmp.path(),
             evidence,
+            deferred_buffer_bytes: 0,
         };
         let hit = crate::scanner::NormalizedHit {
             global_offset: 0,

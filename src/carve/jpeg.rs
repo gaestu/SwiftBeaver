@@ -1,10 +1,8 @@
-use std::fs::File;
-use std::io::{BufWriter, Write};
-
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PreValidation,
+    output_path,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -84,8 +82,7 @@ impl CarveHandler for JpegCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut writer = BufWriter::new(file);
+        let mut writer = DeferredWriter::new(full_path.clone(), ctx.deferred_buffer_bytes);
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -150,7 +147,7 @@ impl CarveHandler for JpegCarveHandler {
             }
         }
 
-        writer.flush()?;
+        writer.flush_to_disk()?;
 
         if bytes_written < self.min_size {
             let _ = std::fs::remove_file(&full_path);
@@ -215,6 +212,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = JpegCarveHandler::new("jpg".to_string(), 10, 0);
         let hit = NormalizedHit {
@@ -244,6 +242,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = JpegCarveHandler::new("jpg".to_string(), 10, 0);
         let hit = NormalizedHit {

@@ -25,6 +25,7 @@ opencl_device_index:
 zip_allowed_kinds:
 ole_allowed_kinds:
 quicktime_mode: mov
+deferred_buffer_kb: 64
 file_types:
   - id: "jpeg"
     extensions: ["jpg", "jpeg"]

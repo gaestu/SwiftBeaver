@@ -5,8 +5,6 @@
 //!
 //! Signature: D0 CF 11 E0 A1 B1 1A E1
 
-use std::fs::File;
-
 use crate::carve::{
     CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
     output_path,
@@ -539,13 +537,18 @@ impl CarveHandler for OleCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
         let effective_max = if self.max_size > 0 {
             self.max_size
         } else {
             100 * 1024 * 1024 // 100 MiB default limit
         };
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, effective_max, file);
+        let mut stream = CarveStream::new(
+            ctx.evidence,
+            hit.global_offset,
+            effective_max,
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+        );
 
         let mut validated = false;
         let mut truncated = false;
@@ -604,7 +607,7 @@ impl CarveHandler for OleCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
@@ -802,6 +805,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -827,6 +831,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -852,6 +857,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         // Should reject due to excessive FAT sectors

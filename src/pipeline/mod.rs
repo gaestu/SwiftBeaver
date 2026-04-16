@@ -470,6 +470,7 @@ impl<'a> PipelineRunner<'a> {
             counters.carve_time_ms.clone(),
             counters.files_rejected.clone(),
             counters.files_prevalidation_rejected.clone(),
+            self.cfg.deferred_buffer_kb * 1024,
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {

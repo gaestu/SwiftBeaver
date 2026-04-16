@@ -3,8 +3,6 @@
 //! WAV files use the RIFF container format with "WAVE" form type.
 //! The file size is embedded in the RIFF header (bytes 4-7).
 
-use std::fs::File;
-
 use crate::carve::{
     CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
     output_path, riff,
@@ -155,8 +153,13 @@ impl CarveHandler for WavCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
+        let mut stream = CarveStream::new(
+            ctx.evidence,
+            hit.global_offset,
+            self.max_size,
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+        );
 
         let mut validated = false;
         let mut truncated = false;
@@ -253,7 +256,7 @@ impl CarveHandler for WavCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
@@ -304,6 +307,7 @@ impl CarveHandler for WavCarveHandler {
 mod tests {
     use super::*;
     use crate::evidence::{EvidenceError, EvidenceSource};
+    use std::fs::File;
     use std::io::Read;
     use tempfile::tempdir;
 
@@ -370,6 +374,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -408,6 +413,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -431,6 +437,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -457,6 +464,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -493,6 +501,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -529,6 +538,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -561,6 +571,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -599,6 +610,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -636,6 +648,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -681,6 +694,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -724,6 +738,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");

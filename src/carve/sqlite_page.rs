@@ -1,6 +1,4 @@
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::Write;
 
 use sha2::{Digest, Sha256};
 
@@ -86,7 +84,6 @@ impl CarveHandler for SqlitePageCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -104,7 +101,7 @@ impl CarveHandler for SqlitePageCarveHandler {
             ctx,
             hit.global_offset,
             end,
-            &mut file,
+            &full_path,
             &mut md5,
             &mut sha256,
         )?;
@@ -112,7 +109,6 @@ impl CarveHandler for SqlitePageCarveHandler {
             truncated = true;
             errors.push("eof before sqlite page end".to_string());
         }
-        file.flush()?;
 
         if written < self.min_size {
             let _ = std::fs::remove_file(&full_path);

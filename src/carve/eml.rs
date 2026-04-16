@@ -4,8 +4,6 @@
 //! Uses MIME boundary detection, mbox boundary detection, and binary content
 //! transition detection to avoid oversized output from forensic disk images.
 
-use std::fs::File;
-
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
@@ -314,7 +312,6 @@ impl CarveHandler for EmlCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -322,7 +319,7 @@ impl CarveHandler for EmlCarveHandler {
             ctx,
             hit.global_offset,
             end_offset,
-            &mut file,
+            &full_path,
             &mut md5,
             &mut sha256,
         )?;
@@ -430,6 +427,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -448,6 +446,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -464,6 +463,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -480,6 +480,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -508,6 +509,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -546,6 +548,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -588,6 +591,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -617,6 +621,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
@@ -656,6 +661,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");

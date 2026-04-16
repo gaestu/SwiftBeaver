@@ -1,6 +1,4 @@
 use std::collections::{HashSet, VecDeque};
-use std::fs::File;
-use std::io::Write;
 
 use sha2::{Digest, Sha256};
 
@@ -106,7 +104,6 @@ impl CarveHandler for TiffCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -122,7 +119,7 @@ impl CarveHandler for TiffCarveHandler {
             ctx,
             hit.global_offset,
             total_end,
-            &mut file,
+            &full_path,
             &mut md5,
             &mut sha256,
         )?;
@@ -130,7 +127,6 @@ impl CarveHandler for TiffCarveHandler {
             truncated = true;
             errors.push("eof before TIFF end".to_string());
         }
-        file.flush()?;
 
         if written < self.min_size {
             let _ = std::fs::remove_file(&full_path);
@@ -565,6 +561,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -612,6 +609,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -659,6 +657,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {
@@ -742,6 +741,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = TiffCarveHandler::new("tiff".to_string(), 8, 0);
         let hit = NormalizedHit {

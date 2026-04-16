@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crc32fast::Hasher as Crc32Hasher;
@@ -8,8 +8,8 @@ use flate2::read::DeflateDecoder;
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
-    write_range,
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PreValidation,
+    output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -120,7 +120,6 @@ impl CarveHandler for ZipCarveHandler {
                 &self.extension,
                 hit.global_offset,
             )?;
-            let mut file = File::create(&full_path)?;
             let mut md5 = md5::Context::new();
             let mut sha256 = Sha256::new();
 
@@ -128,7 +127,7 @@ impl CarveHandler for ZipCarveHandler {
                 ctx,
                 hit.global_offset,
                 total_end,
-                &mut file,
+                &full_path,
                 &mut md5,
                 &mut sha256,
             )?;
@@ -137,7 +136,6 @@ impl CarveHandler for ZipCarveHandler {
                 truncated = true;
                 errors.push("eof before EOCD end".to_string());
             }
-            file.flush()?;
 
             if bytes_written < self.min_size {
                 let _ = std::fs::remove_file(&full_path);
@@ -210,7 +208,7 @@ impl CarveHandler for ZipCarveHandler {
             )?
         };
 
-        let mut file = File::create(&full_path)?;
+        let mut writer = DeferredWriter::new(full_path.clone(), ctx.deferred_buffer_bytes);
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -247,7 +245,7 @@ impl CarveHandler for ZipCarveHandler {
                 && buf.len() >= ZIP_HEADER.len()
                 && &buf[..ZIP_HEADER.len()] != ZIP_HEADER
             {
-                let _ = std::fs::remove_file(&full_path);
+                writer.discard();
                 return Ok(None);
             }
 
@@ -283,7 +281,7 @@ impl CarveHandler for ZipCarveHandler {
 
                 if write_len > 0 {
                     let slice = &buf[..write_len];
-                    file.write_all(slice)?;
+                    writer.write_all(slice)?;
                     md5.consume(slice);
                     sha256.update(slice);
                     bytes_written = bytes_written.saturating_add(slice.len() as u64);
@@ -305,7 +303,7 @@ impl CarveHandler for ZipCarveHandler {
                             break;
                         }
                         extra.truncate(n);
-                        file.write_all(&extra)?;
+                        writer.write_all(&extra)?;
                         md5.consume(&extra);
                         sha256.update(&extra);
                         bytes_written = bytes_written.saturating_add(extra.len() as u64);
@@ -317,7 +315,7 @@ impl CarveHandler for ZipCarveHandler {
                 break;
             }
 
-            file.write_all(&buf)?;
+            writer.write_all(&buf)?;
             md5.consume(&buf);
             sha256.update(&buf);
             bytes_written = bytes_written.saturating_add(buf.len() as u64);
@@ -330,7 +328,7 @@ impl CarveHandler for ZipCarveHandler {
             };
         }
 
-        file.flush()?;
+        writer.flush_to_disk()?;
 
         if bytes_written < self.min_size {
             let _ = std::fs::remove_file(&full_path);
@@ -1214,6 +1212,7 @@ mod tests {
             run_id: "run",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1241,6 +1240,7 @@ mod tests {
             run_id: "run",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let hit = NormalizedHit {
             global_offset: 0,
@@ -1271,6 +1271,7 @@ mod tests {
             run_id: "run",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = ZipCarveHandler::new(
             "zip".to_string(),
@@ -1312,6 +1313,7 @@ mod tests {
             run_id: "run",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1340,6 +1342,7 @@ mod tests {
             run_id: "run",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1373,6 +1376,7 @@ mod tests {
             run_id: "run",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 2048, true, None);
         let hit = NormalizedHit {

@@ -4,8 +4,6 @@
 //! We walk pages validating CRC32, codec identification, and serial number
 //! consistency until an end-of-stream flag is observed.
 
-use std::fs::File;
-
 use crate::carve::{
     CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
     output_path,
@@ -215,8 +213,13 @@ impl CarveHandler for OggCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
+        let mut stream = CarveStream::new(
+            ctx.evidence,
+            hit.global_offset,
+            self.max_size,
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+        );
 
         let mut validated = false;
         let mut truncated = false;
@@ -317,7 +320,7 @@ impl CarveHandler for OggCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
@@ -500,6 +503,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -528,6 +532,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -551,6 +556,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -571,6 +577,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -638,6 +645,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -675,6 +683,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -714,6 +723,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -751,6 +761,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -799,6 +810,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -826,6 +838,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -853,6 +866,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

@@ -2,8 +2,6 @@
 //!
 //! Uses brace depth tracking with escape and \bin handling to find document end.
 
-use std::fs::File;
-
 use crate::carve::{
     CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
     output_path,
@@ -65,8 +63,13 @@ impl CarveHandler for RtfCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
+        let mut stream = CarveStream::new(
+            ctx.evidence,
+            hit.global_offset,
+            self.max_size,
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+        );
 
         let mut validated = false;
         let mut truncated = false;
@@ -153,7 +156,7 @@ impl CarveHandler for RtfCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
@@ -241,6 +244,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

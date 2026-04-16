@@ -2,8 +2,6 @@
 //!
 //! We validate the header magic and scan for a footer with a valid CRC32.
 
-use std::fs::File;
-
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
@@ -81,7 +79,6 @@ impl CarveHandler for XzCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -166,7 +163,7 @@ impl CarveHandler for XzCarveHandler {
             ctx,
             hit.global_offset,
             end_offset,
-            &mut file,
+            &full_path,
             &mut md5,
             &mut sha256,
         )?;
@@ -314,6 +311,7 @@ mod tests {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

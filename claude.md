@@ -351,6 +351,10 @@ evidence_sha256: Option<String>
 For interacting with github use if possible 
 1. github mcp
 2. gh (github cli)
+
+Repo Owner is: gaestu
+Project Name is: SwiftBeaver
+Repo Link is: github.com/gaestu/SwiftBeaver
 ```
 
 ### Before Starting Work

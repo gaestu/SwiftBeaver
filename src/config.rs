@@ -81,6 +81,8 @@ pub struct Config {
     pub ole_allowed_kinds: Option<Vec<String>>,
     #[serde(default = "default_quicktime_mode")]
     pub quicktime_mode: QuicktimeMode,
+    #[serde(default = "default_deferred_buffer_kb")]
+    pub deferred_buffer_kb: usize,
     pub file_types: Vec<FileTypeConfig>,
 }
 
@@ -177,6 +179,10 @@ fn default_sqlite_max_consecutive_invalid_pages() -> u32 {
 
 fn default_sqlite_min_valid_page_ratio() -> f64 {
     0.5
+}
+
+fn default_deferred_buffer_kb() -> usize {
+    64
 }
 
 fn default_true() -> bool {

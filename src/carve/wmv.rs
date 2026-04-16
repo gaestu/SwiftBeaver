@@ -2,8 +2,6 @@
 //!
 //! Uses ASF header and file properties to determine file size.
 
-use std::fs::File;
-
 use sha2::{Digest, Sha256};
 
 use crate::carve::{
@@ -164,7 +162,6 @@ impl CarveHandler for WmvCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
         let mut md5 = md5::Context::new();
         let mut sha256 = Sha256::new();
 
@@ -172,7 +169,7 @@ impl CarveHandler for WmvCarveHandler {
             ctx,
             hit.global_offset,
             total_end,
-            &mut file,
+            &full_path,
             &mut md5,
             &mut sha256,
         )?;
@@ -258,6 +255,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = WmvCarveHandler::new("wmv".to_string(), 0, 0);
         let hit = NormalizedHit {
@@ -292,6 +290,7 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
         };
         let handler = WmvCarveHandler::new("wmv".to_string(), 0, 0);
         let hit = NormalizedHit {
