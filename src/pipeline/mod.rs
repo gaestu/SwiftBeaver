@@ -55,6 +55,8 @@ pub struct PipelineStats {
     pub artefacts_extracted: u64,
     pub scan_time_ms: u64,
     pub carve_time_ms: u64,
+    /// Number of hits skipped due to overlap with already-carved files
+    pub overlap_skipped: u64,
 }
 
 /// Progress snapshot reported during a run.
@@ -85,6 +87,8 @@ pub struct ProgressSnapshot {
     pub scan_time_ms: u64,
     /// Cumulative time spent carving files (milliseconds)
     pub carve_time_ms: u64,
+    /// Number of hits skipped due to overlap with already-carved files
+    pub overlap_skipped: u64,
 }
 
 /// Progress callback trait for long-running scans.
@@ -211,6 +215,7 @@ struct PipelineCounters {
     scan_time_ms: Arc<AtomicU64>,
     carve_time_ms: Arc<AtomicU64>,
     carve_limiter: Arc<CarveLimiter>,
+    overlap_skipped: Arc<AtomicU64>,
 }
 
 impl PipelineCounters {
@@ -229,6 +234,7 @@ impl PipelineCounters {
             scan_time_ms: Arc::new(AtomicU64::new(0)),
             carve_time_ms: Arc::new(AtomicU64::new(0)),
             carve_limiter: Arc::new(CarveLimiter::new(max_files)),
+            overlap_skipped: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -484,6 +490,7 @@ impl<'a> PipelineRunner<'a> {
             counters.files_prevalidation_rejected.clone(),
             self.cfg.deferred_buffer_kb * 1024,
             self.metadata_only,
+            counters.overlap_skipped.clone(),
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
@@ -644,6 +651,7 @@ impl<'a> PipelineRunner<'a> {
                     &counters.sqlite_errors,
                     &counters.scan_time_ms,
                     &counters.carve_time_ms,
+                    &counters.overlap_skipped,
                 );
                 progress.reporter.on_progress(&snapshot);
                 last_progress = Instant::now();
@@ -770,6 +778,7 @@ impl<'a> PipelineRunner<'a> {
                 &counters.sqlite_errors,
                 &counters.scan_time_ms,
                 &counters.carve_time_ms,
+                &counters.overlap_skipped,
             );
             progress.reporter.on_progress(&snapshot);
         }
@@ -800,10 +809,11 @@ impl<'a> PipelineRunner<'a> {
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
             scan_time_ms: counters.scan_time_ms.load(Ordering::Relaxed),
             carve_time_ms: counters.carve_time_ms.load(Ordering::Relaxed),
+            overlap_skipped: counters.overlap_skipped.load(Ordering::Relaxed),
         };
 
         info!(
-            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={}",
+            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={} overlap_skipped={}",
             stats.bytes_scanned,
             stats.chunks_processed,
             stats.hits_found,
@@ -814,6 +824,7 @@ impl<'a> PipelineRunner<'a> {
             stats.artefacts_extracted,
             stats.scan_time_ms,
             stats.carve_time_ms,
+            stats.overlap_skipped,
         );
 
         if (outcome.cancelled
@@ -898,6 +909,7 @@ fn build_progress_snapshot(
     sqlite_errors: &AtomicU64,
     scan_time_ms: &AtomicU64,
     carve_time_ms: &AtomicU64,
+    overlap_skipped: &AtomicU64,
 ) -> ProgressSnapshot {
     let elapsed_seconds = start_time.elapsed().as_secs_f64();
     let scanned = bytes_scanned.load(Ordering::Relaxed);
@@ -945,6 +957,7 @@ fn build_progress_snapshot(
         validation_fail: 0, // To be populated when validation is enabled
         scan_time_ms: scan_time_ms.load(Ordering::Relaxed),
         carve_time_ms: carve_time_ms.load(Ordering::Relaxed),
+        overlap_skipped: overlap_skipped.load(Ordering::Relaxed),
     }
 }
 

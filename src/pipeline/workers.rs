@@ -2,6 +2,7 @@
 //!
 //! Worker thread spawning and management for the processing pipeline.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -231,6 +232,52 @@ pub fn spawn_scan_workers(
     handles
 }
 
+/// Per-worker tracker of carved file ranges to skip interior hits of the same type.
+struct OverlapTracker {
+    ranges: HashMap<String, Vec<(u64, u64)>>,
+    total_checks: u64,
+}
+
+impl OverlapTracker {
+    fn new() -> Self {
+        Self {
+            ranges: HashMap::new(),
+            total_checks: 0,
+        }
+    }
+
+    /// Returns true if `offset` falls within any recorded [start, end] range for `file_type`.
+    fn is_overlapping(&mut self, file_type: &str, offset: u64) -> bool {
+        self.total_checks += 1;
+        if self.total_checks.is_multiple_of(1000) {
+            self.prune_before(offset.saturating_sub(1));
+        }
+        if let Some(ranges) = self.ranges.get(file_type) {
+            ranges
+                .iter()
+                .any(|&(start, end)| offset >= start && offset <= end)
+        } else {
+            false
+        }
+    }
+
+    /// Records a carved range [start, end] for the given file type.
+    fn record(&mut self, file_type: &str, start: u64, end: u64) {
+        self.ranges
+            .entry(file_type.to_owned())
+            .or_default()
+            .push((start, end));
+    }
+
+    /// Removes all ranges where end < min_offset.
+    fn prune_before(&mut self, min_offset: u64) {
+        for ranges in self.ranges.values_mut() {
+            ranges.retain(|&(_, end)| end >= min_offset);
+        }
+        self.ranges.retain(|_, v| !v.is_empty());
+    }
+}
+
 /// Spawn file carving worker threads
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_carve_workers(
@@ -248,6 +295,7 @@ pub fn spawn_carve_workers(
     files_prevalidation_rejected: Arc<AtomicU64>,
     deferred_buffer_bytes: usize,
     metadata_only: bool,
+    overlap_skipped: Arc<AtomicU64>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -264,9 +312,11 @@ pub fn spawn_carve_workers(
         let carve_time_ms = carve_time_ms.clone();
         let files_rejected = files_rejected.clone();
         let files_prevalidation_rejected = files_prevalidation_rejected.clone();
+        let overlap_skipped = overlap_skipped.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
+            let mut overlap_tracker = OverlapTracker::new();
             let mut ctx = ExtractionContext {
                 run_id: &run_id,
                 output_root: &carved_root,
@@ -288,6 +338,15 @@ pub fn spawn_carve_workers(
                         continue;
                     }
                 };
+
+                if overlap_tracker.is_overlapping(&hit.file_type_id, hit.global_offset) {
+                    overlap_skipped.fetch_add(1, Ordering::Relaxed);
+                    debug!(
+                        "overlap skip {} at offset {}",
+                        hit.file_type_id, hit.global_offset
+                    );
+                    continue;
+                }
 
                 if !carve_limiter.try_reserve() {
                     continue;
@@ -321,6 +380,7 @@ pub fn spawn_carve_workers(
                     .fetch_add(carve_start.elapsed().as_millis() as u64, Ordering::Relaxed);
                 match result {
                     Ok(Some(file)) => {
+                        overlap_tracker.record(&file.file_type, file.global_start, file.global_end);
                         carve_limiter.commit();
                         if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {
                             warn!("metadata channel closed while sending carved file: {err}");
@@ -391,4 +451,72 @@ pub fn spawn_string_workers(
     }
 
     handles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlap_tracker_skips_interior_hits() {
+        let mut tracker = OverlapTracker::new();
+
+        // No ranges recorded yet — nothing should overlap
+        assert!(!tracker.is_overlapping("jpeg", 500));
+
+        // Record a carved JPEG from offset 1000 to 2000
+        tracker.record("jpeg", 1000, 2000);
+
+        // Interior offsets should be detected as overlapping
+        assert!(tracker.is_overlapping("jpeg", 1000)); // exact start
+        assert!(tracker.is_overlapping("jpeg", 1500)); // middle
+        assert!(tracker.is_overlapping("jpeg", 2000)); // exact end
+
+        // Offsets outside the range should NOT overlap
+        assert!(!tracker.is_overlapping("jpeg", 999));
+        assert!(!tracker.is_overlapping("jpeg", 2001));
+
+        // Different file type should NOT overlap
+        assert!(!tracker.is_overlapping("png", 1500));
+    }
+
+    #[test]
+    fn overlap_tracker_multiple_ranges() {
+        let mut tracker = OverlapTracker::new();
+
+        tracker.record("wav", 0, 1000);
+        tracker.record("wav", 5000, 6000);
+
+        assert!(tracker.is_overlapping("wav", 500));
+        assert!(tracker.is_overlapping("wav", 5500));
+        assert!(!tracker.is_overlapping("wav", 2500)); // gap between ranges
+    }
+
+    #[test]
+    fn overlap_tracker_prune_removes_old_ranges() {
+        let mut tracker = OverlapTracker::new();
+
+        tracker.record("bmp", 100, 200);
+        tracker.record("bmp", 500, 600);
+
+        // Prune ranges ending before 300
+        tracker.prune_before(300);
+
+        // Range [100, 200] should be gone
+        assert!(!tracker.is_overlapping("bmp", 150));
+        // Range [500, 600] should remain
+        assert!(tracker.is_overlapping("bmp", 550));
+    }
+
+    #[test]
+    fn overlap_tracker_empty_type_after_prune() {
+        let mut tracker = OverlapTracker::new();
+
+        tracker.record("gif", 100, 200);
+        tracker.prune_before(300);
+
+        // Type should be removed entirely from the map
+        assert!(tracker.ranges.is_empty());
+        assert!(!tracker.is_overlapping("gif", 150));
+    }
 }
