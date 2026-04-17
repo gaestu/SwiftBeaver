@@ -44,7 +44,7 @@ file_types:
         hex: "89504E470D0A1A0A"
     footer_patterns: []
     max_size: 104857600
-    min_size: 100
+    min_size: 500
     validator: "png"
   - id: "gif"
     extensions: ["gif"]

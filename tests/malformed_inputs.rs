@@ -86,8 +86,23 @@ fn malformed_inputs_are_handled() {
 
     let mut png = Vec::new();
     png.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
-    png.extend_from_slice(&0x00001000u32.to_be_bytes());
+    // Valid IHDR: length=13, "IHDR", width=1, height=1, bit_depth=8, color_type=2
+    png.extend_from_slice(&13u32.to_be_bytes());
     png.extend_from_slice(b"IHDR");
+    png.extend_from_slice(&1u32.to_be_bytes()); // width
+    png.extend_from_slice(&1u32.to_be_bytes()); // height
+    png.push(8); // bit depth
+    png.push(2); // color type (truecolor)
+    png.push(0); // compression
+    png.push(0); // filter
+    png.push(0); // interlace
+    png.extend_from_slice(&[0u8; 4]); // IHDR CRC (dummy)
+    // Add a fake IDAT chunk with 600 bytes of data to exceed min_size
+    png.extend_from_slice(&600u32.to_be_bytes()); // IDAT length
+    png.extend_from_slice(b"IDAT");
+    png.extend_from_slice(&vec![0xAA; 600]); // dummy compressed data
+    png.extend_from_slice(&[0u8; 4]); // IDAT CRC (dummy)
+    // No IEND — will be truncated when next chunk type is garbage
     insert_bytes(&mut data, 512, &png);
 
     let mut gif = Vec::new();

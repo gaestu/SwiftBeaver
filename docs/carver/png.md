@@ -42,18 +42,33 @@ Common PNG chunks encountered:
 - **tRNS**: Transparency (optional)
 - Many others (text, metadata, etc.)
 
+## Pre-Validation (IHDR)
+
+Before any disk I/O, the PNG carver reads 26 bytes and validates:
+
+1. **PNG signature** (bytes 0–7): must match `89 50 4E 47 0D 0A 1A 0A`
+2. **IHDR chunk length** (bytes 8–11): must be exactly 13
+3. **IHDR chunk type** (bytes 12–15): must be `IHDR`
+4. **Width** (bytes 16–19): must be > 0 and ≤ 2³¹−1
+5. **Height** (bytes 20–23): must be > 0 and ≤ 2³¹−1
+6. **Color type** (byte 25): must be one of {0, 2, 3, 4, 6}
+7. **Bit depth** (byte 24): must be valid for the color type per the PNG spec
+
+This rejects most false positives at zero cost.
+
 ## Validation
 
 - **Validated**: `true` if IEND chunk is successfully parsed
-- **Truncated**: `true` if max_size or EOF reached before IEND
+- **Truncated**: `true` if max_size, total byte limit, or EOF reached before IEND
 - **Invalid**: Removed if:
   - Header signature doesn't match
-  - Chunk type is not valid UTF-8
+  - Chunk type contains non-ASCII-alphabetic bytes
   - Chunk length exceeds max_size
+  - Cumulative chunk size exceeds max_size
 
 ## Size Constraints
 
-- **Default min_size**: 100 bytes (as of v0.2.1)
+- **Default min_size**: 500 bytes
 - **Default max_size**: 100 MB
 - Files smaller than `min_size` are discarded
 - Files exceeding `max_size` are truncated
@@ -99,8 +114,8 @@ Uses golden image framework:
 
 ## Edge Cases Handled
 
-1. **Large chunk lengths**: Validates chunk length doesn't exceed max_size before reading
-2. **Invalid chunk types**: Returns error if chunk type contains non-UTF-8 bytes
+1. **Large chunk lengths**: Validates individual chunk length and cumulative total against max_size before reading
+2. **Invalid chunk types**: Returns error if chunk type contains non-ASCII-alphabetic bytes
 3. **Missing IEND**: File is truncated but kept if substantive data exists
 4. **Zero-length chunks**: Handles chunks with length=0 (e.g., IEND)
 5. **Multiple IDAT chunks**: Correctly reads through all data chunks
