@@ -380,6 +380,260 @@ mod ewf {
         }
     }
 
+    pub struct PooledEwfSource {
+        handles: Vec<Mutex<HandleInner>>,
+        len: u64,
+        next: std::sync::atomic::AtomicUsize,
+    }
+
+    // SAFETY: All handle access is serialized via individual Mutexes.
+    unsafe impl Send for PooledEwfSource {}
+    unsafe impl Sync for PooledEwfSource {}
+
+    /// Close and free a list of already-opened handles, then free the globbed
+    /// filenames array.  Used to clean up on error during pool construction.
+    unsafe fn cleanup_handles_and_glob(
+        handles: &[Mutex<HandleInner>],
+        filenames: *mut *mut c_char,
+        number_of_filenames: c_int,
+    ) {
+        for h in handles {
+            let guard = match Mutex::lock(h) {
+                Ok(g) => g,
+                Err(_) => continue,
+            };
+            if !guard.handle.is_null() {
+                unsafe {
+                    let mut err: *mut LibEwfError = ptr::null_mut();
+                    let _ = libewf_handle_close(guard.handle, &mut err);
+                    if !err.is_null() {
+                        libewf_error_free(&mut err);
+                    }
+                    let mut h_ptr = guard.handle;
+                    let _ = libewf_handle_free(&mut h_ptr, &mut err);
+                    if !err.is_null() {
+                        libewf_error_free(&mut err);
+                    }
+                }
+            }
+        }
+        unsafe {
+            let mut err: *mut LibEwfError = ptr::null_mut();
+            let _ = libewf_glob_free(filenames, number_of_filenames, &mut err);
+            if !err.is_null() {
+                libewf_error_free(&mut err);
+            }
+        }
+    }
+
+    impl PooledEwfSource {
+        pub fn open(path: &Path, count: usize) -> Result<Self, EvidenceError> {
+            use tracing::info;
+
+            if count == 0 {
+                return Err(EvidenceError::Unsupported(
+                    "EWF pool count must be at least 1".to_string(),
+                ));
+            }
+
+            let c_path = CString::new(path.to_string_lossy().as_bytes())
+                .map_err(|_| EvidenceError::Unsupported("path contains null byte".to_string()))?;
+
+            // Verify EWF signature once
+            unsafe {
+                let mut error: *mut LibEwfError = ptr::null_mut();
+                let sig = libewf_check_file_signature(c_path.as_ptr(), &mut error);
+                if sig <= 0 {
+                    let msg = if sig == 0 {
+                        "not an EWF image".to_string()
+                    } else {
+                        error_to_string(error)
+                    };
+                    return Err(EvidenceError::Unsupported(msg));
+                }
+            }
+
+            // Glob filenames once (shared across all handles)
+            let (filenames, number_of_filenames) = unsafe {
+                let mut error: *mut LibEwfError = ptr::null_mut();
+                let mut filenames: *mut *mut c_char = ptr::null_mut();
+                let mut number_of_filenames: c_int = 0;
+                let rc = libewf_glob(
+                    c_path.as_ptr(),
+                    c_path.as_bytes().len(),
+                    LIBEWF_FORMAT_UNKNOWN,
+                    &mut filenames,
+                    &mut number_of_filenames,
+                    &mut error,
+                );
+                if rc != 1 {
+                    return Err(EvidenceError::Unsupported(error_to_string(error)));
+                }
+                (filenames, number_of_filenames)
+            };
+
+            let access_flags = unsafe { libewf_get_access_flags_read() };
+            let mut handles = Vec::with_capacity(count);
+            let mut first_media_size: Option<u64> = None;
+
+            for i in 0..count {
+                unsafe {
+                    let mut error: *mut LibEwfError = ptr::null_mut();
+                    let mut handle: *mut LibEwfHandle = ptr::null_mut();
+
+                    if libewf_handle_initialize(&mut handle, &mut error) != 1 {
+                        let msg = error_to_string(error);
+                        cleanup_handles_and_glob(&handles, filenames, number_of_filenames);
+                        return Err(EvidenceError::Unsupported(msg));
+                    }
+
+                    let rc = libewf_handle_open(
+                        handle,
+                        filenames,
+                        number_of_filenames,
+                        access_flags,
+                        &mut error,
+                    );
+                    if rc != 1 {
+                        let msg = error_to_string(error);
+                        let mut err2: *mut LibEwfError = ptr::null_mut();
+                        let _ = libewf_handle_free(&mut handle, &mut err2);
+                        if !err2.is_null() {
+                            libewf_error_free(&mut err2);
+                        }
+                        cleanup_handles_and_glob(&handles, filenames, number_of_filenames);
+                        return Err(EvidenceError::Unsupported(msg));
+                    }
+
+                    let mut media_size: u64 = 0;
+                    if libewf_handle_get_media_size(handle, &mut media_size, &mut error) != 1 {
+                        let msg = error_to_string(error);
+                        let mut err2: *mut LibEwfError = ptr::null_mut();
+                        let _ = libewf_handle_close(handle, &mut err2);
+                        if !err2.is_null() {
+                            libewf_error_free(&mut err2);
+                        }
+                        let _ = libewf_handle_free(&mut handle, &mut err2);
+                        if !err2.is_null() {
+                            libewf_error_free(&mut err2);
+                        }
+                        cleanup_handles_and_glob(&handles, filenames, number_of_filenames);
+                        return Err(EvidenceError::Unsupported(msg));
+                    }
+
+                    match first_media_size {
+                        None => first_media_size = Some(media_size),
+                        Some(expected) if expected != media_size => {
+                            let mut err2: *mut LibEwfError = ptr::null_mut();
+                            let _ = libewf_handle_close(handle, &mut err2);
+                            if !err2.is_null() {
+                                libewf_error_free(&mut err2);
+                            }
+                            let _ = libewf_handle_free(&mut handle, &mut err2);
+                            if !err2.is_null() {
+                                libewf_error_free(&mut err2);
+                            }
+                            cleanup_handles_and_glob(&handles, filenames, number_of_filenames);
+                            return Err(EvidenceError::Unsupported(format!(
+                                "EWF handle {i} reports media_size {media_size}, expected {expected}"
+                            )));
+                        }
+                        _ => {}
+                    }
+
+                    handles.push(Mutex::new(HandleInner { handle }));
+                }
+            }
+
+            // Free the globbed filenames array
+            unsafe {
+                let mut error: *mut LibEwfError = ptr::null_mut();
+                let _ = libewf_glob_free(filenames, number_of_filenames, &mut error);
+                if !error.is_null() {
+                    libewf_error_free(&mut error);
+                }
+            }
+
+            // first_media_size is guaranteed Some because count >= 1 and
+            // the loop would have returned Err before reaching this point
+            // if any handle failed to open or report its media size.
+            let len = first_media_size.expect("at least one handle opened successfully");
+            info!("opened {} EWF reader handles", count);
+
+            Ok(Self {
+                handles,
+                len,
+                next: std::sync::atomic::AtomicUsize::new(0),
+            })
+        }
+    }
+
+    impl EvidenceSource for PooledEwfSource {
+        fn len(&self) -> u64 {
+            self.len
+        }
+
+        fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, EvidenceError> {
+            use std::sync::atomic::Ordering;
+
+            if offset > i64::MAX as u64 {
+                return Err(EvidenceError::InvalidOffset(format!(
+                    "offset too large for libewf: {offset}"
+                )));
+            }
+
+            let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.handles.len();
+            let guard = self.handles[idx].lock().map_err(|_| {
+                EvidenceError::Unsupported("libewf pool handle lock poisoned".to_string())
+            })?;
+            if guard.handle.is_null() {
+                return Err(EvidenceError::Unsupported(
+                    "libewf handle closed".to_string(),
+                ));
+            }
+
+            unsafe {
+                let mut error: *mut LibEwfError = ptr::null_mut();
+                let read = libewf_handle_read_random(
+                    guard.handle,
+                    buf.as_mut_ptr() as *mut c_void,
+                    buf.len(),
+                    offset as off64_t,
+                    &mut error,
+                );
+                if read < 0 {
+                    return Err(EvidenceError::Unsupported(error_to_string(error)));
+                }
+                Ok(read as usize)
+            }
+        }
+    }
+
+    impl Drop for PooledEwfSource {
+        fn drop(&mut self) {
+            for mutex in &self.handles {
+                if let Ok(mut guard) = mutex.lock() {
+                    if guard.handle.is_null() {
+                        continue;
+                    }
+                    unsafe {
+                        let mut error: *mut LibEwfError = ptr::null_mut();
+                        let _ = libewf_handle_close(guard.handle, &mut error);
+                        if !error.is_null() {
+                            libewf_error_free(&mut error);
+                        }
+                        let mut handle = guard.handle;
+                        let _ = libewf_handle_free(&mut handle, &mut error);
+                        if !error.is_null() {
+                            libewf_error_free(&mut error);
+                        }
+                    }
+                    guard.handle = ptr::null_mut();
+                }
+            }
+        }
+    }
+
     unsafe fn error_to_string(mut error: *mut LibEwfError) -> String {
         if error.is_null() {
             return "libewf error".to_string();
@@ -404,15 +658,23 @@ mod ewf {
 
 use crate::cli::CliOptions;
 
-pub fn open_source(opts: &CliOptions) -> Result<Box<dyn EvidenceSource>, EvidenceError> {
+pub fn open_source(
+    opts: &CliOptions,
+    ewf_reader_handles: usize,
+) -> Result<Box<dyn EvidenceSource>, EvidenceError> {
     if is_ewf_path(&opts.input) {
         #[cfg(feature = "ewf")]
         {
+            if ewf_reader_handles > 1 {
+                let src = ewf::PooledEwfSource::open(&opts.input, ewf_reader_handles)?;
+                return Ok(Box::new(src));
+            }
             let src = ewf::EwfSource::open(&opts.input)?;
             return Ok(Box::new(src));
         }
         #[cfg(not(feature = "ewf"))]
         {
+            let _ = ewf_reader_handles;
             return Err(EvidenceError::Unsupported(
                 "E01 support requires the `ewf` feature and libewf".to_string(),
             ));
@@ -668,7 +930,7 @@ mod tests {
             remove_invalid: false,
         };
 
-        let result = super::open_source(&opts);
+        let result = super::open_source(&opts, 1);
         match result {
             Ok(_) => panic!("expected unsupported error"),
             Err(super::EvidenceError::Unsupported(_)) => {}

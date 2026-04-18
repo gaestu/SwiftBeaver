@@ -324,7 +324,7 @@ fn golden_carves_from_e01_with_strings() {
     cfg.string_scan_utf16 = true;
 
     let opts = cli_opts_for_input(e01_path.clone());
-    let evidence = swiftbeaver::evidence::open_source(&opts).expect("open E01");
+    let evidence = swiftbeaver::evidence::open_source(&opts, 1).expect("open E01");
     let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::from(evidence);
 
     let run_output_dir = temp_dir.path().join(&cfg.run_id);
@@ -386,9 +386,123 @@ fn golden_e01_size_matches_raw() {
 
     let raw_size = fs::metadata(&raw_path).expect("raw metadata").len();
     let opts = cli_opts_for_input(e01_path);
-    let e01 = swiftbeaver::evidence::open_source(&opts).expect("open E01");
+    let e01 = swiftbeaver::evidence::open_source(&opts, 1).expect("open E01");
 
     assert_eq!(e01.len(), raw_size, "E01 media size should match raw");
+}
+
+/// Verify that PooledEwfSource (multiple handles) returns byte-identical data
+/// compared to a single-handle EwfSource at various offsets.
+#[cfg(feature = "ewf")]
+#[test]
+fn golden_e01_pooled_reads_match_single() {
+    let e01_path = golden_e01_path();
+    if !e01_path.exists() {
+        eprintln!("Skipping: golden.E01 not found.");
+        return;
+    }
+
+    let opts = cli_opts_for_input(e01_path);
+
+    // Open with 1 handle (single EwfSource path)
+    let single = swiftbeaver::evidence::open_source(&opts, 1).expect("open single");
+    // Open with 3 handles (PooledEwfSource path)
+    let pooled = swiftbeaver::evidence::open_source(&opts, 3).expect("open pooled");
+
+    assert_eq!(single.len(), pooled.len(), "media sizes must match");
+
+    let total = single.len();
+    // Test offsets: start, various positions, near end
+    let offsets: Vec<u64> = vec![
+        0,
+        512,
+        65536,
+        1024 * 1024,
+        total / 4,
+        total / 2,
+        total.saturating_sub(4096),
+    ];
+
+    for offset in offsets {
+        if offset >= total {
+            continue;
+        }
+        let read_len = 4096.min((total - offset) as usize);
+        let mut buf_single = vec![0u8; read_len];
+        let mut buf_pooled = vec![0u8; read_len];
+
+        let n1 = single
+            .read_at(offset, &mut buf_single)
+            .expect("single read");
+        let n2 = pooled
+            .read_at(offset, &mut buf_pooled)
+            .expect("pooled read");
+
+        assert_eq!(n1, n2, "read sizes differ at offset {offset}");
+        assert_eq!(
+            buf_single[..n1],
+            buf_pooled[..n2],
+            "data mismatch at offset {offset}"
+        );
+    }
+}
+
+/// Verify that concurrent reads from PooledEwfSource are safe and return
+/// consistent data (no corruption from handle contention).
+#[cfg(feature = "ewf")]
+#[test]
+fn golden_e01_pooled_concurrent_reads() {
+    let e01_path = golden_e01_path();
+    if !e01_path.exists() {
+        eprintln!("Skipping: golden.E01 not found.");
+        return;
+    }
+
+    let opts = cli_opts_for_input(e01_path.clone());
+
+    // Single-handle reference reads
+    let single = swiftbeaver::evidence::open_source(&opts, 1).expect("open single");
+    let total = single.len();
+
+    let offsets: Vec<u64> = vec![0, 65536, 1024 * 1024, total / 2];
+    let mut reference_data: Vec<(u64, Vec<u8>)> = Vec::new();
+    for &offset in &offsets {
+        if offset >= total {
+            continue;
+        }
+        let read_len = 4096.min((total - offset) as usize);
+        let mut buf = vec![0u8; read_len];
+        let n = single.read_at(offset, &mut buf).expect("ref read");
+        buf.truncate(n);
+        reference_data.push((offset, buf));
+    }
+    drop(single);
+
+    // Pooled source for concurrent reads
+    let pooled: Arc<dyn swiftbeaver::evidence::EvidenceSource> =
+        Arc::from(swiftbeaver::evidence::open_source(&opts, 3).expect("open pooled"));
+
+    let mut handles = Vec::new();
+    for (offset, expected) in &reference_data {
+        let src = Arc::clone(&pooled);
+        let offset = *offset;
+        let expected = expected.clone();
+        handles.push(std::thread::spawn(move || {
+            for _ in 0..100 {
+                let mut buf = vec![0u8; expected.len()];
+                let n = src.read_at(offset, &mut buf).expect("concurrent read");
+                assert_eq!(
+                    &buf[..n],
+                    &expected[..n],
+                    "data mismatch at offset {offset} during concurrent read"
+                );
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
 }
 
 #[test]

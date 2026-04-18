@@ -26,7 +26,8 @@ zip_allowed_kinds:
 ole_allowed_kinds:
 quicktime_mode: mov
 deferred_buffer_kb: 64
-ewf_cache_segments: 256
+ewf_cache_segments: 4096
+ewf_reader_handles: 0
 file_types:
   - id: "jpeg"
     extensions: ["jpg", "jpeg"]

@@ -85,6 +85,8 @@ pub struct Config {
     pub deferred_buffer_kb: usize,
     #[serde(default = "default_ewf_cache_segments")]
     pub ewf_cache_segments: usize,
+    #[serde(default = "default_ewf_reader_handles")]
+    pub ewf_reader_handles: usize,
     pub file_types: Vec<FileTypeConfig>,
 }
 
@@ -188,7 +190,11 @@ fn default_deferred_buffer_kb() -> usize {
 }
 
 fn default_ewf_cache_segments() -> usize {
-    256
+    4096
+}
+
+fn default_ewf_reader_handles() -> usize {
+    0
 }
 
 fn default_true() -> bool {

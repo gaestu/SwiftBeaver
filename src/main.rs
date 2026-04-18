@@ -99,7 +99,21 @@ fn main() -> Result<()> {
         cli_opts.chunk_size_mib
     );
 
-    let evidence_source = evidence::open_source(&cli_opts)?;
+    let ewf_reader_handles = if cfg.ewf_reader_handles == 0 {
+        (num_cpus::get() / 4).clamp(2, 4)
+    } else {
+        let clamped = cfg.ewf_reader_handles.clamp(1, 32);
+        if clamped != cfg.ewf_reader_handles {
+            warn!(
+                "ewf_reader_handles {} clamped to {}",
+                cfg.ewf_reader_handles, clamped
+            );
+        }
+        clamped
+    };
+    info!("EWF reader handles: {ewf_reader_handles}");
+
+    let evidence_source = evidence::open_source(&cli_opts, ewf_reader_handles)?;
     let evidence_source = evidence::wrap_with_cache(evidence_source, cfg.ewf_cache_segments);
     let evidence_source: Arc<dyn evidence::EvidenceSource> = Arc::from(evidence_source);
 
