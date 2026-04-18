@@ -2,36 +2,79 @@
 set -euo pipefail
 
 # ============================================================
-# Profiled Benchmark: SwiftBeaver on U63395.E01
+# Profiled Benchmark: SwiftBeaver
 #
 # Captures time-series CPU, memory, and I/O metrics alongside
 # the carve run for performance analysis.
 #
 # Each run creates a timestamped subdirectory:
-#   $OUT_DIR/benchmarks/<RUN_ID>/
+#   <image_dir>/benchmarks/<RUN_ID>/
 #     summary.txt           — human-readable summary
 #     system_metrics.csv    — time-series system samples
 #     process_metrics.csv   — time-series per-process samples
 #     io_metrics.csv        — time-series disk I/O samples
 #     swiftbeaver_log.txt   — SwiftBeaver stdout/stderr
+#
+# Usage:
+#   ./scripts/run_benchmark_profiled.sh --image images/U63395/U63395.E01
+#   ./scripts/run_benchmark_profiled.sh --image /path/to/evidence.E01
+#   SAMPLE_INTERVAL=10 ./scripts/run_benchmark_profiled.sh --image ...
 # ============================================================
 
 # --- Configuration ---
 SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-5}"  # seconds between samples
 
-# Resolve paths: script lives in scripts/, data lives in images/
+# Resolve paths: script lives in scripts/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IMAGES_DIR="$REPO_ROOT/images"
-cd "$IMAGES_DIR"
 
-IMAGE="U63395/U63395.E01"
-SB_OUT="U63395/swiftbeaver_output"
-BASE_DIR="U63395"
+# --- Parse flags ---
+IMAGE=""
+for arg in "$@"; do
+    case "$arg" in
+        --image=*) IMAGE="${arg#--image=}" ;;
+        --help|-h)
+            echo "Usage: $0 --image <path-to-E01>"
+            echo "  --image   Path to EWF evidence file (relative to repo root or absolute)"
+            echo "  Environment: SAMPLE_INTERVAL=N (default: 5 seconds)"
+            exit 0
+            ;;
+    esac
+done
+# Support --image <value> (two-arg form)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --image) IMAGE="$2"; shift 2 ;;
+        --image=*) IMAGE="${1#--image=}"; shift ;;
+        --help|-h) shift ;;
+        *) shift ;;
+    esac
+done
+
+if [[ -z "$IMAGE" ]]; then
+    echo "ERROR: --image is required"
+    echo "Usage: $0 --image <path-to-E01>"
+    exit 1
+fi
+
+# Resolve image to absolute path
+if [[ ! "$IMAGE" = /* ]]; then
+    IMAGE="$REPO_ROOT/$IMAGE"
+fi
+if [[ ! -f "$IMAGE" ]]; then
+    echo "ERROR: Image file not found: $IMAGE"
+    exit 1
+fi
+
+# Derive output directory from image location
+# e.g. images/U63395/U63395.E01 → outputs go in images/U63395/benchmarks/<RUN_ID>/
+IMAGE_DIR="$(dirname "$IMAGE")"
+IMAGE_NAME="$(basename "$IMAGE" | sed 's/\.[^.]*$//')"
+SB_OUT="$IMAGE_DIR/swiftbeaver_output"
 
 # Unique run directory with timestamp
 RUN_ID="$(date +%Y%m%dT%H%M%S)"
-OUT_DIR="$BASE_DIR/benchmarks/$RUN_ID"
+OUT_DIR="$IMAGE_DIR/benchmarks/$RUN_ID"
 mkdir -p "$OUT_DIR"
 
 SUMMARY="$OUT_DIR/summary.txt"
@@ -58,7 +101,7 @@ fi
 
 echo "========================================" | tee "$SUMMARY"
 echo " Profiled Benchmark: SwiftBeaver"       | tee -a "$SUMMARY"
-echo " Image: $IMAGE"                         | tee -a "$SUMMARY"
+echo " Image: $IMAGE_NAME ($IMAGE)"           | tee -a "$SUMMARY"
 echo " Started: $(date)"                      | tee -a "$SUMMARY"
 echo " CPUs: $NUM_CPUS"                       | tee -a "$SUMMARY"
 echo " Total RAM: ${TOTAL_MEM_MB} MiB"        | tee -a "$SUMMARY"
@@ -253,7 +296,7 @@ MONITOR_PIDS+=($!)
     --progress-interval-secs 30 \
     2>&1 | tee "$OUT_DIR/swiftbeaver_log.txt" &
 # Symlink latest run for convenience
-ln -sfn "benchmarks/$RUN_ID" "$BASE_DIR/latest_benchmark"
+ln -sfn "benchmarks/$RUN_ID" "$IMAGE_DIR/latest_benchmark"
 SB_PIPE_PID=$!
 
 # Wait a moment for swiftbeaver to start, then find its actual PID
