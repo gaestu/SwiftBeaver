@@ -36,6 +36,8 @@ Schema:
 - `validated` (bool)
 - `truncated` (bool)
 - `error` (string, nullable)
+- `is_duplicate` (bool)
+- `duplicate_of_offset` (int64, nullable)
 
 ## String artefacts
 
@@ -178,6 +180,8 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `files_prevalidation_rejected` (int64)
 - `string_spans` (int64)
 - `artefacts_extracted` (int64)
+- `duplicates_found` (int64)
+- `duplicates_skipped` (int64)
 
 ## Entropy regions
 

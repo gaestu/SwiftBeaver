@@ -98,6 +98,8 @@ struct FileRow {
     validated: bool,
     truncated: bool,
     error: Option<String>,
+    is_duplicate: bool,
+    duplicate_of_offset: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +202,8 @@ struct RunSummaryRow {
     files_prevalidation_rejected: i64,
     string_spans: i64,
     artefacts_extracted: i64,
+    duplicates_found: i64,
+    duplicates_skipped: i64,
 }
 
 enum CategoryBuffer {
@@ -718,6 +722,8 @@ impl MetadataSink for ParquetSink {
             validated: file.validated,
             truncated: file.truncated,
             error: join_errors(&file.errors),
+            is_duplicate: file.is_duplicate,
+            duplicate_of_offset: file.duplicate_of_offset.map(|v| v as i64),
         };
 
         let mut inner = self.lock_inner()?;
@@ -814,6 +820,8 @@ impl MetadataSink for ParquetSink {
             files_prevalidation_rejected: to_i64(summary.files_prevalidation_rejected)?,
             string_spans: to_i64(summary.string_spans)?,
             artefacts_extracted: to_i64(summary.artefacts_extracted)?,
+            duplicates_found: to_i64(summary.duplicates_found)?,
+            duplicates_skipped: to_i64(summary.duplicates_skipped)?,
         };
         let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::RunSummary)?;
@@ -913,6 +921,8 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("validated", DataType::Boolean, false),
             Field::new("truncated", DataType::Boolean, false),
             Field::new("error", DataType::Utf8, true),
+            Field::new("is_duplicate", DataType::Boolean, false),
+            Field::new("duplicate_of_offset", DataType::Int64, true),
         ]));
     }
 
@@ -1066,6 +1076,8 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("files_prevalidation_rejected", DataType::Int64, false),
             Field::new("string_spans", DataType::Int64, false),
             Field::new("artefacts_extracted", DataType::Int64, false),
+            Field::new("duplicates_found", DataType::Int64, false),
+            Field::new("duplicates_skipped", DataType::Int64, false),
         ])),
         _ => Arc::new(Schema::empty()),
     }
@@ -1094,6 +1106,8 @@ fn build_files_batch(
     let mut validated = BooleanBuilder::new();
     let mut truncated = BooleanBuilder::new();
     let mut error = StringBuilder::new();
+    let mut is_duplicate = BooleanBuilder::new();
+    let mut duplicate_of_offset = Int64Builder::new();
 
     for row in rows {
         run_id.append_value(&ctx.run_id);
@@ -1114,6 +1128,8 @@ fn build_files_batch(
         validated.append_value(row.validated);
         truncated.append_value(row.truncated);
         error.append_option(row.error.as_deref());
+        is_duplicate.append_value(row.is_duplicate);
+        duplicate_of_offset.append_option(row.duplicate_of_offset);
     }
 
     let arrays: Vec<ArrayRef> = vec![
@@ -1135,6 +1151,8 @@ fn build_files_batch(
         Arc::new(validated.finish()),
         Arc::new(truncated.finish()),
         Arc::new(error.finish()),
+        Arc::new(is_duplicate.finish()),
+        Arc::new(duplicate_of_offset.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)
@@ -1562,6 +1580,8 @@ fn build_summary_batch(
     let mut files_prevalidation_rejected = Int64Builder::new();
     let mut string_spans = Int64Builder::new();
     let mut artefacts_extracted = Int64Builder::new();
+    let mut duplicates_found = Int64Builder::new();
+    let mut duplicates_skipped = Int64Builder::new();
 
     for row in rows {
         run_id.append_value(&ctx.run_id);
@@ -1577,6 +1597,8 @@ fn build_summary_batch(
         files_prevalidation_rejected.append_value(row.files_prevalidation_rejected);
         string_spans.append_value(row.string_spans);
         artefacts_extracted.append_value(row.artefacts_extracted);
+        duplicates_found.append_value(row.duplicates_found);
+        duplicates_skipped.append_value(row.duplicates_skipped);
     }
 
     let arrays: Vec<ArrayRef> = vec![
@@ -1593,6 +1615,8 @@ fn build_summary_batch(
         Arc::new(files_prevalidation_rejected.finish()),
         Arc::new(string_spans.finish()),
         Arc::new(artefacts_extracted.finish()),
+        Arc::new(duplicates_found.finish()),
+        Arc::new(duplicates_skipped.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)

@@ -28,6 +28,11 @@ quicktime_mode: mov
 deferred_buffer_kb: 64
 ewf_cache_segments: 4096
 ewf_reader_handles: 0
+hash_algorithms:
+  - md5
+  - sha256
+enable_deduplication: false
+skip_duplicate_files: false
 file_types:
   - id: "jpeg"
     extensions: ["jpg", "jpeg"]

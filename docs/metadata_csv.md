@@ -19,6 +19,8 @@ Columns:
 - `truncated`
 - `errors`
 - `pattern_id`
+- `is_duplicate`
+- `duplicate_of_offset`
 - `tool_version`
 - `config_hash`
 - `evidence_path`
@@ -116,6 +118,8 @@ Columns:
 - `files_prevalidation_rejected`
 - `string_spans`
 - `artefacts_extracted`
+- `duplicates_found`
+- `duplicates_skipped`
 - `tool_version`
 - `config_hash`
 - `evidence_path`

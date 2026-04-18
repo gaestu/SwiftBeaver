@@ -192,12 +192,14 @@ impl CarveHandler for AviCarveHandler {
             global_start: hit.global_offset,
             global_end,
             size,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
+            md5: md5_hex,
+            sha256: sha256_hex,
             validated,
             truncated,
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         }))
     }
 }
@@ -303,6 +305,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -348,6 +351,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -378,6 +382,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -411,6 +416,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");

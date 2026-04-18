@@ -38,6 +38,8 @@ struct CarvedFileCsv<'a> {
     truncated: bool,
     errors: String,
     pattern_id: Option<&'a str>,
+    is_duplicate: bool,
+    duplicate_of_offset: Option<u64>,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -124,6 +126,8 @@ struct RunSummaryCsv<'a> {
     files_prevalidation_rejected: u64,
     string_spans: u64,
     artefacts_extracted: u64,
+    duplicates_found: u64,
+    duplicates_skipped: u64,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -199,6 +203,8 @@ impl CsvSink {
             "truncated",
             "errors",
             "pattern_id",
+            "is_duplicate",
+            "duplicate_of_offset",
             "tool_version",
             "config_hash",
             "evidence_path",
@@ -280,6 +286,8 @@ impl CsvSink {
             "files_prevalidation_rejected",
             "string_spans",
             "artefacts_extracted",
+            "duplicates_found",
+            "duplicates_skipped",
             "tool_version",
             "config_hash",
             "evidence_path",
@@ -330,6 +338,8 @@ impl MetadataSink for CsvSink {
             truncated: file.truncated,
             errors: file.errors.join("; "),
             pattern_id: file.pattern_id.as_deref(),
+            is_duplicate: file.is_duplicate,
+            duplicate_of_offset: file.duplicate_of_offset,
             tool_version: &self.tool_version,
             config_hash: &self.config_hash,
             evidence_path: &self.evidence_path,
@@ -454,6 +464,8 @@ impl MetadataSink for CsvSink {
             files_prevalidation_rejected: summary.files_prevalidation_rejected,
             string_spans: summary.string_spans,
             artefacts_extracted: summary.artefacts_extracted,
+            duplicates_found: summary.duplicates_found,
+            duplicates_skipped: summary.duplicates_skipped,
             tool_version: &self.tool_version,
             config_hash: &self.config_hash,
             evidence_path: &self.evidence_path,
@@ -569,6 +581,8 @@ mod tests {
             truncated: false,
             errors: Vec::new(),
             pattern_id: Some("jpeg_soi".to_string()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         };
         sink.record_file(&file).expect("record file");
 
@@ -634,6 +648,8 @@ mod tests {
             files_prevalidation_rejected: 0,
             string_spans: 3,
             artefacts_extracted: 4,
+            duplicates_found: 0,
+            duplicates_skipped: 0,
         };
         sink.record_run_summary(&summary).expect("record summary");
         let region = EntropyRegion {

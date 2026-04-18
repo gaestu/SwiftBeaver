@@ -140,6 +140,9 @@ fn cli_opts_for_input(path: PathBuf) -> CliOptions {
         metadata_only: false,
         validate_carved: false,
         remove_invalid: false,
+        hash_algorithms: None,
+        dedupe: false,
+        skip_duplicates: false,
     }
 }
 

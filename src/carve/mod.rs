@@ -78,6 +78,8 @@ pub enum PreValidation {
 ///     truncated: false,
 ///     errors: Vec::new(),
 ///     pattern_id: Some("jpeg_soi".to_string()),
+///     is_duplicate: false,
+///     duplicate_of_offset: None,
 /// };
 /// let _ = file;
 /// ```
@@ -96,6 +98,8 @@ pub struct CarvedFile {
     pub truncated: bool,
     pub errors: Vec<String>,
     pub pattern_id: Option<String>,
+    pub is_duplicate: bool,
+    pub duplicate_of_offset: Option<u64>,
 }
 
 pub struct ExtractionContext<'a> {
@@ -105,6 +109,8 @@ pub struct ExtractionContext<'a> {
     pub deferred_buffer_bytes: usize,
     /// When true, skip all file I/O (metadata-only mode).
     pub metadata_only: bool,
+    /// Hash algorithm selection for CarveStream-based carvers.
+    pub hash_config: crate::hash::HashConfig,
     /// Per-worker reusable I/O buffer for carve operations.
     /// Persists across hits within the same worker thread.
     pub(crate) io_buf: RefCell<Vec<u8>>,
@@ -122,6 +128,7 @@ impl<'a> std::fmt::Debug for ExtractionContext<'a> {
             .field("evidence", &"<dyn EvidenceSource>")
             .field("deferred_buffer_bytes", &self.deferred_buffer_bytes)
             .field("metadata_only", &self.metadata_only)
+            .field("hash_config", &self.hash_config)
             .field("io_buf_capacity", &self.io_buf.borrow().capacity())
             .field("chunk_data_len", &self.chunk_data.as_ref().map(|d| d.len()))
             .field("chunk_start", &self.chunk_start)
@@ -142,6 +149,7 @@ impl<'a> ExtractionContext<'a> {
             evidence,
             deferred_buffer_bytes,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
             io_buf: RefCell::new(Vec::new()),
             chunk_data: None,
             chunk_start: 0,
@@ -259,8 +267,8 @@ pub fn build_carved_file(
     rel_path: String,
     global_start: u64,
     size: u64,
-    md5_hex: String,
-    sha256_hex: String,
+    md5_hex: Option<String>,
+    sha256_hex: Option<String>,
     validated: bool,
     truncated: bool,
     errors: Vec<String>,
@@ -280,12 +288,14 @@ pub fn build_carved_file(
         global_start,
         global_end,
         size,
-        md5: Some(md5_hex),
-        sha256: Some(sha256_hex),
+        md5: md5_hex,
+        sha256: sha256_hex,
         validated,
         truncated,
         errors,
         pattern_id: Some(pattern_id.to_string()),
+        is_duplicate: false,
+        duplicate_of_offset: None,
     }
 }
 
@@ -408,8 +418,8 @@ pub(crate) struct CarveStream<'a> {
     max_size: u64,
     written: u64,
     writer: DeferredWriter,
-    md5: md5::Context,
-    sha256: Sha256,
+    md5: Option<md5::Context>,
+    sha256: Option<Sha256>,
     reuse_buf: Vec<u8>,
 }
 
@@ -421,14 +431,24 @@ impl<'a> CarveStream<'a> {
         path: PathBuf,
     ) -> Self {
         let reuse_buf = std::mem::take(&mut *ctx.io_buf.borrow_mut());
+        let md5 = if ctx.hash_config.has_md5() {
+            Some(md5::Context::new())
+        } else {
+            None
+        };
+        let sha256 = if ctx.hash_config.has_sha256() {
+            Some(Sha256::new())
+        } else {
+            None
+        };
         Self {
             ctx,
             offset,
             max_size,
             written: 0,
             writer: DeferredWriter::new(path, ctx.deferred_buffer_bytes, ctx.metadata_only),
-            md5: md5::Context::new(),
-            sha256: Sha256::new(),
+            md5,
+            sha256,
             reuse_buf,
         }
     }
@@ -467,19 +487,21 @@ impl<'a> CarveStream<'a> {
             return Err(CarveError::Truncated);
         }
         self.writer.write_all(buf)?;
-        self.md5.consume(buf);
-        self.sha256.update(buf);
+        if let Some(ref mut md5) = self.md5 {
+            md5.consume(buf);
+        }
+        if let Some(ref mut sha256) = self.sha256 {
+            sha256.update(buf);
+        }
         self.offset = self.offset.saturating_add(buf.len() as u64);
         self.written = self.written.saturating_add(buf.len() as u64);
         Ok(())
     }
 
-    pub(crate) fn finish(mut self) -> Result<(u64, String, String), CarveError> {
+    pub(crate) fn finish(mut self) -> Result<(u64, Option<String>, Option<String>), CarveError> {
         self.writer.flush_to_disk()?;
-        let md5_ctx = std::mem::replace(&mut self.md5, md5::Context::new());
-        let sha_ctx = std::mem::replace(&mut self.sha256, Sha256::new());
-        let md5 = format!("{:x}", md5_ctx.compute());
-        let sha256 = hex::encode(sha_ctx.finalize());
+        let md5 = self.md5.take().map(|ctx| format!("{:x}", ctx.compute()));
+        let sha256 = self.sha256.take().map(|ctx| hex::encode(ctx.finalize()));
         Ok((self.written, md5, sha256))
     }
 
@@ -547,13 +569,40 @@ impl Drop for CarveStream<'_> {
     }
 }
 
+/// Create optional hash contexts based on configuration.
+pub(crate) fn create_hashers(
+    config: &crate::hash::HashConfig,
+) -> (Option<md5::Context>, Option<Sha256>) {
+    let md5 = if config.has_md5() {
+        Some(md5::Context::new())
+    } else {
+        None
+    };
+    let sha256 = if config.has_sha256() {
+        Some(Sha256::new())
+    } else {
+        None
+    };
+    (md5, sha256)
+}
+
+/// Finalize optional hash contexts into hex strings.
+pub(crate) fn finalize_hashers(
+    md5: Option<md5::Context>,
+    sha256: Option<Sha256>,
+) -> (Option<String>, Option<String>) {
+    let md5_hex = md5.map(|c| format!("{:x}", c.compute()));
+    let sha256_hex = sha256.map(|s| hex::encode(s.finalize()));
+    (md5_hex, sha256_hex)
+}
+
 pub(crate) fn write_range(
     ctx: &ExtractionContext,
     start: u64,
     end: u64,
     path: &Path,
-    md5: &mut md5::Context,
-    sha256: &mut Sha256,
+    mut md5: Option<&mut md5::Context>,
+    mut sha256: Option<&mut Sha256>,
 ) -> Result<(u64, bool), CarveError> {
     let mut writer = DeferredWriter::new(
         path.to_path_buf(),
@@ -574,8 +623,12 @@ pub(crate) fn write_range(
             return Ok((bytes_written, true));
         }
         writer.write_all(&buf[..n])?;
-        md5.consume(&buf[..n]);
-        sha256.update(&buf[..n]);
+        if let Some(ref mut m) = md5 {
+            m.consume(&buf[..n]);
+        }
+        if let Some(ref mut s) = sha256 {
+            s.update(&buf[..n]);
+        }
         bytes_written = bytes_written.saturating_add(n as u64);
         offset = offset.saturating_add(n as u64);
         remaining = remaining.saturating_sub(n as u64);

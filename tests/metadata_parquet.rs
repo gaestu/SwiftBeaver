@@ -46,6 +46,8 @@ fn parquet_writes_expected_files() {
         truncated: false,
         errors: Vec::new(),
         pattern_id: Some("jpeg_soi".to_string()),
+        is_duplicate: false,
+        duplicate_of_offset: None,
     };
     sink.record_file(&file).expect("record file");
 
@@ -112,6 +114,8 @@ fn parquet_writes_expected_files() {
         files_prevalidation_rejected: 0,
         string_spans: 3,
         artefacts_extracted: 4,
+        duplicates_found: 0,
+        duplicates_skipped: 0,
     };
     sink.record_run_summary(&summary).expect("record summary");
     let entropy = EntropyRegion {

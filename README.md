@@ -99,6 +99,9 @@ CLI overrides:
 - `--metadata-only` / `--no-carve`: scan, validate, and record metadata (with hashes) but skip writing carved files to disk
 - `--validate-carved`: validate carved files after carving (checks file integrity)
 - `--remove-invalid`: remove invalid carved files (requires `--validate-carved`)
+- `--hash-algorithms md5,sha256`: select hash algorithms to compute (comma-separated; default: md5,sha256)
+- `--dedupe`: enable deduplication tracking (records duplicates in metadata)
+- `--skip-duplicates`: skip writing duplicate files to disk (still records metadata; requires `--dedupe`)
 
 QuickTime handling is configurable in `config/default.yml` with `quicktime_mode`:
 - `mov` (default) keeps QuickTime output under `mov`

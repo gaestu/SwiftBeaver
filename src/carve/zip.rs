@@ -5,11 +5,11 @@ use std::path::Path;
 
 use crc32fast::Hasher as Crc32Hasher;
 use flate2::read::DeflateDecoder;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 
 use crate::carve::{
     CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PreValidation,
-    output_path, write_range,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -120,16 +120,15 @@ impl CarveHandler for ZipCarveHandler {
                 &self.extension,
                 hit.global_offset,
             )?;
-            let mut md5 = md5::Context::new();
-            let mut sha256 = Sha256::new();
+            let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
             let (written, eof_truncated) = write_range(
                 ctx,
                 hit.global_offset,
                 total_end,
                 &full_path,
-                &mut md5,
-                &mut sha256,
+                md5.as_mut(),
+                sha256.as_mut(),
             )?;
             bytes_written = written;
             if eof_truncated {
@@ -151,8 +150,7 @@ impl CarveHandler for ZipCarveHandler {
                 }
             }
 
-            let md5_hex = format!("{:x}", md5.compute());
-            let sha256_hex = hex::encode(sha256.finalize());
+            let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
             let global_end = if bytes_written == 0 {
                 hit.global_offset
             } else {
@@ -195,12 +193,14 @@ impl CarveHandler for ZipCarveHandler {
                 global_start: hit.global_offset,
                 global_end,
                 size: bytes_written,
-                md5: Some(md5_hex),
-                sha256: Some(sha256_hex),
+                md5: md5_hex,
+                sha256: sha256_hex,
                 validated,
                 truncated,
                 errors,
                 pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
             }));
         } else {
             output_path(
@@ -216,8 +216,7 @@ impl CarveHandler for ZipCarveHandler {
             ctx.deferred_buffer_bytes,
             ctx.metadata_only,
         );
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut offset = hit.global_offset;
         let mut carry: Vec<u8> = Vec::new();
@@ -289,8 +288,12 @@ impl CarveHandler for ZipCarveHandler {
                 if write_len > 0 {
                     let slice = &buf[..write_len];
                     writer.write_all(slice)?;
-                    md5.consume(slice);
-                    sha256.update(slice);
+                    if let Some(ref mut m) = md5 {
+                        m.consume(slice);
+                    }
+                    if let Some(ref mut s) = sha256 {
+                        s.update(slice);
+                    }
                     bytes_written = bytes_written.saturating_add(slice.len() as u64);
                 }
 
@@ -311,8 +314,12 @@ impl CarveHandler for ZipCarveHandler {
                         }
                         extra.truncate(n);
                         writer.write_all(&extra)?;
-                        md5.consume(&extra);
-                        sha256.update(&extra);
+                        if let Some(ref mut m) = md5 {
+                            m.consume(&extra);
+                        }
+                        if let Some(ref mut s) = sha256 {
+                            s.update(&extra);
+                        }
                         bytes_written = bytes_written.saturating_add(extra.len() as u64);
                         extra_offset = extra_offset.saturating_add(extra.len() as u64);
                         remaining = remaining.saturating_sub(extra.len() as u64);
@@ -323,8 +330,12 @@ impl CarveHandler for ZipCarveHandler {
             }
 
             writer.write_all(&buf)?;
-            md5.consume(&buf);
-            sha256.update(&buf);
+            if let Some(ref mut m) = md5 {
+                m.consume(&buf);
+            }
+            if let Some(ref mut s) = sha256 {
+                s.update(&buf);
+            }
             bytes_written = bytes_written.saturating_add(buf.len() as u64);
             offset = offset.saturating_add(buf.len() as u64);
 
@@ -351,8 +362,7 @@ impl CarveHandler for ZipCarveHandler {
             }
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if bytes_written == 0 {
             hit.global_offset
         } else {
@@ -387,12 +397,14 @@ impl CarveHandler for ZipCarveHandler {
             global_start: hit.global_offset,
             global_end,
             size: bytes_written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
+            md5: md5_hex,
+            sha256: sha256_hex,
             validated,
             truncated,
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         }))
     }
 }
@@ -1227,6 +1239,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1261,6 +1274,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let hit = NormalizedHit {
             global_offset: 0,
@@ -1298,6 +1312,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = ZipCarveHandler::new(
             "zip".to_string(),
@@ -1344,6 +1359,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1379,6 +1395,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 1024, true, None);
         let hit = NormalizedHit {
@@ -1419,6 +1436,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = ZipCarveHandler::new("zip".to_string(), 0, 2048, true, None);
         let hit = NormalizedHit {

@@ -3,11 +3,9 @@
 //! QuickTime files use the same atom/box structure as MP4, but typically use
 //! the 'qt  ' brand in the ftyp box.
 
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
-    write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, create_hashers,
+    finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -176,8 +174,7 @@ impl CarveHandler for MovCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut total_end = last_good;
         if self.max_size > 0 && total_end - hit.global_offset > self.max_size {
@@ -189,8 +186,8 @@ impl CarveHandler for MovCarveHandler {
             hit.global_offset,
             total_end,
             &full_path,
-            &mut md5,
-            &mut sha256,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
         if eof_truncated {
             truncated = true;
@@ -202,8 +199,7 @@ impl CarveHandler for MovCarveHandler {
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
@@ -218,12 +214,14 @@ impl CarveHandler for MovCarveHandler {
             global_start: hit.global_offset,
             global_end,
             size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
+            md5: md5_hex,
+            sha256: sha256_hex,
             validated: !truncated,
             truncated,
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         }))
     }
 }
@@ -273,6 +271,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = MovCarveHandler::new("mov".to_string(), 8, 0);
         let hit = NormalizedHit {

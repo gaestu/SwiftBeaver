@@ -696,6 +696,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let hit = NormalizedHit {
             global_offset: 0,

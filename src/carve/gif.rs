@@ -147,12 +147,14 @@ impl CarveHandler for GifCarveHandler {
             global_start: hit.global_offset,
             global_end,
             size,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
+            md5: md5_hex,
+            sha256: sha256_hex,
             validated,
             truncated,
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         }))
     }
 }

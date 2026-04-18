@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 
 use crate::carve::{CarveRegistry, ExtractionContext};
 use crate::chunk::ScanChunk;
+use crate::dedup::DedupTracker;
 use crate::entropy;
 use crate::evidence::EvidenceSource;
 use crate::metadata::MetadataSink;
@@ -43,11 +44,42 @@ pub fn spawn_metadata_thread(
     sink: Box<dyn MetadataSink>,
     rx: Receiver<MetadataEvent>,
     error_count: Arc<AtomicU64>,
+    mut dedup_tracker: Option<DedupTracker>,
+    skip_duplicates: bool,
+    carved_root: Option<PathBuf>,
+    duplicates_found: Arc<AtomicU64>,
+    duplicates_skipped: Arc<AtomicU64>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         for event in rx {
             match event {
-                MetadataEvent::File(file) => {
+                MetadataEvent::File(mut file) => {
+                    if let Some(ref mut tracker) = dedup_tracker {
+                        if let Some(ref sha) = file.sha256 {
+                            let result = tracker.check_and_register(sha, file.global_start);
+                            if result.is_duplicate {
+                                file.is_duplicate = true;
+                                file.duplicate_of_offset = result.duplicate_of_offset;
+                                duplicates_found.fetch_add(1, Ordering::Relaxed);
+                                if skip_duplicates {
+                                    if let Some(ref root) = carved_root {
+                                        let full_path = root.join(&file.path);
+                                        match std::fs::remove_file(&full_path) {
+                                            Ok(()) => {
+                                                duplicates_skipped.fetch_add(1, Ordering::Relaxed);
+                                            }
+                                            Err(e) => {
+                                                warn!(
+                                                    "failed to remove duplicate file {}: {e}",
+                                                    full_path.display()
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if let Err(err) = sink.record_file(&file) {
                         error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
@@ -296,6 +328,7 @@ pub fn spawn_carve_workers(
     deferred_buffer_bytes: usize,
     metadata_only: bool,
     overlap_skipped: Arc<AtomicU64>,
+    hash_config: crate::hash::HashConfig,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -313,6 +346,7 @@ pub fn spawn_carve_workers(
         let files_rejected = files_rejected.clone();
         let files_prevalidation_rejected = files_prevalidation_rejected.clone();
         let overlap_skipped = overlap_skipped.clone();
+        let hash_config = hash_config.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -323,6 +357,7 @@ pub fn spawn_carve_workers(
                 evidence: evidence.as_ref(),
                 deferred_buffer_bytes,
                 metadata_only,
+                hash_config,
                 io_buf: std::cell::RefCell::new(Vec::new()),
                 chunk_data: None,
                 chunk_start: 0,

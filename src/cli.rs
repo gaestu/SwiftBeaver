@@ -169,6 +169,18 @@ pub struct CliOptions {
     /// Remove files that fail post-carving validation (requires --validate-carved)
     #[arg(long, requires = "validate_carved")]
     pub remove_invalid: bool,
+
+    /// Hash algorithms to compute (comma-separated: md5,sha256)
+    #[arg(long, value_delimiter = ',')]
+    pub hash_algorithms: Option<Vec<String>>,
+
+    /// Enable deduplication tracking (records duplicates in metadata)
+    #[arg(long)]
+    pub dedupe: bool,
+
+    /// Skip writing duplicate files to disk (still records metadata; requires --dedupe)
+    #[arg(long, requires = "dedupe")]
+    pub skip_duplicates: bool,
 }
 
 pub fn parse() -> CliOptions {

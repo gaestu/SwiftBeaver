@@ -6,15 +6,13 @@
 use std::fs::File;
 use std::io::{self, Seek};
 
-use flate2::read::GzDecoder;
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
-    write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, create_hashers,
+    finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
+use flate2::read::GzDecoder;
 
 const GZIP_MAGIC: [u8; 3] = [0x1F, 0x8B, 0x08];
 
@@ -78,8 +76,7 @@ impl CarveHandler for GzipCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut truncated = false;
         let mut errors = Vec::new();
@@ -145,8 +142,8 @@ impl CarveHandler for GzipCarveHandler {
             hit.global_offset,
             end_offset,
             &full_path,
-            &mut md5,
-            &mut sha256,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
         if eof_truncated {
             truncated = true;
@@ -165,8 +162,7 @@ impl CarveHandler for GzipCarveHandler {
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
@@ -181,12 +177,14 @@ impl CarveHandler for GzipCarveHandler {
             global_start: hit.global_offset,
             global_end,
             size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
+            md5: md5_hex,
+            sha256: sha256_hex,
             validated: true,
             truncated,
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         }))
     }
 }
@@ -336,6 +334,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -370,6 +369,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

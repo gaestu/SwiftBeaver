@@ -25,6 +25,7 @@ use crate::constants::{
     CHANNEL_CAPACITY_MULTIPLIER, HIT_CHANNEL_MULTIPLIER, METADATA_FLUSH_INTERVAL_SECS,
     MIN_CHANNEL_CAPACITY,
 };
+use crate::dedup::DedupTracker;
 use crate::evidence::EvidenceSource;
 use crate::metadata::{MetadataSink, RunSummary};
 use crate::scanner::SignatureScanner;
@@ -57,6 +58,8 @@ pub struct PipelineStats {
     pub carve_time_ms: u64,
     /// Number of hits skipped due to overlap with already-carved files
     pub overlap_skipped: u64,
+    pub duplicates_found: u64,
+    pub duplicates_skipped: u64,
 }
 
 /// Progress snapshot reported during a run.
@@ -216,6 +219,8 @@ struct PipelineCounters {
     carve_time_ms: Arc<AtomicU64>,
     carve_limiter: Arc<CarveLimiter>,
     overlap_skipped: Arc<AtomicU64>,
+    duplicates_found: Arc<AtomicU64>,
+    duplicates_skipped: Arc<AtomicU64>,
 }
 
 impl PipelineCounters {
@@ -235,6 +240,8 @@ impl PipelineCounters {
             carve_time_ms: Arc::new(AtomicU64::new(0)),
             carve_limiter: Arc::new(CarveLimiter::new(max_files)),
             overlap_skipped: Arc::new(AtomicU64::new(0)),
+            duplicates_found: Arc::new(AtomicU64::new(0)),
+            duplicates_skipped: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -453,10 +460,21 @@ impl<'a> PipelineRunner<'a> {
         counters: &PipelineCounters,
         entropy_cfg: Option<EntropyConfig>,
     ) -> WorkerHandles {
+        let dedup_tracker = if self.cfg.enable_deduplication {
+            Some(DedupTracker::new())
+        } else {
+            None
+        };
+
         let meta_handle = workers::spawn_metadata_thread(
             meta_sink,
             channels.meta_rx.clone(),
             counters.metadata_errors.clone(),
+            dedup_tracker,
+            self.cfg.skip_duplicate_files,
+            Some(self.run_output_dir.join("carved")),
+            counters.duplicates_found.clone(),
+            counters.duplicates_skipped.clone(),
         );
 
         let scan_handles = workers::spawn_scan_workers(
@@ -491,6 +509,7 @@ impl<'a> PipelineRunner<'a> {
             self.cfg.deferred_buffer_kb * 1024,
             self.metadata_only,
             counters.overlap_skipped.clone(),
+            crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
@@ -752,6 +771,8 @@ impl<'a> PipelineRunner<'a> {
                 .load(Ordering::Relaxed),
             string_spans: counters.string_spans.load(Ordering::Relaxed),
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
+            duplicates_found: counters.duplicates_found.load(Ordering::Relaxed),
+            duplicates_skipped: counters.duplicates_skipped.load(Ordering::Relaxed),
         };
         if let Err(err) = meta_tx.send(MetadataEvent::RunSummary(summary)) {
             warn!("metadata channel closed while sending run summary: {err}");
@@ -810,10 +831,12 @@ impl<'a> PipelineRunner<'a> {
             scan_time_ms: counters.scan_time_ms.load(Ordering::Relaxed),
             carve_time_ms: counters.carve_time_ms.load(Ordering::Relaxed),
             overlap_skipped: counters.overlap_skipped.load(Ordering::Relaxed),
+            duplicates_found: counters.duplicates_found.load(Ordering::Relaxed),
+            duplicates_skipped: counters.duplicates_skipped.load(Ordering::Relaxed),
         };
 
         info!(
-            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={} overlap_skipped={}",
+            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={} overlap_skipped={} duplicates_found={} duplicates_skipped={}",
             stats.bytes_scanned,
             stats.chunks_processed,
             stats.hits_found,
@@ -825,6 +848,8 @@ impl<'a> PipelineRunner<'a> {
             stats.scan_time_ms,
             stats.carve_time_ms,
             stats.overlap_skipped,
+            stats.duplicates_found,
+            stats.duplicates_skipped,
         );
 
         if (outcome.cancelled

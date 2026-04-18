@@ -21,6 +21,8 @@ pub struct RunSummary {
     pub files_prevalidation_rejected: u64,
     pub string_spans: u64,
     pub artefacts_extracted: u64,
+    pub duplicates_found: u64,
+    pub duplicates_skipped: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -85,6 +87,8 @@ pub enum MetadataError {
 ///     files_prevalidation_rejected: 0,
 ///     string_spans: 0,
 ///     artefacts_extracted: 0,
+///     duplicates_found: 0,
+///     duplicates_skipped: 0,
 /// };
 /// sink.record_run_summary(&summary).unwrap();
 /// sink.flush().unwrap();

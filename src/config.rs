@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use tracing::warn;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FileTypeConfig {
@@ -87,6 +88,12 @@ pub struct Config {
     pub ewf_cache_segments: usize,
     #[serde(default = "default_ewf_reader_handles")]
     pub ewf_reader_handles: usize,
+    #[serde(default = "default_hash_algorithms")]
+    pub hash_algorithms: Vec<String>,
+    #[serde(default)]
+    pub enable_deduplication: bool,
+    #[serde(default)]
+    pub skip_duplicate_files: bool,
     pub file_types: Vec<FileTypeConfig>,
 }
 
@@ -197,6 +204,10 @@ fn default_ewf_reader_handles() -> usize {
     0
 }
 
+fn default_hash_algorithms() -> Vec<String> {
+    vec!["md5".to_string(), "sha256".to_string()]
+}
+
 fn default_true() -> bool {
     true
 }
@@ -264,6 +275,38 @@ impl Config {
         }
         if let Some(threshold) = cli.entropy_threshold {
             self.entropy_threshold = threshold;
+        }
+
+        // Hash algorithms
+        if let Some(ref algos) = cli.hash_algorithms {
+            self.hash_algorithms = algos.clone();
+        }
+
+        // Deduplication
+        if cli.dedupe {
+            self.enable_deduplication = true;
+        }
+        if cli.skip_duplicates {
+            self.skip_duplicate_files = true;
+        }
+
+        // Deduplication requires sha256 hashing
+        if self.enable_deduplication
+            && !self
+                .hash_algorithms
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case("sha256"))
+        {
+            warn!("deduplication requires sha256; adding sha256 to hash_algorithms");
+            self.hash_algorithms.push("sha256".to_string());
+        }
+
+        // Validate skip_duplicate_files requires deduplication
+        if self.skip_duplicate_files && !self.enable_deduplication {
+            warn!(
+                "skip_duplicate_files requires enable_deduplication; ignoring skip_duplicate_files"
+            );
+            self.skip_duplicate_files = false;
         }
     }
 }

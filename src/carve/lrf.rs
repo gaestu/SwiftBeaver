@@ -4,12 +4,11 @@
 //! from the short 4-byte magic `LRF\0`. Fields checked: version, root
 //! object ID, number of objects, object index offset, and declared size.
 
-use sha2::{Digest, Sha256};
 use tracing::debug;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, output_path,
-    write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, create_hashers,
+    finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -165,16 +164,15 @@ impl CarveHandler for LrfCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let (written, eof_truncated) = write_range(
             ctx,
             hit.global_offset,
             total_end,
             &full_path,
-            &mut md5,
-            &mut sha256,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
 
         if written < self.min_size {
@@ -182,8 +180,7 @@ impl CarveHandler for LrfCarveHandler {
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
@@ -202,12 +199,14 @@ impl CarveHandler for LrfCarveHandler {
             global_start: hit.global_offset,
             global_end,
             size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
+            md5: md5_hex,
+            sha256: sha256_hex,
             validated,
             truncated: eof_truncated,
             errors: Vec::new(),
             pattern_id: Some(hit.pattern_id.clone()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         }))
     }
 }
@@ -293,6 +292,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler
@@ -320,6 +320,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -345,6 +346,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -370,6 +372,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -395,6 +398,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -420,6 +424,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -445,6 +450,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -471,6 +477,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -496,6 +503,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -521,6 +529,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(
             handler
@@ -547,6 +556,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         // 0xFFFF version = 65535 > MAX_VERSION → rejected
         assert!(
@@ -572,6 +582,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         assert!(handler.process_hit(&hit_at(0), &ctx).is_err());
     }

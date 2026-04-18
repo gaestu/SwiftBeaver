@@ -1,7 +1,8 @@
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, create_hashers,
+    finalize_hashers, output_path,
 };
 use crate::scanner::NormalizedHit;
 
@@ -71,8 +72,7 @@ impl CarveHandler for FooterCarveHandler {
             ctx.deferred_buffer_bytes,
             ctx.metadata_only,
         );
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut offset = hit.global_offset;
         let mut bytes_written = 0u64;
@@ -127,8 +127,12 @@ impl CarveHandler for FooterCarveHandler {
                 if write_len > 0 {
                     let slice = &buf[..write_len];
                     writer.write_all(slice)?;
-                    md5.consume(slice);
-                    sha256.update(slice);
+                    if let Some(ref mut m) = md5 {
+                        m.consume(slice);
+                    }
+                    if let Some(ref mut s) = sha256 {
+                        s.update(slice);
+                    }
                     bytes_written = bytes_written.saturating_add(slice.len() as u64);
                 }
                 validated = true;
@@ -136,8 +140,12 @@ impl CarveHandler for FooterCarveHandler {
             }
 
             writer.write_all(&buf)?;
-            md5.consume(&buf);
-            sha256.update(&buf);
+            if let Some(ref mut m) = md5 {
+                m.consume(&buf);
+            }
+            if let Some(ref mut s) = sha256 {
+                s.update(&buf);
+            }
             bytes_written = bytes_written.saturating_add(buf.len() as u64);
             offset = offset.saturating_add(buf.len() as u64);
 
@@ -160,8 +168,7 @@ impl CarveHandler for FooterCarveHandler {
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if bytes_written == 0 {
             hit.global_offset
         } else {
@@ -176,12 +183,14 @@ impl CarveHandler for FooterCarveHandler {
             global_start: hit.global_offset,
             global_end,
             size: bytes_written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
+            md5: md5_hex,
+            sha256: sha256_hex,
             validated,
             truncated,
             errors,
             pattern_id: Some(hit.pattern_id.clone()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         }))
     }
 }
@@ -266,6 +275,7 @@ mod tests {
             chunk_data: None,
             chunk_start: 0,
             metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let handler = FooterCarveHandler::new(
