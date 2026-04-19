@@ -3,8 +3,8 @@
 //! We scan for the byte-aligned end marker as a best-effort heuristic.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, create_hashers,
-    finalize_hashers, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -66,7 +66,7 @@ impl CarveHandler for Bzip2CarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let header = read_exact_at(ctx, hit.global_offset, 4)
             .ok_or_else(|| CarveError::Invalid("bzip2 header too short".to_string()))?;
         if header[0..3] != BZIP2_MAGIC {
@@ -128,7 +128,6 @@ impl CarveHandler for Bzip2CarveHandler {
             let bytes_searched = offset.saturating_sub(hit.global_offset);
             if bytes_searched > BZIP2_SEARCH_LIMIT && !validated {
                 // Searched too far without finding footer - likely false positive
-                let _ = std::fs::remove_file(&full_path);
                 return Ok(None);
             }
 
@@ -146,7 +145,7 @@ impl CarveHandler for Bzip2CarveHandler {
             errors.push("max_size reached before bzip2 end".to_string());
         }
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             end_offset,
@@ -162,7 +161,7 @@ impl CarveHandler for Bzip2CarveHandler {
         }
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -173,23 +172,26 @@ impl CarveHandler for Bzip2CarveHandler {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -275,7 +277,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, data.len() as u64);
     }
@@ -352,7 +354,10 @@ mod tests {
 
         // Should accept because footer found within limit
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("should carve file with footer within limit");
+        let carved = carved
+            .expect("should carve file with footer within limit")
+            .flush()
+            .expect("flush");
         assert!(carved.validated);
     }
 }

@@ -1,8 +1,8 @@
 use sha2::Digest;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, create_hashers,
-    finalize_hashers, output_path,
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PendingCarve,
+    create_hashers, finalize_hashers, output_path,
 };
 use crate::scanner::NormalizedHit;
 
@@ -60,7 +60,7 @@ impl CarveHandler for FooterCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let (full_path, rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
@@ -161,10 +161,8 @@ impl CarveHandler for FooterCarveHandler {
             }
         }
 
-        writer.flush_to_disk()?;
-
         if bytes_written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -175,23 +173,26 @@ impl CarveHandler for FooterCarveHandler {
             hit.global_offset + bytes_written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: bytes_written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: bytes_written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -298,7 +299,9 @@ mod tests {
         let carved = handler
             .process_hit(&hit, &ctx)
             .expect("process")
-            .expect("carved");
+            .expect("carved")
+            .flush()
+            .expect("flush");
 
         assert!(carved.validated);
         assert_eq!(

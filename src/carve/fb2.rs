@@ -6,8 +6,8 @@
 use sha2::Digest;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PreValidation,
-    create_hashers, finalize_hashers, output_path,
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PendingCarve,
+    PreValidation, create_hashers, finalize_hashers, output_path,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -79,7 +79,7 @@ impl CarveHandler for Fb2CarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         // Early validation: check for FictionBook marker in first 4KB BEFORE creating file
         let preview = read_prefix(ctx, hit.global_offset, MAX_TAG_SEARCH_BYTES);
         if preview.is_empty() {
@@ -193,10 +193,8 @@ impl CarveHandler for Fb2CarveHandler {
             }
         }
 
-        writer.flush_to_disk()?;
-
         if bytes_written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -207,23 +205,26 @@ impl CarveHandler for Fb2CarveHandler {
             hit.global_offset + bytes_written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: bytes_written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: bytes_written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -303,7 +304,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, data.len() as u64);
     }

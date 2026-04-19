@@ -8,8 +8,8 @@ use flate2::read::DeflateDecoder;
 use sha2::Digest;
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PreValidation,
-    create_hashers, finalize_hashers, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PendingCarve,
+    PreValidation, create_hashers, finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -85,7 +85,7 @@ impl CarveHandler for ZipCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let Some(_local_header) = read_local_header(ctx, hit.global_offset)? else {
             return Ok(None);
         };
@@ -114,7 +114,7 @@ impl CarveHandler for ZipCarveHandler {
                 }
             }
 
-            let (mut full_path, mut rel_path) = output_path(
+            let (full_path, mut rel_path) = output_path(
                 ctx.output_root,
                 self.file_type(),
                 &self.extension,
@@ -122,7 +122,7 @@ impl CarveHandler for ZipCarveHandler {
             )?;
             let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
-            let (written, eof_truncated) = write_range(
+            let (written, eof_truncated, mut writer) = write_range(
                 ctx,
                 hit.global_offset,
                 total_end,
@@ -136,8 +136,10 @@ impl CarveHandler for ZipCarveHandler {
                 errors.push("eof before EOCD end".to_string());
             }
 
+            writer.flush_to_disk()?;
+
             if bytes_written < self.min_size {
-                let _ = std::fs::remove_file(&full_path);
+                writer.discard();
                 return Ok(None);
             }
 
@@ -173,35 +175,38 @@ impl CarveHandler for ZipCarveHandler {
                         .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
                     && std::fs::rename(&full_path, &new_path).is_ok()
                 {
+                    writer.update_path(new_path);
                     rel_path = new_rel;
-                    full_path = new_path;
                 }
             }
 
             if let Some(allowed) = &self.allowed_kinds
                 && !allowed.contains(&file_type)
             {
-                let _ = std::fs::remove_file(&full_path);
+                writer.discard();
                 return Ok(None);
             }
 
-            return Ok(Some(CarvedFile {
-                run_id: ctx.run_id.to_string(),
-                file_type,
-                path: rel_path,
-                extension,
-                global_start: hit.global_offset,
-                global_end,
-                size: bytes_written,
-                md5: md5_hex,
-                sha256: sha256_hex,
-                validated,
-                truncated,
-                errors,
-                pattern_id: Some(hit.pattern_id.clone()),
-                is_duplicate: false,
-                duplicate_of_offset: None,
-            }));
+            return Ok(Some(PendingCarve::new(
+                CarvedFile {
+                    run_id: ctx.run_id.to_string(),
+                    file_type,
+                    path: rel_path,
+                    extension,
+                    global_start: hit.global_offset,
+                    global_end,
+                    size: bytes_written,
+                    md5: md5_hex,
+                    sha256: sha256_hex,
+                    validated,
+                    truncated,
+                    errors,
+                    pattern_id: Some(hit.pattern_id.clone()),
+                    is_duplicate: false,
+                    duplicate_of_offset: None,
+                },
+                writer,
+            )));
         } else {
             output_path(
                 ctx.output_root,
@@ -349,7 +354,7 @@ impl CarveHandler for ZipCarveHandler {
         writer.flush_to_disk()?;
 
         if bytes_written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -385,27 +390,31 @@ impl CarveHandler for ZipCarveHandler {
                     .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
                 && std::fs::rename(&full_path, &new_path).is_ok()
             {
+                writer.update_path(new_path);
                 rel_path = new_rel;
             }
         }
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type,
-            path: rel_path,
-            extension,
-            global_start: hit.global_offset,
-            global_end,
-            size: bytes_written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type,
+                path: rel_path,
+                extension,
+                global_start: hit.global_offset,
+                global_end,
+                size: bytes_written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -1292,7 +1301,7 @@ mod tests {
             Some(vec!["docx".to_string()]),
         );
         let result = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = result.expect("carved");
+        let carved = result.expect("carved").flush().expect("flush");
         assert_eq!(carved.file_type, "docx");
         assert!(dir.path().join("docx").exists());
 
@@ -1407,7 +1416,7 @@ mod tests {
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = result.expect("carved");
+        let carved = result.expect("carved").flush().expect("flush");
         assert!(!carved.validated);
         assert!(
             carved
@@ -1448,7 +1457,7 @@ mod tests {
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = result.expect("carved");
+        let carved = result.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert!(carved.errors.is_empty());
     }

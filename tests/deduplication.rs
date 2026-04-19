@@ -134,3 +134,90 @@ fn carved_file_dedup_fields_set() {
     assert!(file.is_duplicate);
     assert_eq!(file.duplicate_of_offset, Some(0));
 }
+
+/// Verify that PendingCarve::discard() does not create a file on disk
+/// when the DeferredWriter has not overflowed its buffer (zero-write dedup).
+#[test]
+fn pending_carve_discard_skips_disk_io_for_small_files() {
+    use std::sync::Arc;
+    use swiftbeaver::carve::gif::GifCarveHandler;
+    use swiftbeaver::carve::{CarveHandler, ExtractionContext};
+    use swiftbeaver::evidence::RawFileSource;
+    use swiftbeaver::scanner::NormalizedHit;
+
+    // Build a small valid GIF (well under 64 KB deferred buffer)
+    let gif_data = {
+        let mut v = Vec::new();
+        // GIF89a header
+        v.extend_from_slice(b"GIF89a");
+        // Logical screen descriptor: 1x1, no GCT
+        v.extend_from_slice(&[0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
+        // Trailer
+        v.push(0x3B);
+        v
+    };
+
+    let evidence_dir = tempfile::tempdir().expect("tmpdir");
+    let evidence_path = evidence_dir.path().join("dup.raw");
+    // Write the same GIF twice at offsets 0 and 512
+    let mut raw = vec![0u8; 1024];
+    raw[..gif_data.len()].copy_from_slice(&gif_data);
+    raw[512..512 + gif_data.len()].copy_from_slice(&gif_data);
+    std::fs::write(&evidence_path, &raw).expect("write evidence");
+
+    let evidence = RawFileSource::open(&evidence_path).expect("open evidence");
+    let output_dir = tempfile::tempdir().expect("tmpdir");
+    let handler = GifCarveHandler::new("gif".to_string(), 6, 1024 * 1024);
+
+    // Carve the first copy at offset 0
+    let ctx = ExtractionContext::new("test_dedup", output_dir.path(), &evidence, 64 * 1024);
+    let hit1 = NormalizedHit {
+        global_offset: 0,
+        file_type_id: "gif".to_string(),
+        pattern_id: "gif89a".to_string(),
+        chunk_data: Some(Arc::new(raw.clone())),
+        chunk_start: 0,
+    };
+    let pending1 = handler
+        .process_hit(&hit1, &ctx)
+        .expect("process_hit 1")
+        .expect("should carve");
+    let file1 = pending1.flush().expect("flush first copy");
+    let first_path = output_dir.path().join(&file1.path);
+    assert!(
+        first_path.exists(),
+        "first file should be on disk after flush"
+    );
+
+    // Carve the second (duplicate) copy at offset 512
+    let hit2 = NormalizedHit {
+        global_offset: 512,
+        file_type_id: "gif".to_string(),
+        pattern_id: "gif89a".to_string(),
+        chunk_data: Some(Arc::new(raw.clone())),
+        chunk_start: 0,
+    };
+    let pending2 = handler
+        .process_hit(&hit2, &ctx)
+        .expect("process_hit 2")
+        .expect("should carve");
+
+    // Verify the second file does NOT exist on disk before discard
+    // (it's still in the DeferredWriter buffer because it's < 64 KB)
+    let second_path = output_dir.path().join(&pending2.file.path);
+    assert!(
+        !second_path.exists(),
+        "second file should NOT be on disk before flush (deferred)"
+    );
+
+    // Discard the duplicate — zero disk I/O
+    let file2 = pending2.discard();
+    assert!(
+        !second_path.exists(),
+        "second file should NOT exist after discard"
+    );
+
+    // Verify both files have the same hash (they're duplicates)
+    assert_eq!(file1.sha256, file2.sha256);
+    assert!(file2.sha256.is_some(), "sha256 must be computed");
+}

@@ -1,6 +1,6 @@
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
-    output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -81,7 +81,7 @@ impl CarveHandler for SqliteCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let (full_path, rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
@@ -221,9 +221,9 @@ impl CarveHandler for SqliteCarveHandler {
             }
         }
 
-        let (size, md5_hex, sha256_hex) = stream.finish()?;
+        let (size, md5_hex, sha256_hex, mut writer) = stream.finalize()?;
         if size < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -240,23 +240,26 @@ impl CarveHandler for SqliteCarveHandler {
             hit.global_offset + size - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -393,6 +396,7 @@ mod tests {
         handler
             .process_hit(&hit, &ctx)
             .expect("process_hit should not error")
+            .map(|p| p.flush().expect("flush"))
     }
 
     #[test]

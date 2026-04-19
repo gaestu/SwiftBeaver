@@ -1,8 +1,8 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, create_hashers,
-    finalize_hashers, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -85,7 +85,7 @@ impl CarveHandler for TiffCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let mut errors = Vec::new();
         let estimate = match estimate_tiff_end(ctx, hit.global_offset, &mut errors) {
             Ok(estimate) => estimate,
@@ -112,7 +112,7 @@ impl CarveHandler for TiffCarveHandler {
             errors.push("max_size reached before TIFF end".to_string());
         }
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             total_end,
@@ -126,7 +126,7 @@ impl CarveHandler for TiffCarveHandler {
         }
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -137,23 +137,26 @@ impl CarveHandler for TiffCarveHandler {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated: !truncated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !truncated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -576,7 +579,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, tiff.len() as u64);
     }
@@ -777,7 +780,10 @@ mod tests {
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("carve");
-        let carved = result.expect("should still produce a file (capped)");
+        let carved = result
+            .expect("should still produce a file (capped)")
+            .flush()
+            .expect("flush");
 
         // 100x100 × 3 bytes/pixel = 30000 raw
         // plausibility_cap = max(30000 × 10, 65536) = 300000

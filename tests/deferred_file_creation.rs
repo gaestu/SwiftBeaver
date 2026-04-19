@@ -113,7 +113,8 @@ fn carve_with_buffer(
     };
 
     let result = handler.process_hit(&hit, &ctx).expect("process_hit");
-    result.map(|carved| {
+    result.map(|pending| {
+        let carved = pending.flush().expect("flush");
         let full_path = output_dir.path().join(&carved.path);
         let content = std::fs::read(&full_path).expect("read carved file");
         (content, carved)

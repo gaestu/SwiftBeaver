@@ -5,8 +5,8 @@
 //! transition detection to avoid oversized output from forensic disk images.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, create_hashers, finalize_hashers,
-    output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, create_hashers,
+    finalize_hashers, output_path, write_range,
 };
 use crate::scanner::NormalizedHit;
 
@@ -164,7 +164,7 @@ impl CarveHandler for EmlCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let head = read_prefix(ctx, hit.global_offset, 2048);
         if head.is_empty() {
             return Ok(None);
@@ -313,7 +313,7 @@ impl CarveHandler for EmlCarveHandler {
         )?;
         let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             end_offset,
@@ -323,7 +323,7 @@ impl CarveHandler for EmlCarveHandler {
         )?;
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -334,23 +334,26 @@ impl CarveHandler for EmlCarveHandler {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated: !eof_truncated,
-            truncated: eof_truncated,
-            errors: Vec::new(),
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !eof_truncated,
+                truncated: eof_truncated,
+                errors: Vec::new(),
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -437,7 +440,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert_eq!(carved.size, data.len() as u64);
     }
 
@@ -539,7 +542,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
-        let carved = carved.expect("should be carved");
+        let carved = carved.expect("should be carved").flush().expect("flush");
         // Should stop near binary transition, not include all binary data
         assert!(
             carved.size < data.len() as u64,
@@ -583,7 +586,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
-        let carved = carved.expect("should be carved");
+        let carved = carved.expect("should be carved").flush().expect("flush");
         assert!(
             carved.size < data.len() as u64,
             "MIME boundary should trim trailing data"
@@ -631,7 +634,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
-        let carved = carved.expect("should be carved");
+        let carved = carved.expect("should be carved").flush().expect("flush");
         let carved_path = dir.path().join(&carved.path);
         let content = std::fs::read(&carved_path).expect("read");
         let content_str = String::from_utf8_lossy(&content);
@@ -666,7 +669,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
-        let carved = carved.expect("should be carved");
+        let carved = carved.expect("should be carved").flush().expect("flush");
         let carved_path = dir.path().join(&carved.path);
         let content = std::fs::read(&carved_path).expect("read");
         let content_str = String::from_utf8_lossy(&content);
@@ -711,7 +714,10 @@ mod tests {
         };
 
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
-        let carved = carved.expect("should carve the email portion");
+        let carved = carved
+            .expect("should carve the email portion")
+            .flush()
+            .expect("flush");
         assert!(
             carved.size < 5000,
             "should stop near email content, not at max_size: {} bytes",

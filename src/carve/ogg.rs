@@ -5,8 +5,8 @@
 //! consistency until an end-of-stream flag is observed.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
-    output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -206,7 +206,7 @@ impl CarveHandler for OggCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let (full_path, rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
@@ -321,10 +321,10 @@ impl CarveHandler for OggCarveHandler {
             }
         }
 
-        let (size, md5_hex, sha256_hex) = stream.finish()?;
+        let (size, md5_hex, sha256_hex, mut writer) = stream.finalize()?;
 
         if size < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -341,23 +341,26 @@ impl CarveHandler for OggCarveHandler {
             hit.global_offset + size - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -510,7 +513,10 @@ mod tests {
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("should carve valid vorbis stream");
+        let carved = carved
+            .expect("should carve valid vorbis stream")
+            .flush()
+            .expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, data.len() as u64);
     }
@@ -544,7 +550,10 @@ mod tests {
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("should carve opus stream");
+        let carved = carved
+            .expect("should carve opus stream")
+            .flush()
+            .expect("flush");
         assert!(carved.validated);
     }
 

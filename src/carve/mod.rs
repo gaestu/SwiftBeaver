@@ -102,6 +102,34 @@ pub struct CarvedFile {
     pub duplicate_of_offset: Option<u64>,
 }
 
+/// A carved file whose data has been hashed but not yet materialized on disk.
+/// The carve worker decides whether to flush (non-duplicate) or discard (duplicate).
+pub struct PendingCarve {
+    pub file: CarvedFile,
+    writer: DeferredWriter,
+}
+
+impl PendingCarve {
+    pub(crate) fn new(file: CarvedFile, writer: DeferredWriter) -> Self {
+        Self { file, writer }
+    }
+
+    /// Materialize the file on disk. Call for non-duplicate files.
+    pub fn flush(mut self) -> Result<CarvedFile, CarveError> {
+        if let Err(e) = self.writer.flush_to_disk() {
+            self.writer.discard();
+            return Err(e);
+        }
+        Ok(self.file)
+    }
+
+    /// Discard without writing (or remove if already materialized). Call for duplicates.
+    pub fn discard(mut self) -> CarvedFile {
+        self.writer.discard();
+        self.file
+    }
+}
+
 pub struct ExtractionContext<'a> {
     pub run_id: &'a str,
     pub output_root: &'a Path,
@@ -191,7 +219,7 @@ pub trait CarveHandler: Send + Sync {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError>;
+    ) -> Result<Option<PendingCarve>, CarveError>;
 }
 
 pub struct CarveRegistry {
@@ -299,16 +327,6 @@ pub fn build_carved_file(
     }
 }
 
-/// Check if carved size meets minimum requirement, delete file if not
-pub fn check_min_size(full_path: &Path, size: u64, min_size: u64) -> bool {
-    if size < min_size {
-        let _ = std::fs::remove_file(full_path);
-        false
-    } else {
-        true
-    }
-}
-
 /// Deferred file writer that buffers initial bytes in memory before creating
 /// an output file on disk. This eliminates the create-write-delete I/O waste
 /// for candidates that fail structural validation during carving.
@@ -321,6 +339,8 @@ pub(crate) struct DeferredWriter {
     writer: Option<BufWriter<File>>,
     /// When true, all I/O operations are skipped (metadata-only mode).
     skip_io: bool,
+    /// Whether a file has been created on disk (buffer overflow or flush).
+    materialized: bool,
 }
 
 impl DeferredWriter {
@@ -331,7 +351,12 @@ impl DeferredWriter {
             buffer: Vec::new(),
             writer: None,
             skip_io,
+            materialized: false,
         }
+    }
+
+    pub(crate) fn update_path(&mut self, new_path: PathBuf) {
+        self.path = new_path;
     }
 
     pub(crate) fn write_all(&mut self, data: &[u8]) -> Result<(), CarveError> {
@@ -354,6 +379,7 @@ impl DeferredWriter {
             }
             writer.write_all(data)?;
             self.writer = Some(writer);
+            self.materialized = true;
         }
         Ok(())
     }
@@ -372,6 +398,7 @@ impl DeferredWriter {
             let mut file = File::create(&self.path)?;
             file.write_all(&self.buffer)?;
             file.flush()?;
+            self.materialized = true;
         }
         Ok(())
     }
@@ -384,9 +411,12 @@ impl DeferredWriter {
         }
         if let Some(writer) = self.writer.take() {
             drop(writer);
-            let _ = std::fs::remove_file(&self.path);
         }
         self.buffer.clear();
+        if self.materialized {
+            let _ = std::fs::remove_file(&self.path);
+            self.materialized = false;
+        }
     }
 }
 
@@ -417,7 +447,7 @@ pub(crate) struct CarveStream<'a> {
     offset: u64,
     max_size: u64,
     written: u64,
-    writer: DeferredWriter,
+    writer: Option<DeferredWriter>,
     md5: Option<md5::Context>,
     sha256: Option<Sha256>,
     reuse_buf: Vec<u8>,
@@ -446,7 +476,11 @@ impl<'a> CarveStream<'a> {
             offset,
             max_size,
             written: 0,
-            writer: DeferredWriter::new(path, ctx.deferred_buffer_bytes, ctx.metadata_only),
+            writer: Some(DeferredWriter::new(
+                path,
+                ctx.deferred_buffer_bytes,
+                ctx.metadata_only,
+            )),
             md5,
             sha256,
             reuse_buf,
@@ -486,7 +520,10 @@ impl<'a> CarveStream<'a> {
         if self.max_size > 0 && self.written.saturating_add(buf.len() as u64) > self.max_size {
             return Err(CarveError::Truncated);
         }
-        self.writer.write_all(buf)?;
+        self.writer
+            .as_mut()
+            .ok_or_else(|| CarveError::Invalid("stream already finalized".into()))?
+            .write_all(buf)?;
         if let Some(ref mut md5) = self.md5 {
             md5.consume(buf);
         }
@@ -498,16 +535,25 @@ impl<'a> CarveStream<'a> {
         Ok(())
     }
 
-    pub(crate) fn finish(mut self) -> Result<(u64, Option<String>, Option<String>), CarveError> {
-        self.writer.flush_to_disk()?;
+    /// Finalize hashes and return the unflushed writer.
+    /// The caller decides whether to flush or discard.
+    pub(crate) fn finalize(
+        mut self,
+    ) -> Result<(u64, Option<String>, Option<String>, DeferredWriter), CarveError> {
+        let writer = self
+            .writer
+            .take()
+            .ok_or_else(|| CarveError::Invalid("stream already finalized".into()))?;
         let md5 = self.md5.take().map(|ctx| format!("{:x}", ctx.compute()));
         let sha256 = self.sha256.take().map(|ctx| hex::encode(ctx.finalize()));
-        Ok((self.written, md5, sha256))
+        Ok((self.written, md5, sha256, writer))
     }
 
     /// Discard the stream without creating a file (for validation failures).
     pub(crate) fn discard(mut self) {
-        self.writer.discard();
+        if let Some(ref mut w) = self.writer {
+            w.discard();
+        }
     }
 
     /// Get the number of bytes written so far
@@ -603,7 +649,7 @@ pub(crate) fn write_range(
     path: &Path,
     mut md5: Option<&mut md5::Context>,
     mut sha256: Option<&mut Sha256>,
-) -> Result<(u64, bool), CarveError> {
+) -> Result<(u64, bool, DeferredWriter), CarveError> {
     let mut writer = DeferredWriter::new(
         path.to_path_buf(),
         ctx.deferred_buffer_bytes,
@@ -619,8 +665,7 @@ pub(crate) fn write_range(
         let read_len = remaining.min(buf_size as u64) as usize;
         let n = read_from_ctx(ctx, offset, &mut buf[..read_len])?;
         if n == 0 {
-            writer.flush_to_disk()?;
-            return Ok((bytes_written, true));
+            return Ok((bytes_written, true, writer));
         }
         writer.write_all(&buf[..n])?;
         if let Some(ref mut m) = md5 {
@@ -633,13 +678,11 @@ pub(crate) fn write_range(
         offset = offset.saturating_add(n as u64);
         remaining = remaining.saturating_sub(n as u64);
         if n < read_len {
-            writer.flush_to_disk()?;
-            return Ok((bytes_written, true));
+            return Ok((bytes_written, true, writer));
         }
     }
 
-    writer.flush_to_disk()?;
-    Ok((bytes_written, false))
+    Ok((bytes_written, false, writer))
 }
 
 #[cfg(test)]

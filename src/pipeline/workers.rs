@@ -390,30 +390,39 @@ pub fn spawn_carve_workers(
                 carve_time_ms
                     .fetch_add(carve_start.elapsed().as_millis() as u64, Ordering::Relaxed);
                 match result {
-                    Ok(Some(mut file)) => {
-                        // Upstream dedup check: detect duplicates before metadata recording
+                    Ok(Some(mut pending)) => {
+                        // Zero-write dedup: check BEFORE materializing file
+                        let mut should_discard = false;
                         if let Some(ref tracker) = dedup_tracker {
-                            if let Some(ref sha) = file.sha256 {
+                            if let Some(ref sha) = pending.file.sha256 {
                                 let dedup_result =
-                                    tracker.check_and_register(sha, file.global_start);
+                                    tracker.check_and_register(sha, pending.file.global_start);
                                 if dedup_result.is_duplicate {
-                                    file.is_duplicate = true;
-                                    file.duplicate_of_offset = dedup_result.duplicate_of_offset;
+                                    pending.file.is_duplicate = true;
+                                    pending.file.duplicate_of_offset =
+                                        dedup_result.duplicate_of_offset;
                                     duplicates_found.fetch_add(1, Ordering::Relaxed);
                                     if skip_duplicates {
-                                        let full_path = carved_root.join(&file.path);
-                                        if let Err(e) = std::fs::remove_file(&full_path) {
-                                            warn!(
-                                                "failed to remove duplicate file {}: {e}",
-                                                full_path.display()
-                                            );
-                                        } else {
-                                            duplicates_skipped.fetch_add(1, Ordering::Relaxed);
-                                        }
+                                        should_discard = true;
                                     }
                                 }
                             }
                         }
+
+                        let file = if should_discard {
+                            duplicates_skipped.fetch_add(1, Ordering::Relaxed);
+                            pending.discard()
+                        } else {
+                            match pending.flush() {
+                                Ok(f) => f,
+                                Err(err) => {
+                                    carve_limiter.release();
+                                    carve_errors.fetch_add(1, Ordering::Relaxed);
+                                    warn!("flush error at offset {}: {err}", hit.global_offset);
+                                    continue;
+                                }
+                            }
+                        };
                         overlap_tracker.record(&file.file_type, file.global_start, file.global_end);
                         carve_limiter.commit();
                         if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {

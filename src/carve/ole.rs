@@ -6,8 +6,8 @@
 //! Signature: D0 CF 11 E0 A1 B1 1A E1
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PreValidation,
-    output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -530,8 +530,8 @@ impl CarveHandler for OleCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
-        let (mut full_path, mut rel_path) = output_path(
+    ) -> Result<Option<PendingCarve>, CarveError> {
+        let (full_path, mut rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
             &self.extension,
@@ -608,11 +608,11 @@ impl CarveHandler for OleCarveHandler {
             }
         }
 
-        let (size, md5_hex, sha256_hex) = stream.finish()?;
+        let (size, md5_hex, sha256_hex, mut writer) = stream.finalize()?;
 
         // Check minimum size
         if size < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -622,23 +622,26 @@ impl CarveHandler for OleCarveHandler {
         if let Some(kind) = classified_kind {
             file_type = kind.to_string();
             extension = kind.to_string();
-            if file_type != self.file_type()
-                && let Ok((new_path, new_rel)) =
+            if file_type != self.file_type() {
+                // Flush to disk before rename so the file exists
+                writer.flush_to_disk()?;
+                if let Ok((new_path, new_rel)) =
                     output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
-                && new_path
-                    .parent()
-                    .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
-                && std::fs::rename(&full_path, &new_path).is_ok()
-            {
-                full_path = new_path;
-                rel_path = new_rel;
+                    && new_path
+                        .parent()
+                        .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
+                    && std::fs::rename(&full_path, &new_path).is_ok()
+                {
+                    writer.update_path(new_path);
+                    rel_path = new_rel;
+                }
             }
         }
 
         if let Some(allowed) = &self.allowed_kinds
             && !allowed.contains(&file_type)
         {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -656,23 +659,26 @@ impl CarveHandler for OleCarveHandler {
             hit.global_offset + size - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type,
-            path: rel_path,
-            extension,
-            global_start: hit.global_offset,
-            global_end,
-            size,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type,
+                path: rel_path,
+                extension,
+                global_start: hit.global_offset,
+                global_end,
+                size,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -815,7 +821,7 @@ mod tests {
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = result.expect("carved file");
+        let carved = result.expect("carved file").flush().expect("flush");
 
         assert_eq!(carved.file_type, "ole");
         assert!(carved.validated);

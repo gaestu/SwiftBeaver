@@ -44,7 +44,7 @@ impl carve::CarveHandler for DryRunCarveHandler {
         &self,
         _hit: &NormalizedHit,
         _ctx: &carve::ExtractionContext,
-    ) -> Result<Option<carve::CarvedFile>, carve::CarveError> {
+    ) -> Result<Option<carve::PendingCarve>, carve::CarveError> {
         Ok(None)
     }
 }

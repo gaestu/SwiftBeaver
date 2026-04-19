@@ -1,6 +1,6 @@
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, create_hashers,
-    finalize_hashers, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -92,7 +92,7 @@ impl CarveHandler for SqliteWalCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let header_bytes = match read_exact_at(ctx, hit.global_offset, WAL_HEADER_LEN as usize)? {
             Some(bytes) => bytes,
             None => return Ok(None),
@@ -130,7 +130,7 @@ impl CarveHandler for SqliteWalCarveHandler {
             ));
         }
         let end = hit.global_offset.saturating_add(walked.size);
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             end,
@@ -146,7 +146,7 @@ impl CarveHandler for SqliteWalCarveHandler {
         }
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -158,23 +158,26 @@ impl CarveHandler for SqliteWalCarveHandler {
         let validated = walked.frames > 0 && !truncated && walked.checksum_mismatches == 0;
         let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 

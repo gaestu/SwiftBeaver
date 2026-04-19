@@ -3,8 +3,8 @@
 //! Uses header table offsets to estimate file size.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PreValidation, create_hashers,
-    finalize_hashers, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -67,7 +67,7 @@ impl CarveHandler for ElfCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let header = read_exact_at(ctx, hit.global_offset, 64)
             .ok_or_else(|| CarveError::Invalid("elf header too short".to_string()))?;
         if header[0..4] != ELF_MAGIC {
@@ -127,7 +127,7 @@ impl CarveHandler for ElfCarveHandler {
         )?;
         let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             total_end,
@@ -137,7 +137,7 @@ impl CarveHandler for ElfCarveHandler {
         )?;
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -148,23 +148,26 @@ impl CarveHandler for ElfCarveHandler {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated: !eof_truncated,
-            truncated: eof_truncated,
-            errors: Vec::new(),
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !eof_truncated,
+                truncated: eof_truncated,
+                errors: Vec::new(),
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -276,7 +279,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert_eq!(carved.size, data.len() as u64);
     }
 }

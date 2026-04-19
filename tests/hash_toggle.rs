@@ -47,7 +47,10 @@ fn carve_gif_with_config(hash_config: HashConfig) -> Option<swiftbeaver::carve::
         chunk_start: 0,
     };
 
-    handler.process_hit(&hit, &ctx).expect("process_hit")
+    handler
+        .process_hit(&hit, &ctx)
+        .expect("process_hit")
+        .map(|p| p.flush().expect("flush"))
 }
 
 #[test]
@@ -147,7 +150,10 @@ fn carve_bmp_with_config(hash_config: HashConfig) -> Option<swiftbeaver::carve::
         chunk_start: 0,
     };
 
-    handler.process_hit(&hit, &ctx).expect("process_hit")
+    handler
+        .process_hit(&hit, &ctx)
+        .expect("process_hit")
+        .map(|p| p.flush().expect("flush"))
 }
 
 #[test]

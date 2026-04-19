@@ -3,8 +3,8 @@
 //! Uses PDB record offsets to estimate file size; best-effort heuristic.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, create_hashers, finalize_hashers,
-    output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, create_hashers,
+    finalize_hashers, output_path, write_range,
 };
 use crate::scanner::NormalizedHit;
 
@@ -41,7 +41,7 @@ impl CarveHandler for MobiCarveHandler {
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let start_offset = if hit.pattern_id == "mobi_pdb" {
             if hit.global_offset < MOBI_OFFSET {
                 return Ok(None);
@@ -111,7 +111,7 @@ impl CarveHandler for MobiCarveHandler {
         )?;
         let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             start_offset,
             total_end,
@@ -121,7 +121,7 @@ impl CarveHandler for MobiCarveHandler {
         )?;
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -132,23 +132,26 @@ impl CarveHandler for MobiCarveHandler {
             start_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: start_offset,
-            global_end,
-            size: written,
-            md5: md5_hex,
-            sha256: sha256_hex,
-            validated: !eof_truncated,
-            truncated: eof_truncated,
-            errors: Vec::new(),
-            pattern_id: Some(hit.pattern_id.clone()),
-            is_duplicate: false,
-            duplicate_of_offset: None,
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: start_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !eof_truncated,
+                truncated: eof_truncated,
+                errors: Vec::new(),
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -225,7 +228,7 @@ mod tests {
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert_eq!(carved.size, data.len() as u64);
     }
 }
