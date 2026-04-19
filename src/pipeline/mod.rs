@@ -126,7 +126,8 @@ pub fn run_pipeline(
     string_scanner: Option<Arc<dyn StringScanner>>,
     meta_sink: Box<dyn MetadataSink>,
     run_output_dir: &Path,
-    workers: usize,
+    scan_workers: usize,
+    carve_workers: usize,
     chunk_size: u64,
     overlap: u64,
     max_bytes: Option<u64>,
@@ -140,7 +141,8 @@ pub fn run_pipeline(
         string_scanner,
         meta_sink,
         run_output_dir,
-        workers,
+        scan_workers,
+        carve_workers,
         chunk_size,
         overlap,
         max_bytes,
@@ -162,7 +164,8 @@ pub fn run_pipeline_with_cancel(
     string_scanner: Option<Arc<dyn StringScanner>>,
     meta_sink: Box<dyn MetadataSink>,
     run_output_dir: &Path,
-    workers: usize,
+    scan_workers: usize,
+    carve_workers: usize,
     chunk_size: u64,
     overlap: u64,
     max_bytes: Option<u64>,
@@ -180,7 +183,8 @@ pub fn run_pipeline_with_cancel(
         string_scanner,
         meta_sink,
         run_output_dir,
-        workers,
+        scan_workers,
+        carve_workers,
         chunk_size,
         overlap,
         max_bytes,
@@ -275,7 +279,8 @@ struct PipelineRunner<'a> {
     string_scanner: Option<Arc<dyn StringScanner>>,
     meta_sink: Option<Box<dyn MetadataSink>>,
     run_output_dir: PathBuf,
-    workers: usize,
+    scan_workers: usize,
+    carve_workers: usize,
     chunk_size: u64,
     overlap: u64,
     max_bytes: Option<u64>,
@@ -296,7 +301,8 @@ impl<'a> PipelineRunner<'a> {
         string_scanner: Option<Arc<dyn StringScanner>>,
         meta_sink: Box<dyn MetadataSink>,
         run_output_dir: &Path,
-        workers: usize,
+        scan_workers: usize,
+        carve_workers: usize,
         chunk_size: u64,
         overlap: u64,
         max_bytes: Option<u64>,
@@ -314,7 +320,8 @@ impl<'a> PipelineRunner<'a> {
             string_scanner,
             meta_sink: Some(meta_sink),
             run_output_dir: run_output_dir.to_path_buf(),
-            workers,
+            scan_workers,
+            carve_workers,
             chunk_size,
             overlap,
             max_bytes,
@@ -428,25 +435,30 @@ impl<'a> PipelineRunner<'a> {
     }
 
     fn setup_channels(&self, string_enabled: bool) -> PipelineChannels {
-        let channel_cap = self
-            .workers
+        let scan_cap = self
+            .scan_workers
             .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
             .max(MIN_CHANNEL_CAPACITY);
-        let (scan_tx, scan_rx) = bounded::<ScanJob>(channel_cap);
+        let carve_cap = self
+            .carve_workers
+            .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
+            .max(MIN_CHANNEL_CAPACITY);
+        let (scan_tx, scan_rx) = bounded::<ScanJob>(scan_cap);
         let (fast_hit_tx, fast_hit_rx) = bounded(
-            channel_cap
+            carve_cap
                 .saturating_mul(FAST_HIT_CHANNEL_MULTIPLIER)
                 .max(MIN_CHANNEL_CAPACITY),
         );
         let (slow_hit_tx, slow_hit_rx) = bounded(
-            channel_cap
+            carve_cap
                 .saturating_mul(SLOW_HIT_CHANNEL_MULTIPLIER)
                 .max(MIN_CHANNEL_CAPACITY),
         );
-        let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 16);
+        let meta_cap = scan_cap.max(carve_cap);
+        let (meta_tx, meta_rx) = bounded::<MetadataEvent>(meta_cap * 16);
 
         let (string_tx, string_rx) = if string_enabled {
-            let (tx, rx) = bounded::<StringJob>(channel_cap);
+            let (tx, rx) = bounded::<StringJob>(scan_cap);
             (Some(tx), Some(rx))
         } else {
             (None, None)
@@ -495,14 +507,14 @@ impl<'a> PipelineRunner<'a> {
             warn!("fast_carve_worker_ratio={raw_ratio} is outside [0.0, 1.0], clamping");
         }
         let ratio = raw_ratio.clamp(0.0, 1.0);
-        let (fast_count, slow_count) = if self.workers < 2 || ratio == 0.0 {
+        let (fast_count, slow_count) = if self.carve_workers < 2 || ratio == 0.0 {
             // Single-worker mode or ratio=0: all hits go through the slow pool.
             // Scan workers send all hits to slow channel (split_enabled=false).
-            (0usize, self.workers.max(1))
+            (0usize, self.carve_workers.max(1))
         } else {
-            let fc = (self.workers as f64 * ratio).round() as usize;
-            let fc = fc.max(1).min(self.workers - 1);
-            let sc = self.workers - fc;
+            let fc = (self.carve_workers as f64 * ratio).round() as usize;
+            let fc = fc.max(1).min(self.carve_workers - 1);
+            let sc = self.carve_workers - fc;
             (fc, sc)
         };
 
@@ -515,7 +527,7 @@ impl<'a> PipelineRunner<'a> {
         );
 
         let scan_handles = workers::spawn_scan_workers(
-            self.workers,
+            self.scan_workers,
             self.sig_scanner.clone(),
             self.string_scanner.clone(),
             channels.scan_rx.clone(),
@@ -593,7 +605,7 @@ impl<'a> PipelineRunner<'a> {
                 phones: self.cfg.enable_phone_scan,
             };
             workers::spawn_string_workers(
-                self.workers,
+                self.scan_workers,
                 self.cfg.run_id.clone(),
                 rx.clone(),
                 channels.meta_tx.clone(),
@@ -657,7 +669,7 @@ impl<'a> PipelineRunner<'a> {
         }
 
         // Prefetch channel: reader thread → scan loop
-        let prefetch_cap = self.workers.max(2);
+        let prefetch_cap = self.scan_workers.max(2);
         let (prefetch_tx, prefetch_rx) = bounded::<(ScanChunk, Arc<Vec<u8>>)>(prefetch_cap);
 
         // Clone what the reader thread needs
@@ -979,7 +991,8 @@ fn run_pipeline_inner(
     string_scanner: Option<Arc<dyn StringScanner>>,
     meta_sink: Box<dyn MetadataSink>,
     run_output_dir: &Path,
-    workers: usize,
+    scan_workers: usize,
+    carve_workers: usize,
     chunk_size: u64,
     overlap: u64,
     max_bytes: Option<u64>,
@@ -997,7 +1010,8 @@ fn run_pipeline_inner(
         string_scanner,
         meta_sink,
         run_output_dir,
-        workers,
+        scan_workers,
+        carve_workers,
         chunk_size,
         overlap,
         max_bytes,

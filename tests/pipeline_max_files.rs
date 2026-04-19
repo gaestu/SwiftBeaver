@@ -66,6 +66,7 @@ fn run_pipeline(
         meta_sink,
         &run_output_dir,
         workers,
+        workers,
         64 * 1024,
         256,
         None,

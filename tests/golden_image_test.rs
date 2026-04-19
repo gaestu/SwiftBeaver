@@ -144,6 +144,8 @@ fn cli_opts_for_input(path: PathBuf) -> CliOptions {
         dedupe: false,
         skip_duplicates: false,
         write_workers: None,
+        scan_workers: None,
+        carve_workers: None,
     }
 }
 
@@ -235,6 +237,7 @@ fn golden_carves_from_raw() {
         None,
         meta_sink,
         &run_output_dir,
+        2,
         2,
         64 * 1024,
         4096,
@@ -362,6 +365,7 @@ fn golden_carves_from_e01_with_strings() {
         string_scanner,
         meta_sink,
         &run_output_dir,
+        2,
         2,
         64 * 1024,
         4096,

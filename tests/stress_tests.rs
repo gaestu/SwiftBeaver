@@ -69,6 +69,7 @@ fn run_pipeline(
         meta_sink,
         &run_output_dir,
         workers,
+        workers,
         chunk_size,
         overlap,
         None,

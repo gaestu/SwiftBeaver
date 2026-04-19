@@ -141,6 +141,7 @@ pub fn run_carver_for_types(types: &[&str]) -> CarveResult {
         meta_sink,
         &run_output_dir,
         2,
+        2,
         64 * 1024,
         4096,
         None,

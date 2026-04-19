@@ -99,6 +99,12 @@ pub struct Config {
     pub fast_carve_worker_ratio: f64,
     #[serde(default = "default_write_workers")]
     pub write_workers: usize,
+    /// Override for scan worker count (None = use CLI workers value)
+    #[serde(default)]
+    pub scan_workers: Option<usize>,
+    /// Override for carve worker count (None = use CLI workers value)
+    #[serde(default)]
+    pub carve_workers: Option<usize>,
     #[serde(default)]
     pub carver_limits: HashMap<String, CarverLimits>,
     pub file_types: Vec<FileTypeConfig>,
@@ -337,6 +343,28 @@ impl Config {
         if self.write_workers == 0 {
             warn!("write_workers must be >= 1; using 1");
             self.write_workers = 1;
+        }
+
+        // Scan workers
+        if let Some(sw) = cli.scan_workers {
+            self.scan_workers = Some(sw);
+        }
+        if let Some(ref mut sw) = self.scan_workers
+            && *sw == 0
+        {
+            warn!("scan_workers must be >= 1; using 1");
+            *sw = 1;
+        }
+
+        // Carve workers
+        if let Some(cw) = cli.carve_workers {
+            self.carve_workers = Some(cw);
+        }
+        if let Some(ref mut cw) = self.carve_workers
+            && *cw == 0
+        {
+            warn!("carve_workers must be >= 1; using 1");
+            *cw = 1;
         }
     }
 }

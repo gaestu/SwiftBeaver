@@ -58,6 +58,7 @@ fn run_pipeline_with_bytes(bytes: Vec<u8>) -> Vec<Value> {
         meta_sink,
         &run_output_dir,
         1,
+        1,
         64,
         8,
         None,

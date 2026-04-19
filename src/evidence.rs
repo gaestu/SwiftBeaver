@@ -933,6 +933,8 @@ mod tests {
             skip_duplicates: false,
             metadata_only: false,
             write_workers: None,
+            scan_workers: None,
+            carve_workers: None,
         };
 
         let result = super::open_source(&opts, 1);

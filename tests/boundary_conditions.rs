@@ -71,6 +71,7 @@ fn run_pipeline_with_bytes(
         meta_sink,
         &run_output_dir,
         1,
+        1,
         chunk_size,
         overlap,
         None,

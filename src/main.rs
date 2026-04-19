@@ -90,12 +90,16 @@ fn main() -> Result<()> {
     let tool_version = env!("CARGO_PKG_VERSION");
     let evidence_path = cli_opts.input.clone();
 
+    let scan_workers = cfg.scan_workers.unwrap_or(cli_opts.workers);
+    let carve_workers = cfg.carve_workers.unwrap_or(cli_opts.workers);
+
     info!(
-        "starting run_id={} input={} output={} workers={} chunk_mib={}",
+        "starting run_id={} input={} output={} scan_workers={} carve_workers={} chunk_mib={}",
         cfg.run_id,
         cli_opts.input.display(),
         run_output_dir.display(),
-        cli_opts.workers,
+        scan_workers,
+        carve_workers,
         cli_opts.chunk_size_mib
     );
 
@@ -206,7 +210,8 @@ fn main() -> Result<()> {
         string_scanner,
         meta_sink,
         &run_output_dir,
-        cli_opts.workers,
+        scan_workers,
+        carve_workers,
         chunk_size,
         overlap,
         cli_opts.max_bytes,

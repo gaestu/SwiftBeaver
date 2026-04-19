@@ -38,6 +38,14 @@ pub struct CliOptions {
     #[arg(long, default_value_t = num_cpus::get())]
     pub workers: usize,
 
+    /// Number of scan worker threads (defaults to --workers)
+    #[arg(long)]
+    pub scan_workers: Option<usize>,
+
+    /// Number of carve worker threads (defaults to --workers)
+    #[arg(long)]
+    pub carve_workers: Option<usize>,
+
     /// Chunk size, in MiB
     #[arg(long, default_value_t = crate::constants::DEFAULT_CHUNK_SIZE_MIB)]
     pub chunk_size_mib: u64,

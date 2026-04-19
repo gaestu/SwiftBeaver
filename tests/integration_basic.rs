@@ -276,7 +276,7 @@ fn integration_carves_basic_formats() {
         MetadataBackendKind::Jsonl,
         &cfg,
         &cfg.run_id,
-        "0.1.0",
+        env!("CARGO_PKG_VERSION"),
         &loaded.config_hash,
         &input_path,
         "",
@@ -296,6 +296,7 @@ fn integration_carves_basic_formats() {
         None,
         meta_sink,
         &run_output_dir,
+        2,
         2,
         64 * 1024,
         64,
@@ -398,6 +399,7 @@ fn pipeline_reports_timing_metrics() {
         meta_sink,
         &run_output_dir,
         2,
+        2,
         64 * 1024,
         64,
         None,
@@ -465,6 +467,7 @@ fn metadata_only_mode_records_metadata_without_writing_files() {
         None,
         meta_sink,
         &run_output_dir,
+        2,
         2,
         64 * 1024,
         64,
@@ -538,4 +541,75 @@ fn metadata_only_mode_records_metadata_without_writing_files() {
             "metadata record should have evidence_path"
         );
     }
+}
+
+/// Verify that the pipeline produces correct output when carve_workers != scan_workers
+/// (asymmetric worker configuration from issue #48).
+#[test]
+fn asymmetric_worker_counts_produce_correct_output() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let input_path = temp_dir.path().join("input.bin");
+
+    let mut data = vec![0u8; 4096];
+
+    // Embed a JPEG
+    let jpeg = sample_jpeg();
+    insert_bytes(&mut data, 0, &jpeg);
+
+    // Embed a PNG after the JPEG
+    let png = sample_png();
+    insert_bytes(&mut data, 512, &png);
+
+    fs::write(&input_path, &data).expect("write input");
+
+    let loaded = config::load_config(None).expect("config");
+    let mut cfg = loaded.config.clone();
+    cfg.run_id = "test_asymmetric_workers".to_string();
+
+    let evidence = RawFileSource::open(&input_path).expect("evidence");
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
+
+    let run_output_dir = temp_dir.path().join("run");
+    fs::create_dir_all(&run_output_dir).expect("output dir");
+
+    let meta_sink = metadata::build_sink(
+        MetadataBackendKind::Jsonl,
+        &cfg,
+        &cfg.run_id,
+        "0.1.0",
+        &loaded.config_hash,
+        &input_path,
+        "",
+        &run_output_dir,
+    )
+    .expect("metadata sink");
+
+    let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
+
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg, false).expect("registry"));
+
+    // Asymmetric: 1 scan worker, 4 carve workers
+    let stats = pipeline::run_pipeline(
+        &cfg,
+        evidence,
+        sig_scanner,
+        None,
+        meta_sink,
+        &run_output_dir,
+        1, // scan_workers
+        4, // carve_workers (more than scan)
+        64 * 1024,
+        64,
+        None,
+        None,
+        carve_registry,
+    )
+    .expect("pipeline with asymmetric workers");
+
+    assert!(
+        stats.hits_found >= 2,
+        "expected at least 2 hits, got {}",
+        stats.hits_found
+    );
 }

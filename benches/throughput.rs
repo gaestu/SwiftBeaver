@@ -57,6 +57,7 @@ fn run_pipeline(input_path: &std::path::Path, max_files: Option<u64>) -> pipelin
         meta_sink,
         &run_output_dir,
         2,
+        2,
         4 * 1024 * 1024,
         64 * 1024,
         None,

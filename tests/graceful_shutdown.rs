@@ -51,6 +51,7 @@ fn cancel_flag_stops_pipeline_early() {
         meta_sink,
         &run_output_dir,
         1,
+        1,
         64,
         0,
         None,
