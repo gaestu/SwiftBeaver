@@ -216,9 +216,9 @@ for mult in $MULTIPLIERS; do
         ELAPSED_NS=$((END_TS - START_TS))
         ELAPSED_S=$(echo "$ELAPSED_NS" | awk '{printf "%.2f", $1 / 1000000000}')
 
-        # Extract stats from log
-        HITS=$(extract_metric "$RUN_LOG" 'hits=\K[0-9]+')
-        FILES=$(extract_metric "$RUN_LOG" 'files=\K[0-9]+')
+        # Extract final run_summary stats from log
+        HITS=$(extract_metric "$RUN_LOG" 'hits_found=\K[0-9]+')
+        FILES=$(extract_metric "$RUN_LOG" 'files_carved=\K[0-9]+')
 
         # Compute throughput
         THROUGHPUT="0.00"
