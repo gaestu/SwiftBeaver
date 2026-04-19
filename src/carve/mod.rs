@@ -690,9 +690,6 @@ pub(crate) fn write_range(
         bytes_written = bytes_written.saturating_add(n as u64);
         offset = offset.saturating_add(n as u64);
         remaining = remaining.saturating_sub(n as u64);
-        if n < read_len {
-            return Ok((bytes_written, true, writer));
-        }
     }
 
     Ok((bytes_written, false, writer))
