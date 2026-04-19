@@ -293,11 +293,13 @@ MONITOR_PIDS+=($!)
     --chunk-size-mib 64 \
     --scan-strings \
     --scan-entropy \
+    --dedupe \
+    --skip-duplicates \
     --progress-interval-secs 30 \
     2>&1 | tee "$OUT_DIR/swiftbeaver_log.txt" &
+SB_PIPE_PID=$!
 # Symlink latest run for convenience
 ln -sfn "benchmarks/$RUN_ID" "$IMAGE_DIR/latest_benchmark"
-SB_PIPE_PID=$!
 
 # Wait a moment for swiftbeaver to start, then find its actual PID
 sleep 1
@@ -321,16 +323,20 @@ SB_SECS=$((SB_ELAPSED % 60))
 cleanup_monitors
 MONITOR_PIDS=()
 
+# Disable strict error mode for post-processing — these are non-critical
+# reporting steps and should not abort the script.
+set +e
+
 echo "    Finished: $(date)" | tee -a "$SUMMARY"
 echo "    Wall time: ${SB_MINS}m ${SB_SECS}s ($SB_ELAPSED seconds)" | tee -a "$SUMMARY"
 
 # ============================================================
 # Collect output stats
 # ============================================================
-SB_SIZE=$(du -sh "$SB_OUT" | cut -f1)
-SB_FILES=$(find "$SB_OUT" -type f | wc -l)
-echo "    Output size: $SB_SIZE" | tee -a "$SUMMARY"
-echo "    Output files: $SB_FILES" | tee -a "$SUMMARY"
+SB_SIZE=$(du -sh "$SB_OUT" 2>/dev/null | cut -f1)
+SB_FILES=$(find "$SB_OUT" -type f 2>/dev/null | wc -l)
+echo "    Output size: ${SB_SIZE:-unknown}" | tee -a "$SUMMARY"
+echo "    Output files: ${SB_FILES:-0}" | tee -a "$SUMMARY"
 
 # Per-type carved file counts
 echo "" | tee -a "$SUMMARY"
@@ -338,14 +344,18 @@ echo "    SwiftBeaver carved files by type:" | tee -a "$SUMMARY"
 for d in "$SB_OUT"/*/; do
     [ -d "$d" ] || continue
     name=$(basename "$d")
-    count=$(find "$d" -type f | wc -l)
-    size=$(du -sh "$d" | cut -f1)
-    echo "      $name: $count files ($size)" | tee -a "$SUMMARY"
+    count=$(find "$d" -type f 2>/dev/null | wc -l)
+    size=$(du -sh "$d" 2>/dev/null | cut -f1)
+    echo "      $name: ${count:-0} files (${size:-?})" | tee -a "$SUMMARY"
 done
 
 # Disk size info
 echo "" | tee -a "$SUMMARY"
-DISK_SIZE=$(ewfinfo "$IMAGE" 2>/dev/null | grep "Media size" || echo "unknown")
+if command -v ewfinfo &>/dev/null; then
+    DISK_SIZE=$(ewfinfo "$IMAGE" 2>/dev/null | grep "Media size" || echo "unknown")
+else
+    DISK_SIZE="unknown (ewfinfo not found)"
+fi
 echo "    Evidence disk size: $DISK_SIZE" | tee -a "$SUMMARY"
 
 # ============================================================

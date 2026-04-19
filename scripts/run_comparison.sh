@@ -154,6 +154,8 @@ if $RUN_SB; then
         --chunk-size-mib 64 \
         --scan-strings \
         --scan-entropy \
+        --dedupe \
+        --skip-duplicates \
         --progress-interval-secs 60 \
         2>&1 | tee "$OUT_DIR/sb_log.txt"
 
