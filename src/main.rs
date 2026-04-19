@@ -118,7 +118,14 @@ fn main() -> Result<()> {
     info!("EWF reader handles: {ewf_reader_handles}");
 
     let evidence_source = evidence::open_source(&cli_opts, ewf_reader_handles)?;
-    let evidence_source = evidence::wrap_with_cache(evidence_source, cfg.ewf_cache_segments);
+    let evidence_source = if evidence::is_ewf_path(&cli_opts.input) {
+        // Keep the in-process segment cache scoped to EWF inputs. Raw and
+        // device reads already benefit from the OS page cache, while EWF reads
+        // pay decompression overhead that this cache can avoid on repeated hits.
+        evidence::wrap_with_cache(evidence_source, cfg.ewf_cache_segments)
+    } else {
+        evidence_source
+    };
     let evidence_source: Arc<dyn evidence::EvidenceSource> = Arc::from(evidence_source);
 
     if cli_opts.evidence_sha256.is_some() && cli_opts.compute_evidence_sha256 {
