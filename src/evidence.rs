@@ -928,6 +928,11 @@ mod tests {
             dry_run: false,
             validate_carved: false,
             remove_invalid: false,
+            hash_algorithms: None,
+            dedupe: false,
+            skip_duplicates: false,
+            metadata_only: false,
+            write_workers: None,
         };
 
         let result = super::open_source(&opts, 1);

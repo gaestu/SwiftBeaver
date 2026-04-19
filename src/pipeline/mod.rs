@@ -23,7 +23,7 @@ use crate::chunk::{ChunkIter, ScanChunk, chunk_count};
 use crate::config::Config;
 use crate::constants::{
     CHANNEL_CAPACITY_MULTIPLIER, FAST_HIT_CHANNEL_MULTIPLIER, METADATA_FLUSH_INTERVAL_SECS,
-    MIN_CHANNEL_CAPACITY, SLOW_HIT_CHANNEL_MULTIPLIER,
+    MIN_CHANNEL_CAPACITY, SLOW_HIT_CHANNEL_MULTIPLIER, WRITE_QUEUE_CAPACITY_MULTIPLIER,
 };
 use crate::dedup::DedupTracker;
 use crate::evidence::EvidenceSource;
@@ -204,6 +204,8 @@ struct PipelineChannels {
     meta_rx: crossbeam_channel::Receiver<MetadataEvent>,
     string_tx: Option<crossbeam_channel::Sender<StringJob>>,
     string_rx: Option<crossbeam_channel::Receiver<StringJob>>,
+    write_tx: crossbeam_channel::Sender<workers::WriteJob>,
+    write_rx: crossbeam_channel::Receiver<workers::WriteJob>,
 }
 
 struct PipelineCounters {
@@ -253,6 +255,7 @@ struct WorkerHandles {
     scan_handles: Vec<std::thread::JoinHandle<()>>,
     fast_carve_handles: Vec<std::thread::JoinHandle<()>>,
     slow_carve_handles: Vec<std::thread::JoinHandle<()>>,
+    write_handles: Vec<std::thread::JoinHandle<()>>,
     string_handles: Vec<std::thread::JoinHandle<()>>,
 }
 
@@ -449,6 +452,14 @@ impl<'a> PipelineRunner<'a> {
             (None, None)
         };
 
+        let write_cap = self
+            .cfg
+            .write_workers
+            .max(1)
+            .saturating_mul(WRITE_QUEUE_CAPACITY_MULTIPLIER)
+            .max(MIN_CHANNEL_CAPACITY);
+        let (write_tx, write_rx) = bounded::<workers::WriteJob>(write_cap);
+
         PipelineChannels {
             scan_tx,
             scan_rx,
@@ -460,6 +471,8 @@ impl<'a> PipelineRunner<'a> {
             meta_rx,
             string_tx,
             string_rx,
+            write_tx,
+            write_rx,
         }
     }
 
@@ -531,7 +544,7 @@ impl<'a> PipelineRunner<'a> {
                 self.cfg.run_id.clone(),
                 self.run_output_dir.clone(),
                 channels.fast_hit_rx.clone(),
-                channels.meta_tx.clone(),
+                channels.write_tx.clone(),
                 counters.carve_limiter.clone(),
                 counters.carve_errors.clone(),
                 counters.carve_time_ms.clone(),
@@ -543,7 +556,6 @@ impl<'a> PipelineRunner<'a> {
                 crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
                 dedup_tracker.clone(),
                 counters.duplicates_found.clone(),
-                counters.duplicates_skipped.clone(),
                 self.cfg.skip_duplicate_files,
                 None, // fast workers: no per-type semaphores
             )
@@ -558,7 +570,7 @@ impl<'a> PipelineRunner<'a> {
             self.cfg.run_id.clone(),
             self.run_output_dir.clone(),
             channels.slow_hit_rx.clone(),
-            channels.meta_tx.clone(),
+            channels.write_tx.clone(),
             counters.carve_limiter.clone(),
             counters.carve_errors.clone(),
             counters.carve_time_ms.clone(),
@@ -570,7 +582,6 @@ impl<'a> PipelineRunner<'a> {
             crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
             dedup_tracker,
             counters.duplicates_found.clone(),
-            counters.duplicates_skipped.clone(),
             self.cfg.skip_duplicate_files,
             Some(type_semaphores),
         );
@@ -593,11 +604,20 @@ impl<'a> PipelineRunner<'a> {
             Vec::new()
         };
 
+        let write_handles = workers::spawn_write_workers(
+            self.cfg.write_workers,
+            channels.write_rx.clone(),
+            channels.meta_tx.clone(),
+            counters.carve_errors.clone(),
+            counters.duplicates_skipped.clone(),
+        );
+
         WorkerHandles {
             meta_handle,
             scan_handles,
             fast_carve_handles,
             slow_carve_handles,
+            write_handles,
             string_handles,
         }
     }
@@ -798,6 +818,7 @@ impl<'a> PipelineRunner<'a> {
             fast_hit_tx,
             slow_hit_tx,
             string_tx,
+            write_tx,
             meta_tx,
             ..
         } = channels;
@@ -814,6 +835,11 @@ impl<'a> PipelineRunner<'a> {
             let _ = handle.join();
         }
         for handle in handles.slow_carve_handles {
+            let _ = handle.join();
+        }
+        // Drop write channel after carve workers finish (they're the senders)
+        drop(write_tx);
+        for handle in handles.write_handles {
             let _ = handle.join();
         }
         for handle in handles.string_handles {

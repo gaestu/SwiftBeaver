@@ -42,3 +42,12 @@ pub const FAST_HIT_CHANNEL_MULTIPLIER: usize = 16;
 /// Hit channel capacity multiplier for the **slow** carve queue.
 /// Smaller to bound memory from large pending carves.
 pub const SLOW_HIT_CHANNEL_MULTIPLIER: usize = 4;
+
+/// Default number of dedicated I/O writer worker threads.
+/// SSDs can typically saturate with fewer threads than CPU cores.
+pub const DEFAULT_WRITE_WORKERS: usize = 4;
+
+/// Write queue capacity multiplier (per writer worker).
+/// Each pending write buffers up to `deferred_buffer_kb` of file data,
+/// so the total memory bound is roughly `write_workers * multiplier * deferred_buffer_kb`.
+pub const WRITE_QUEUE_CAPACITY_MULTIPLIER: usize = 64;

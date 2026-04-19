@@ -102,6 +102,7 @@ CLI overrides:
 - `--hash-algorithms md5,sha256`: select hash algorithms to compute (comma-separated; default: md5,sha256)
 - `--dedupe`: enable deduplication tracking (records duplicates in metadata)
 - `--skip-duplicates`: skip writing duplicate files to disk (still records metadata; requires `--dedupe`)
+- `--write-workers N`: number of dedicated I/O writer threads for flushing carved files to disk (default: 4)
 
 QuickTime handling is configurable in `config/default.yml` with `quicktime_mode`:
 - `mov` (default) keeps QuickTime output under `mov`

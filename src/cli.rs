@@ -181,6 +181,10 @@ pub struct CliOptions {
     /// Skip writing duplicate files to disk (still records metadata; requires --dedupe)
     #[arg(long, requires = "dedupe")]
     pub skip_duplicates: bool,
+
+    /// Number of dedicated I/O writer threads for flushing carved files to disk
+    #[arg(long)]
+    pub write_workers: Option<usize>,
 }
 
 pub fn parse() -> CliOptions {

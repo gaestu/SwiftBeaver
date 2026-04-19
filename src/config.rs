@@ -97,6 +97,8 @@ pub struct Config {
     pub skip_duplicate_files: bool,
     #[serde(default = "default_fast_carve_worker_ratio")]
     pub fast_carve_worker_ratio: f64,
+    #[serde(default = "default_write_workers")]
+    pub write_workers: usize,
     #[serde(default)]
     pub carver_limits: HashMap<String, CarverLimits>,
     pub file_types: Vec<FileTypeConfig>,
@@ -227,6 +229,10 @@ fn default_fast_carve_worker_ratio() -> f64 {
     crate::constants::DEFAULT_FAST_WORKER_RATIO
 }
 
+fn default_write_workers() -> usize {
+    crate::constants::DEFAULT_WRITE_WORKERS
+}
+
 impl Config {
     /// Merge CLI options into the config.
     /// CLI flags override config file values.
@@ -322,6 +328,15 @@ impl Config {
                 "skip_duplicate_files requires enable_deduplication; ignoring skip_duplicate_files"
             );
             self.skip_duplicate_files = false;
+        }
+
+        // Write workers
+        if let Some(ww) = cli.write_workers {
+            self.write_workers = ww;
+        }
+        if self.write_workers == 0 {
+            warn!("write_workers must be >= 1; using 1");
+            self.write_workers = 1;
         }
     }
 }

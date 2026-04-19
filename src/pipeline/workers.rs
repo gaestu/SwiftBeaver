@@ -40,6 +40,15 @@ pub struct StringJob {
     pub spans: Vec<StringSpan>,
 }
 
+/// A validated carve result ready for I/O-bound disk writing.
+/// Sent from validate (carve) workers to dedicated writer workers.
+pub struct WriteJob {
+    pub pending: crate::carve::PendingCarve,
+    pub hit_global_offset: u64,
+    pub should_discard: bool,
+    pub carve_limiter: Arc<CarveLimiter>,
+}
+
 /// Spawn the metadata recording thread
 pub fn spawn_metadata_thread(
     sink: Box<dyn MetadataSink>,
@@ -346,10 +355,10 @@ impl Drop for SemaphoreGuard<'_> {
 pub fn build_type_semaphores(limits: &HashMap<String, CarverLimits>) -> TypeSemaphores {
     let mut map = HashMap::new();
     for (type_id, lim) in limits {
-        if let Some(max) = lim.max_concurrent {
-            if max > 0 {
-                map.insert(type_id.clone(), Arc::new(CountingSemaphore::new(max)));
-            }
+        if let Some(max) = lim.max_concurrent
+            && max > 0
+        {
+            map.insert(type_id.clone(), Arc::new(CountingSemaphore::new(max)));
         }
     }
     Arc::new(map)
@@ -364,7 +373,7 @@ pub fn spawn_carve_workers(
     run_id: String,
     run_output_dir: PathBuf,
     rx: Receiver<NormalizedHit>,
-    meta_tx: Sender<MetadataEvent>,
+    write_tx: Sender<WriteJob>,
     carve_limiter: Arc<CarveLimiter>,
     carve_errors: Arc<AtomicU64>,
     carve_time_ms: Arc<AtomicU64>,
@@ -376,7 +385,6 @@ pub fn spawn_carve_workers(
     hash_config: crate::hash::HashConfig,
     dedup_tracker: Option<Arc<DedupTracker>>,
     duplicates_found: Arc<AtomicU64>,
-    duplicates_skipped: Arc<AtomicU64>,
     skip_duplicates: bool,
     type_semaphores: Option<TypeSemaphores>,
 ) -> Vec<thread::JoinHandle<()>> {
@@ -389,7 +397,7 @@ pub fn spawn_carve_workers(
         let run_id = run_id.clone();
         let run_output_dir = run_output_dir.clone();
         let rx = rx.clone();
-        let meta_tx = meta_tx.clone();
+        let write_tx = write_tx.clone();
         let carve_limiter = carve_limiter.clone();
         let carve_errors = carve_errors.clone();
         let carve_time_ms = carve_time_ms.clone();
@@ -399,7 +407,6 @@ pub fn spawn_carve_workers(
         let hash_config = hash_config.clone();
         let dedup_tracker = dedup_tracker.clone();
         let duplicates_found = duplicates_found.clone();
-        let duplicates_skipped = duplicates_skipped.clone();
         let type_semaphores = type_semaphores.clone();
 
         handles.push(thread::spawn(move || {
@@ -463,7 +470,8 @@ pub fn spawn_carve_workers(
                     }
                 }
 
-                // Acquire per-type semaphore if configured (Phase B: concurrency limit)
+                // Per-type semaphore limits concurrent process_hit() calls only;
+                // disk I/O is handled by the writer pool and is not type-limited.
                 let _type_permit = type_semaphores.as_ref().and_then(
                     |sems: &Arc<HashMap<String, Arc<CountingSemaphore>>>| {
                         sems.get(hit.file_type_id.as_str()).map(|sem| sem.acquire())
@@ -478,40 +486,48 @@ pub fn spawn_carve_workers(
                     Ok(Some(mut pending)) => {
                         // Zero-write dedup: check BEFORE materializing file
                         let mut should_discard = false;
-                        if let Some(ref tracker) = dedup_tracker {
-                            if let Some(ref sha) = pending.file.sha256 {
-                                let dedup_result =
-                                    tracker.check_and_register(sha, pending.file.global_start);
-                                if dedup_result.is_duplicate {
-                                    pending.file.is_duplicate = true;
-                                    pending.file.duplicate_of_offset =
-                                        dedup_result.duplicate_of_offset;
-                                    duplicates_found.fetch_add(1, Ordering::Relaxed);
-                                    if skip_duplicates {
-                                        should_discard = true;
-                                    }
+                        if let Some(ref tracker) = dedup_tracker
+                            && let Some(ref sha) = pending.file.sha256
+                        {
+                            let dedup_result =
+                                tracker.check_and_register(sha, pending.file.global_start);
+                            if dedup_result.is_duplicate {
+                                pending.file.is_duplicate = true;
+                                pending.file.duplicate_of_offset = dedup_result.duplicate_of_offset;
+                                duplicates_found.fetch_add(1, Ordering::Relaxed);
+                                if skip_duplicates {
+                                    should_discard = true;
                                 }
                             }
                         }
 
-                        let file = if should_discard {
-                            duplicates_skipped.fetch_add(1, Ordering::Relaxed);
-                            pending.discard()
-                        } else {
-                            match pending.flush() {
-                                Ok(f) => f,
-                                Err(err) => {
-                                    carve_limiter.release();
-                                    carve_errors.fetch_add(1, Ordering::Relaxed);
-                                    warn!("flush error at offset {}: {err}", hit.global_offset);
-                                    continue;
-                                }
-                            }
+                        // Record overlap before sending to writer to prevent re-carving the same
+                        // range while the write is in-flight. Trade-off: if flush() later fails,
+                        // this range remains "blocked" for this worker.
+                        overlap_tracker.record(
+                            &pending.file.file_type,
+                            pending.file.global_start,
+                            pending.file.global_end,
+                        );
+
+                        let write_job = WriteJob {
+                            pending,
+                            hit_global_offset: hit.global_offset,
+                            should_discard,
+                            carve_limiter: carve_limiter.clone(),
                         };
-                        overlap_tracker.record(&file.file_type, file.global_start, file.global_end);
-                        carve_limiter.commit();
-                        if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {
-                            warn!("metadata channel closed while sending carved file: {err}");
+                        // Drop per-type permit before send to avoid holding it
+                        // during potential backpressure on the write channel.
+                        drop(_type_permit);
+                        if let Err(err) = write_tx.send(write_job) {
+                            // Channel closed — release reservation and stop
+                            err.into_inner().carve_limiter.release();
+                            carve_errors.fetch_add(1, Ordering::Relaxed);
+                            warn!(
+                                "write channel closed while sending job at offset {}",
+                                hit.global_offset
+                            );
+                            break;
                         }
                     }
                     Ok(None) => {
@@ -523,6 +539,54 @@ pub fn spawn_carve_workers(
                         carve_errors.fetch_add(1, Ordering::Relaxed);
                         warn!("carve error at offset {}: {err}", hit.global_offset);
                     }
+                }
+            }
+        }));
+    }
+
+    handles
+}
+
+/// Spawn dedicated I/O writer worker threads that flush/discard validated
+/// carve results and emit metadata events.
+pub fn spawn_write_workers(
+    workers: usize,
+    rx: Receiver<WriteJob>,
+    meta_tx: Sender<MetadataEvent>,
+    carve_errors: Arc<AtomicU64>,
+    duplicates_skipped: Arc<AtomicU64>,
+) -> Vec<thread::JoinHandle<()>> {
+    let mut handles = Vec::new();
+    let worker_count = workers.max(1);
+
+    for _ in 0..worker_count {
+        let rx = rx.clone();
+        let meta_tx = meta_tx.clone();
+        let carve_errors = carve_errors.clone();
+        let duplicates_skipped = duplicates_skipped.clone();
+
+        handles.push(thread::spawn(move || {
+            for job in rx {
+                let file = if job.should_discard {
+                    duplicates_skipped.fetch_add(1, Ordering::Relaxed);
+                    job.carve_limiter.commit();
+                    job.pending.discard()
+                } else {
+                    match job.pending.flush() {
+                        Ok(f) => {
+                            job.carve_limiter.commit();
+                            f
+                        }
+                        Err(err) => {
+                            job.carve_limiter.release();
+                            carve_errors.fetch_add(1, Ordering::Relaxed);
+                            warn!("flush error at offset {}: {err}", job.hit_global_offset);
+                            continue;
+                        }
+                    }
+                };
+                if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {
+                    warn!("metadata channel closed while sending carved file: {err}");
                 }
             }
         }));

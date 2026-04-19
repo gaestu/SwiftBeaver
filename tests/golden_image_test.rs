@@ -143,6 +143,7 @@ fn cli_opts_for_input(path: PathBuf) -> CliOptions {
         hash_algorithms: None,
         dedupe: false,
         skip_duplicates: false,
+        write_workers: None,
     }
 }
 
