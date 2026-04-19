@@ -138,7 +138,7 @@ pub fn run_carver_for_types(types: &[&str]) -> CarveResult {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         2,
         2,

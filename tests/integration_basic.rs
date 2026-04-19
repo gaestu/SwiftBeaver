@@ -294,7 +294,7 @@ fn integration_carves_basic_formats() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         2,
         2,
@@ -396,7 +396,7 @@ fn pipeline_reports_timing_metrics() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         2,
         2,
@@ -465,7 +465,7 @@ fn metadata_only_mode_records_metadata_without_writing_files() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         2,
         2,
@@ -595,7 +595,7 @@ fn asymmetric_worker_counts_produce_correct_output() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         1, // scan_workers
         4, // carve_workers (more than scan)
@@ -611,5 +611,170 @@ fn asymmetric_worker_counts_produce_correct_output() {
         stats.hits_found >= 2,
         "expected at least 2 hits, got {}",
         stats.hits_found
+    );
+}
+
+/// Verify that sharded metadata writing (3 Parquet sinks) produces
+/// complete and correct output — all carved files appear in parquet.
+#[test]
+fn sharded_parquet_metadata_writes_all_events() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let input_path = temp_dir.path().join("input.bin");
+
+    let mut data = vec![0u8; 200_000];
+    insert_bytes(&mut data, 1024, &sample_jpeg());
+    insert_bytes(&mut data, 65_536, &sample_png());
+    insert_bytes(&mut data, 131_072, &sample_gif());
+
+    fs::write(&input_path, &data).expect("write input");
+
+    let loaded = config::load_config(None).expect("config");
+    let mut cfg = loaded.config;
+    cfg.run_id = "test_sharded_meta".to_string();
+
+    for ft in cfg.file_types.iter_mut() {
+        if ft.id == "jpeg" || ft.id == "gif" || ft.id == "png" {
+            ft.min_size = 16;
+        }
+    }
+
+    let evidence = RawFileSource::open(&input_path).expect("evidence");
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
+
+    let run_output_dir = temp_dir.path().join("run");
+    fs::create_dir_all(&run_output_dir).expect("output dir");
+
+    // Build 3 Parquet sinks for sharded metadata writing
+    let mut meta_sinks: Vec<Box<dyn swiftbeaver::metadata::MetadataSink>> = Vec::with_capacity(3);
+    for _ in 0..3 {
+        meta_sinks.push(
+            metadata::build_sink(
+                MetadataBackendKind::Parquet,
+                &cfg,
+                &cfg.run_id,
+                env!("CARGO_PKG_VERSION"),
+                &loaded.config_hash,
+                &input_path,
+                "",
+                &run_output_dir,
+            )
+            .expect("parquet sink"),
+        );
+    }
+
+    let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg, false).expect("registry"));
+
+    let stats = pipeline::run_pipeline(
+        &cfg,
+        evidence,
+        sig_scanner,
+        None,
+        meta_sinks,
+        &run_output_dir,
+        2,
+        2,
+        64 * 1024,
+        64,
+        None,
+        None,
+        carve_registry,
+    )
+    .expect("sharded pipeline");
+
+    assert!(
+        stats.files_carved >= 3,
+        "expected at least 3 carved files, got {}",
+        stats.files_carved
+    );
+
+    // Verify parquet files were created by the file shard
+    let parquet_dir = run_output_dir.join("parquet");
+    assert!(
+        parquet_dir.exists(),
+        "parquet output directory should exist"
+    );
+
+    // At least one files_*.parquet should exist (from file shard)
+    let has_file_parquet = fs::read_dir(&parquet_dir)
+        .expect("read parquet dir")
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().starts_with("files_"));
+    assert!(
+        has_file_parquet,
+        "sharded file shard should produce files_*.parquet"
+    );
+
+    // Verify run_summary.parquet was written (also handled by file shard)
+    assert!(
+        parquet_dir.join("run_summary.parquet").exists(),
+        "run_summary.parquet should exist"
+    );
+}
+
+/// Verify that invalid sink counts are rejected.
+#[test]
+fn rejects_invalid_sink_counts() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let input_path = temp_dir.path().join("input.bin");
+    fs::write(&input_path, [0u8; 1024]).expect("write input");
+
+    let loaded = config::load_config(None).expect("config");
+    let mut cfg = loaded.config;
+    cfg.run_id = "test_invalid_sinks".to_string();
+
+    let evidence = RawFileSource::open(&input_path).expect("evidence");
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
+
+    let run_output_dir = temp_dir.path().join("run");
+    fs::create_dir_all(&run_output_dir).expect("output dir");
+
+    // Build 2 sinks — should be rejected (only 1 or 3 accepted)
+    let mut meta_sinks: Vec<Box<dyn swiftbeaver::metadata::MetadataSink>> = Vec::with_capacity(2);
+    for _ in 0..2 {
+        meta_sinks.push(
+            metadata::build_sink(
+                MetadataBackendKind::Parquet,
+                &cfg,
+                &cfg.run_id,
+                env!("CARGO_PKG_VERSION"),
+                &loaded.config_hash,
+                &input_path,
+                "",
+                &run_output_dir,
+            )
+            .expect("parquet sink"),
+        );
+    }
+
+    let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg, false).expect("registry"));
+
+    let result = pipeline::run_pipeline(
+        &cfg,
+        evidence,
+        sig_scanner,
+        None,
+        meta_sinks,
+        &run_output_dir,
+        1,
+        1,
+        64 * 1024,
+        64,
+        None,
+        None,
+        carve_registry,
+    );
+
+    assert!(
+        result.is_err(),
+        "pipeline should reject 2 sinks (only 1 or 3 valid)"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("expected 1 or 3"),
+        "error should mention valid counts, got: {err}"
     );
 }

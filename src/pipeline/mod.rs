@@ -124,7 +124,7 @@ pub fn run_pipeline(
     evidence: Arc<dyn EvidenceSource>,
     sig_scanner: Arc<dyn SignatureScanner>,
     string_scanner: Option<Arc<dyn StringScanner>>,
-    meta_sink: Box<dyn MetadataSink>,
+    meta_sinks: Vec<Box<dyn MetadataSink>>,
     run_output_dir: &Path,
     scan_workers: usize,
     carve_workers: usize,
@@ -139,7 +139,7 @@ pub fn run_pipeline(
         evidence,
         sig_scanner,
         string_scanner,
-        meta_sink,
+        meta_sinks,
         run_output_dir,
         scan_workers,
         carve_workers,
@@ -162,7 +162,7 @@ pub fn run_pipeline_with_cancel(
     evidence: Arc<dyn EvidenceSource>,
     sig_scanner: Arc<dyn SignatureScanner>,
     string_scanner: Option<Arc<dyn StringScanner>>,
-    meta_sink: Box<dyn MetadataSink>,
+    meta_sinks: Vec<Box<dyn MetadataSink>>,
     run_output_dir: &Path,
     scan_workers: usize,
     carve_workers: usize,
@@ -181,7 +181,7 @@ pub fn run_pipeline_with_cancel(
         evidence,
         sig_scanner,
         string_scanner,
-        meta_sink,
+        meta_sinks,
         run_output_dir,
         scan_workers,
         carve_workers,
@@ -210,6 +210,12 @@ struct PipelineChannels {
     string_rx: Option<crossbeam_channel::Receiver<StringJob>>,
     write_tx: crossbeam_channel::Sender<workers::WriteJob>,
     write_rx: crossbeam_channel::Receiver<workers::WriteJob>,
+    file_shard_tx: crossbeam_channel::Sender<events::FileShardEvent>,
+    file_shard_rx: crossbeam_channel::Receiver<events::FileShardEvent>,
+    string_shard_tx: crossbeam_channel::Sender<events::StringShardEvent>,
+    string_shard_rx: crossbeam_channel::Receiver<events::StringShardEvent>,
+    entropy_shard_tx: crossbeam_channel::Sender<events::EntropyShardEvent>,
+    entropy_shard_rx: crossbeam_channel::Receiver<events::EntropyShardEvent>,
 }
 
 struct PipelineCounters {
@@ -256,6 +262,7 @@ impl PipelineCounters {
 
 struct WorkerHandles {
     meta_handle: std::thread::JoinHandle<()>,
+    meta_shard_handles: Vec<std::thread::JoinHandle<()>>,
     scan_handles: Vec<std::thread::JoinHandle<()>>,
     fast_carve_handles: Vec<std::thread::JoinHandle<()>>,
     slow_carve_handles: Vec<std::thread::JoinHandle<()>>,
@@ -277,7 +284,7 @@ struct PipelineRunner<'a> {
     evidence: Arc<dyn EvidenceSource>,
     sig_scanner: Arc<dyn SignatureScanner>,
     string_scanner: Option<Arc<dyn StringScanner>>,
-    meta_sink: Option<Box<dyn MetadataSink>>,
+    meta_sinks: Vec<Box<dyn MetadataSink>>,
     run_output_dir: PathBuf,
     scan_workers: usize,
     carve_workers: usize,
@@ -299,7 +306,7 @@ impl<'a> PipelineRunner<'a> {
         evidence: Arc<dyn EvidenceSource>,
         sig_scanner: Arc<dyn SignatureScanner>,
         string_scanner: Option<Arc<dyn StringScanner>>,
-        meta_sink: Box<dyn MetadataSink>,
+        meta_sinks: Vec<Box<dyn MetadataSink>>,
         run_output_dir: &Path,
         scan_workers: usize,
         carve_workers: usize,
@@ -318,7 +325,7 @@ impl<'a> PipelineRunner<'a> {
             evidence,
             sig_scanner,
             string_scanner,
-            meta_sink: Some(meta_sink),
+            meta_sinks,
             run_output_dir: run_output_dir.to_path_buf(),
             scan_workers,
             carve_workers,
@@ -347,9 +354,9 @@ impl<'a> PipelineRunner<'a> {
         let channels = self.setup_channels(self.string_scanner.is_some());
         let counters = PipelineCounters::new(self.cfg.max_files);
 
-        let meta_sink = self.meta_sink.take().expect("metadata sink already taken");
+        let meta_sinks = std::mem::take(&mut self.meta_sinks);
         let entropy_cfg = self.entropy_config();
-        let handles = self.spawn_workers(meta_sink, &channels, &counters, entropy_cfg);
+        let handles = self.spawn_workers(meta_sinks, &channels, &counters, entropy_cfg)?;
 
         let outcome = self.scan_loop(
             total_bytes,
@@ -472,6 +479,14 @@ impl<'a> PipelineRunner<'a> {
             .max(MIN_CHANNEL_CAPACITY);
         let (write_tx, write_rx) = bounded::<workers::WriteJob>(write_cap);
 
+        let shard_cap = meta_cap * 4;
+        let (file_shard_tx, file_shard_rx) = bounded::<events::FileShardEvent>(shard_cap);
+        // String shard gets larger capacity for high-volume string events
+        let string_shard_cap = shard_cap * 4;
+        let (string_shard_tx, string_shard_rx) =
+            bounded::<events::StringShardEvent>(string_shard_cap);
+        let (entropy_shard_tx, entropy_shard_rx) = bounded::<events::EntropyShardEvent>(shard_cap);
+
         PipelineChannels {
             scan_tx,
             scan_rx,
@@ -485,16 +500,22 @@ impl<'a> PipelineRunner<'a> {
             string_rx,
             write_tx,
             write_rx,
+            file_shard_tx,
+            file_shard_rx,
+            string_shard_tx,
+            string_shard_rx,
+            entropy_shard_tx,
+            entropy_shard_rx,
         }
     }
 
     fn spawn_workers(
         &self,
-        meta_sink: Box<dyn MetadataSink>,
+        meta_sinks: Vec<Box<dyn MetadataSink>>,
         channels: &PipelineChannels,
         counters: &PipelineCounters,
         entropy_cfg: Option<EntropyConfig>,
-    ) -> WorkerHandles {
+    ) -> Result<WorkerHandles> {
         let dedup_tracker = if self.cfg.enable_deduplication {
             Some(Arc::new(DedupTracker::new()))
         } else {
@@ -520,11 +541,62 @@ impl<'a> PipelineRunner<'a> {
 
         info!("carve worker split: fast={fast_count} slow={slow_count} (ratio={ratio:.2})");
 
-        let meta_handle = workers::spawn_metadata_thread(
-            meta_sink,
-            channels.meta_rx.clone(),
-            counters.metadata_errors.clone(),
+        // Spawn metadata threads: sharded (3 sinks) or single-thread (1 sink).
+        // Exactly 1 or 3 sinks are accepted; other counts are rejected.
+        let num_sinks = meta_sinks.len();
+        anyhow::ensure!(
+            num_sinks == 1 || num_sinks == 3,
+            "expected 1 or 3 metadata sinks, got {num_sinks}"
         );
+        let (meta_handle, meta_shard_handles) =
+            match <[Box<dyn MetadataSink>; 3]>::try_from(meta_sinks) {
+                Ok([file_sink, string_sink, entropy_sink]) => {
+                    // Sharded path: router + 3 shard writer threads
+                    let router_handle = workers::spawn_metadata_router(
+                        channels.meta_rx.clone(),
+                        channels.file_shard_tx.clone(),
+                        channels.string_shard_tx.clone(),
+                        channels.entropy_shard_tx.clone(),
+                        counters.metadata_errors.clone(),
+                    );
+
+                    let file_shard_handle = workers::spawn_file_shard_thread(
+                        file_sink,
+                        channels.file_shard_rx.clone(),
+                        counters.metadata_errors.clone(),
+                    );
+                    let string_shard_handle = workers::spawn_string_shard_thread(
+                        string_sink,
+                        channels.string_shard_rx.clone(),
+                        counters.metadata_errors.clone(),
+                    );
+                    let entropy_shard_handle = workers::spawn_entropy_shard_thread(
+                        entropy_sink,
+                        channels.entropy_shard_rx.clone(),
+                        counters.metadata_errors.clone(),
+                    );
+
+                    info!("metadata writer: sharded (3 shard threads + router)");
+                    (
+                        router_handle,
+                        vec![file_shard_handle, string_shard_handle, entropy_shard_handle],
+                    )
+                }
+                Err(sinks) => {
+                    // Single-thread fallback (e.g. DryRunSink, CSV, JSONL)
+                    let sink = sinks
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("metadata sink vector was empty"))?;
+                    let handle = workers::spawn_metadata_thread(
+                        sink,
+                        channels.meta_rx.clone(),
+                        counters.metadata_errors.clone(),
+                    );
+                    info!("metadata writer: single-thread");
+                    (handle, Vec::new())
+                }
+            };
 
         let scan_handles = workers::spawn_scan_workers(
             self.scan_workers,
@@ -624,14 +696,15 @@ impl<'a> PipelineRunner<'a> {
             counters.duplicates_skipped.clone(),
         );
 
-        WorkerHandles {
+        Ok(WorkerHandles {
             meta_handle,
+            meta_shard_handles,
             scan_handles,
             fast_carve_handles,
             slow_carve_handles,
             write_handles,
             string_handles,
-        }
+        })
     }
 
     fn scan_loop(
@@ -832,6 +905,9 @@ impl<'a> PipelineRunner<'a> {
             string_tx,
             write_tx,
             meta_tx,
+            file_shard_tx,
+            string_shard_tx,
+            entropy_shard_tx,
             ..
         } = channels;
 
@@ -886,7 +962,16 @@ impl<'a> PipelineRunner<'a> {
         }
 
         drop(meta_tx);
+        // Join the router (or single-thread metadata writer)
         let _ = handles.meta_handle.join();
+        // Drop shard senders so shard threads see channel closure
+        drop(file_shard_tx);
+        drop(string_shard_tx);
+        drop(entropy_shard_tx);
+        // Join shard writer threads (empty vec in single-thread mode)
+        for handle in handles.meta_shard_handles {
+            let _ = handle.join();
+        }
 
         if let Some(progress) = &self.progress {
             let snapshot = build_progress_snapshot(
@@ -989,7 +1074,7 @@ fn run_pipeline_inner(
     evidence: Arc<dyn EvidenceSource>,
     sig_scanner: Arc<dyn SignatureScanner>,
     string_scanner: Option<Arc<dyn StringScanner>>,
-    meta_sink: Box<dyn MetadataSink>,
+    meta_sinks: Vec<Box<dyn MetadataSink>>,
     run_output_dir: &Path,
     scan_workers: usize,
     carve_workers: usize,
@@ -1008,7 +1093,7 @@ fn run_pipeline_inner(
         evidence,
         sig_scanner,
         string_scanner,
-        meta_sink,
+        meta_sinks,
         run_output_dir,
         scan_workers,
         carve_workers,

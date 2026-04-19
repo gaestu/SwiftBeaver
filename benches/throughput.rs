@@ -54,7 +54,7 @@ fn run_pipeline(input_path: &std::path::Path, max_files: Option<u64>) -> pipelin
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         2,
         2,

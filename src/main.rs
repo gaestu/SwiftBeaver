@@ -137,10 +137,29 @@ fn main() -> Result<()> {
     };
 
     let meta_backend = util::backend_from_cli(cli_opts.metadata_backend);
-    let meta_sink: Box<dyn metadata::MetadataSink> = if cli_opts.dry_run {
-        metadata::build_dry_run_sink()
+    let meta_sinks: Vec<Box<dyn metadata::MetadataSink>> = if cli_opts.dry_run {
+        vec![metadata::build_dry_run_sink()]
+    } else if meta_backend.supports_sharding() {
+        // Parquet uses lazy per-category writers, so 3 independent sinks
+        // can safely write to the same output directory without conflicts.
+        let mut sinks = Vec::with_capacity(3);
+        for _ in 0..3 {
+            sinks.push(metadata::build_sink(
+                meta_backend,
+                &cfg,
+                &cfg.run_id,
+                tool_version,
+                &loaded.config_hash,
+                &evidence_path,
+                &evidence_sha256,
+                &run_output_dir,
+            )?);
+        }
+        sinks
     } else {
-        metadata::build_sink(
+        // CSV/JSONL sinks eagerly create all output files in new(), so
+        // multiple instances would truncate each other's files.
+        vec![metadata::build_sink(
             meta_backend,
             &cfg,
             &cfg.run_id,
@@ -149,7 +168,7 @@ fn main() -> Result<()> {
             &evidence_path,
             &evidence_sha256,
             &run_output_dir,
-        )?
+        )?]
     };
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, cli_opts.gpu)?;
@@ -208,7 +227,7 @@ fn main() -> Result<()> {
         evidence_source,
         sig_scanner,
         string_scanner,
-        meta_sink,
+        meta_sinks,
         &run_output_dir,
         scan_workers,
         carve_workers,

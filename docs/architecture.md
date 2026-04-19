@@ -31,14 +31,15 @@ Both backends compile kernels at scanner initialization and fall back to CPU if 
 3. **CPU signature scanner** searches for file headers within each chunk.
 4. **CPU string scanner** (optional) extracts printable spans and artefacts.
 5. **Carve workers** pre-validate hits in-memory (header/magic checks), then validate and extract files from the evidence source.
-6. **Metadata sink** writes JSONL, CSV, or Parquet records.
+6. **Metadata sink** writes JSONL, CSV, or Parquet records. Parquet uses sharded writer threads for parallelism; CSV/JSONL use a single writer thread.
 
 ## Concurrency model
 
 - Reader thread: reads chunks and feeds scan jobs.
 - Scan workers: perform signature scanning and emit normalized hits.
 - Carve workers: validate/extract files and emit metadata.
-- Metadata writer: serializes JSONL/CSV/Parquet records.
+- Metadata writer (Parquet): a router thread dispatches metadata events to 3 per-shard channels. File shard (carved files, browser data, run summary), string shard (artefacts), and entropy shard (entropy regions) each own an independent sink instance for zero write contention.
+- Metadata writer (CSV/JSONL): a single thread processes all metadata events sequentially, since these backends eagerly open all output files on initialization.
 
 ## Modules
 

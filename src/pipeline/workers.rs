@@ -24,7 +24,7 @@ use crate::strings::artifacts::ArtefactScanConfig;
 use crate::strings::{self, StringScanner, StringSpan};
 
 use super::EntropyConfig;
-use super::events::MetadataEvent;
+use super::events::{EntropyShardEvent, FileShardEvent, MetadataEvent, StringShardEvent};
 use super::limiter::CarveLimiter;
 
 /// Job containing a chunk of data to scan
@@ -112,6 +112,133 @@ pub fn spawn_metadata_thread(
         if let Err(err) = sink.flush() {
             error_count.fetch_add(1, Ordering::Relaxed);
             warn!("metadata flush error: {err}");
+        }
+    })
+}
+
+/// Spawn the metadata router thread that dispatches events to per-shard channels.
+///
+/// Reads from the single producer channel and routes each event to the
+/// appropriate shard channel. Flush events are broadcast to all shards.
+pub fn spawn_metadata_router(
+    rx: Receiver<MetadataEvent>,
+    file_tx: Sender<FileShardEvent>,
+    string_tx: Sender<StringShardEvent>,
+    entropy_tx: Sender<EntropyShardEvent>,
+    error_count: Arc<AtomicU64>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut dropped = 0u64;
+        for event in rx {
+            let ok = match event {
+                MetadataEvent::File(f) => file_tx.send(FileShardEvent::File(f)).is_ok(),
+                MetadataEvent::String(s) => string_tx.send(StringShardEvent::String(s)).is_ok(),
+                MetadataEvent::History(h) => file_tx.send(FileShardEvent::History(h)).is_ok(),
+                MetadataEvent::Cookie(c) => file_tx.send(FileShardEvent::Cookie(c)).is_ok(),
+                MetadataEvent::Download(d) => file_tx.send(FileShardEvent::Download(d)).is_ok(),
+                MetadataEvent::RunSummary(s) => file_tx.send(FileShardEvent::RunSummary(s)).is_ok(),
+                MetadataEvent::Entropy(e) => entropy_tx.send(EntropyShardEvent::Entropy(e)).is_ok(),
+                MetadataEvent::Flush => {
+                    if file_tx.send(FileShardEvent::Flush).is_err() {
+                        dropped += 1;
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if string_tx.send(StringShardEvent::Flush).is_err() {
+                        dropped += 1;
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if entropy_tx.send(EntropyShardEvent::Flush).is_err() {
+                        dropped += 1;
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    continue;
+                }
+            };
+            if !ok {
+                dropped += 1;
+                error_count.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        if dropped > 0 {
+            warn!("metadata router: {dropped} events dropped (shard channel disconnected)");
+        }
+        // Shard channels close when this function returns (senders are dropped),
+        // causing shard threads to do their final flush and exit.
+    })
+}
+
+/// Spawn a file-shard metadata writer thread.
+pub fn spawn_file_shard_thread(
+    sink: Box<dyn MetadataSink>,
+    rx: Receiver<FileShardEvent>,
+    error_count: Arc<AtomicU64>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for event in rx {
+            let result = match event {
+                FileShardEvent::File(ref file) => sink.record_file(file),
+                FileShardEvent::History(ref record) => sink.record_history(record),
+                FileShardEvent::Cookie(ref record) => sink.record_cookie(record),
+                FileShardEvent::Download(ref record) => sink.record_download(record),
+                FileShardEvent::RunSummary(ref summary) => sink.record_run_summary(summary),
+                FileShardEvent::Flush => sink.flush(),
+            };
+            if let Err(err) = result {
+                error_count.fetch_add(1, Ordering::Relaxed);
+                warn!("file shard metadata error: {err}");
+            }
+        }
+        if let Err(err) = sink.flush() {
+            error_count.fetch_add(1, Ordering::Relaxed);
+            warn!("file shard final flush error: {err}");
+        }
+    })
+}
+
+/// Spawn a string-shard metadata writer thread.
+pub fn spawn_string_shard_thread(
+    sink: Box<dyn MetadataSink>,
+    rx: Receiver<StringShardEvent>,
+    error_count: Arc<AtomicU64>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for event in rx {
+            let result = match event {
+                StringShardEvent::String(ref artefact) => sink.record_string(artefact),
+                StringShardEvent::Flush => sink.flush(),
+            };
+            if let Err(err) = result {
+                error_count.fetch_add(1, Ordering::Relaxed);
+                warn!("string shard metadata error: {err}");
+            }
+        }
+        if let Err(err) = sink.flush() {
+            error_count.fetch_add(1, Ordering::Relaxed);
+            warn!("string shard final flush error: {err}");
+        }
+    })
+}
+
+/// Spawn an entropy-shard metadata writer thread.
+pub fn spawn_entropy_shard_thread(
+    sink: Box<dyn MetadataSink>,
+    rx: Receiver<EntropyShardEvent>,
+    error_count: Arc<AtomicU64>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for event in rx {
+            let result = match event {
+                EntropyShardEvent::Entropy(ref region) => sink.record_entropy(region),
+                EntropyShardEvent::Flush => sink.flush(),
+            };
+            if let Err(err) = result {
+                error_count.fetch_add(1, Ordering::Relaxed);
+                warn!("entropy shard metadata error: {err}");
+            }
+        }
+        if let Err(err) = sink.flush() {
+            error_count.fetch_add(1, Ordering::Relaxed);
+            warn!("entropy shard final flush error: {err}");
         }
     })
 }

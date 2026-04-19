@@ -48,7 +48,7 @@ fn cancel_flag_stops_pipeline_early() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         1,
         1,

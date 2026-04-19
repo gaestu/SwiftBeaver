@@ -68,7 +68,7 @@ fn run_pipeline_with_bytes(
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         1,
         1,

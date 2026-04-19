@@ -41,6 +41,18 @@ pub enum MetadataBackendKind {
     Parquet,
 }
 
+impl MetadataBackendKind {
+    /// Whether this backend supports multiple independent sink instances
+    /// writing to the same output directory without file conflicts.
+    ///
+    /// Parquet uses lazy per-category writers so each shard only creates
+    /// the files it needs. CSV and JSONL eagerly create all output files
+    /// in `new()`, so multiple instances would truncate each other.
+    pub fn supports_sharding(self) -> bool {
+        matches!(self, MetadataBackendKind::Parquet)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum MetadataError {
     #[error("io error: {0}")]

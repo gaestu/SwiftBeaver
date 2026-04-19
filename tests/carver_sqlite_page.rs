@@ -65,7 +65,7 @@ fn run_page_carver(bytes: Vec<u8>, sqlite_page_max_hits_per_chunk: Option<usize>
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
         1,
         1,
