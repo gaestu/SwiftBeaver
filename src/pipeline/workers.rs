@@ -44,42 +44,11 @@ pub fn spawn_metadata_thread(
     sink: Box<dyn MetadataSink>,
     rx: Receiver<MetadataEvent>,
     error_count: Arc<AtomicU64>,
-    mut dedup_tracker: Option<DedupTracker>,
-    skip_duplicates: bool,
-    carved_root: Option<PathBuf>,
-    duplicates_found: Arc<AtomicU64>,
-    duplicates_skipped: Arc<AtomicU64>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         for event in rx {
             match event {
-                MetadataEvent::File(mut file) => {
-                    if let Some(ref mut tracker) = dedup_tracker {
-                        if let Some(ref sha) = file.sha256 {
-                            let result = tracker.check_and_register(sha, file.global_start);
-                            if result.is_duplicate {
-                                file.is_duplicate = true;
-                                file.duplicate_of_offset = result.duplicate_of_offset;
-                                duplicates_found.fetch_add(1, Ordering::Relaxed);
-                                if skip_duplicates {
-                                    if let Some(ref root) = carved_root {
-                                        let full_path = root.join(&file.path);
-                                        match std::fs::remove_file(&full_path) {
-                                            Ok(()) => {
-                                                duplicates_skipped.fetch_add(1, Ordering::Relaxed);
-                                            }
-                                            Err(e) => {
-                                                warn!(
-                                                    "failed to remove duplicate file {}: {e}",
-                                                    full_path.display()
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                MetadataEvent::File(file) => {
                     if let Err(err) = sink.record_file(&file) {
                         error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
@@ -329,6 +298,10 @@ pub fn spawn_carve_workers(
     metadata_only: bool,
     overlap_skipped: Arc<AtomicU64>,
     hash_config: crate::hash::HashConfig,
+    dedup_tracker: Option<Arc<DedupTracker>>,
+    duplicates_found: Arc<AtomicU64>,
+    duplicates_skipped: Arc<AtomicU64>,
+    skip_duplicates: bool,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -347,6 +320,9 @@ pub fn spawn_carve_workers(
         let files_prevalidation_rejected = files_prevalidation_rejected.clone();
         let overlap_skipped = overlap_skipped.clone();
         let hash_config = hash_config.clone();
+        let dedup_tracker = dedup_tracker.clone();
+        let duplicates_found = duplicates_found.clone();
+        let duplicates_skipped = duplicates_skipped.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -414,7 +390,30 @@ pub fn spawn_carve_workers(
                 carve_time_ms
                     .fetch_add(carve_start.elapsed().as_millis() as u64, Ordering::Relaxed);
                 match result {
-                    Ok(Some(file)) => {
+                    Ok(Some(mut file)) => {
+                        // Upstream dedup check: detect duplicates before metadata recording
+                        if let Some(ref tracker) = dedup_tracker {
+                            if let Some(ref sha) = file.sha256 {
+                                let dedup_result =
+                                    tracker.check_and_register(sha, file.global_start);
+                                if dedup_result.is_duplicate {
+                                    file.is_duplicate = true;
+                                    file.duplicate_of_offset = dedup_result.duplicate_of_offset;
+                                    duplicates_found.fetch_add(1, Ordering::Relaxed);
+                                    if skip_duplicates {
+                                        let full_path = carved_root.join(&file.path);
+                                        if let Err(e) = std::fs::remove_file(&full_path) {
+                                            warn!(
+                                                "failed to remove duplicate file {}: {e}",
+                                                full_path.display()
+                                            );
+                                        } else {
+                                            duplicates_skipped.fetch_add(1, Ordering::Relaxed);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         overlap_tracker.record(&file.file_type, file.global_start, file.global_end);
                         carve_limiter.commit();
                         if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {

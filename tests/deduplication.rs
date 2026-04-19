@@ -7,7 +7,7 @@ use swiftbeaver::dedup::{DedupResult, DedupTracker};
 
 #[test]
 fn dedup_tracker_first_insert_not_duplicate() {
-    let mut tracker = DedupTracker::new();
+    let tracker = DedupTracker::new();
     let result = tracker.check_and_register("aaaa", 0);
     assert_eq!(
         result,
@@ -20,7 +20,7 @@ fn dedup_tracker_first_insert_not_duplicate() {
 
 #[test]
 fn dedup_tracker_second_insert_is_duplicate() {
-    let mut tracker = DedupTracker::new();
+    let tracker = DedupTracker::new();
     let _ = tracker.check_and_register("aaaa", 100);
     let result = tracker.check_and_register("aaaa", 200);
     assert_eq!(
@@ -34,7 +34,7 @@ fn dedup_tracker_second_insert_is_duplicate() {
 
 #[test]
 fn dedup_tracker_different_hashes_not_duplicate() {
-    let mut tracker = DedupTracker::new();
+    let tracker = DedupTracker::new();
     let _ = tracker.check_and_register("aaaa", 100);
     let result = tracker.check_and_register("bbbb", 200);
     assert_eq!(
@@ -48,7 +48,7 @@ fn dedup_tracker_different_hashes_not_duplicate() {
 
 #[test]
 fn dedup_tracker_many_distinct_hashes() {
-    let mut tracker = DedupTracker::new();
+    let tracker = DedupTracker::new();
     for i in 0..100 {
         let hash = format!("hash_{:04}", i);
         let result = tracker.check_and_register(&hash, i * 512);
@@ -56,6 +56,35 @@ fn dedup_tracker_many_distinct_hashes() {
     }
     // Re-inserting the first hash should be duplicate
     let result = tracker.check_and_register("hash_0000", 999999);
+    assert!(result.is_duplicate);
+    assert_eq!(result.duplicate_of_offset, Some(0));
+}
+
+#[test]
+fn dedup_tracker_concurrent_access() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let tracker = Arc::new(DedupTracker::new());
+    let mut handles = Vec::new();
+
+    // Spawn threads that each insert unique hashes
+    for t in 0..4 {
+        let tracker = tracker.clone();
+        handles.push(thread::spawn(move || {
+            for i in 0..100 {
+                let hash = format!("thread{t}_hash{i}");
+                let result = tracker.check_and_register(&hash, (t * 1000 + i) as u64);
+                assert!(!result.is_duplicate, "unique hash should not be duplicate");
+            }
+        }));
+    }
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
+
+    // All 400 unique hashes should be tracked; re-inserting should be duplicate
+    let result = tracker.check_and_register("thread0_hash0", 999999);
     assert!(result.is_duplicate);
     assert_eq!(result.duplicate_of_offset, Some(0));
 }

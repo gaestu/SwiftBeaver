@@ -461,7 +461,7 @@ impl<'a> PipelineRunner<'a> {
         entropy_cfg: Option<EntropyConfig>,
     ) -> WorkerHandles {
         let dedup_tracker = if self.cfg.enable_deduplication {
-            Some(DedupTracker::new())
+            Some(Arc::new(DedupTracker::new()))
         } else {
             None
         };
@@ -470,11 +470,6 @@ impl<'a> PipelineRunner<'a> {
             meta_sink,
             channels.meta_rx.clone(),
             counters.metadata_errors.clone(),
-            dedup_tracker,
-            self.cfg.skip_duplicate_files,
-            Some(self.run_output_dir.join("carved")),
-            counters.duplicates_found.clone(),
-            counters.duplicates_skipped.clone(),
         );
 
         let scan_handles = workers::spawn_scan_workers(
@@ -510,6 +505,10 @@ impl<'a> PipelineRunner<'a> {
             self.metadata_only,
             counters.overlap_skipped.clone(),
             crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
+            dedup_tracker,
+            counters.duplicates_found.clone(),
+            counters.duplicates_skipped.clone(),
+            self.cfg.skip_duplicate_files,
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
