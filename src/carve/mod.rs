@@ -203,6 +203,14 @@ pub trait CarveHandler: Send + Sync {
     fn file_type(&self) -> &str;
     fn extension(&self) -> &str;
 
+    /// Whether this carver is "fast" (small fixed-size reads, typically < 10 MB).
+    /// Fast carvers are routed to a dedicated high-throughput worker pool so they
+    /// are not blocked behind slow, I/O-heavy carvers like SQLite or MP3.
+    /// Default: `false` (conservative — unknown carvers go to the slow pool).
+    fn is_fast(&self) -> bool {
+        false
+    }
+
     /// Quick in-memory validation of a signature hit.
     /// Default returns `Proceed` (backward compatible).
     /// Implementations should read minimal bytes from evidence
@@ -233,6 +241,11 @@ impl CarveRegistry {
 
     pub fn get(&self, file_type_id: &str) -> Option<&dyn CarveHandler> {
         self.handlers.get(file_type_id).map(|h| h.as_ref())
+    }
+
+    /// Check whether the carver for `file_type_id` is classified as fast.
+    pub fn is_fast(&self, file_type_id: &str) -> bool {
+        self.handlers.get(file_type_id).is_some_and(|h| h.is_fast())
     }
 }
 
@@ -824,5 +837,58 @@ mod tests {
         writer.write_all(b"data").expect("write");
         writer.discard();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn carve_registry_is_fast_delegates_to_handler() {
+        use super::{CarveError, CarveHandler, CarveRegistry, NormalizedHit, PendingCarve};
+
+        struct FastHandler;
+        impl CarveHandler for FastHandler {
+            fn file_type(&self) -> &str {
+                "bmp"
+            }
+            fn extension(&self) -> &str {
+                "bmp"
+            }
+            fn is_fast(&self) -> bool {
+                true
+            }
+            fn process_hit(
+                &self,
+                _: &NormalizedHit,
+                _: &super::ExtractionContext,
+            ) -> Result<Option<PendingCarve>, CarveError> {
+                Ok(None)
+            }
+        }
+
+        struct SlowHandler;
+        impl CarveHandler for SlowHandler {
+            fn file_type(&self) -> &str {
+                "sqlite"
+            }
+            fn extension(&self) -> &str {
+                "sqlite"
+            }
+            // is_fast() defaults to false
+            fn process_hit(
+                &self,
+                _: &NormalizedHit,
+                _: &super::ExtractionContext,
+            ) -> Result<Option<PendingCarve>, CarveError> {
+                Ok(None)
+            }
+        }
+
+        let mut handlers: std::collections::HashMap<String, Box<dyn CarveHandler>> =
+            std::collections::HashMap::new();
+        handlers.insert("bmp".to_string(), Box::new(FastHandler));
+        handlers.insert("sqlite".to_string(), Box::new(SlowHandler));
+
+        let registry = CarveRegistry::new(handlers);
+        assert!(registry.is_fast("bmp"));
+        assert!(!registry.is_fast("sqlite"));
+        assert!(!registry.is_fast("nonexistent"));
     }
 }

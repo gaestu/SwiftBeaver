@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 
 use crate::carve::{CarveRegistry, ExtractionContext};
 use crate::chunk::ScanChunk;
+use crate::config::CarverLimits;
 use crate::dedup::DedupTracker;
 use crate::entropy;
 use crate::evidence::EvidenceSource;
@@ -113,7 +114,10 @@ pub fn spawn_scan_workers(
     scanner: Arc<dyn SignatureScanner>,
     string_scanner: Option<Arc<dyn StringScanner>>,
     rx: Receiver<ScanJob>,
-    hit_tx: Sender<NormalizedHit>,
+    fast_hit_tx: Sender<NormalizedHit>,
+    slow_hit_tx: Sender<NormalizedHit>,
+    carve_registry: Arc<CarveRegistry>,
+    split_enabled: bool,
     string_tx: Option<Sender<StringJob>>,
     meta_tx: Sender<MetadataEvent>,
     run_id: String,
@@ -129,7 +133,9 @@ pub fn spawn_scan_workers(
     for _ in 0..worker_count {
         let scanner = scanner.clone();
         let rx = rx.clone();
-        let hit_tx = hit_tx.clone();
+        let fast_hit_tx = fast_hit_tx.clone();
+        let slow_hit_tx = slow_hit_tx.clone();
+        let carve_registry = carve_registry.clone();
         let string_scanner = string_scanner.clone();
         let string_tx = string_tx.clone();
         let hits_found = hits_found.clone();
@@ -170,7 +176,14 @@ pub fn spawn_scan_workers(
                         chunk_data: Some(Arc::clone(&job.data)),
                         chunk_start: job.chunk.start,
                     };
-                    if let Err(err) = hit_tx.send(normalized) {
+                    // Classify hit as fast or slow based on carver metadata.
+                    // When split is disabled (single worker mode), all hits go to slow.
+                    let tx = if split_enabled && carve_registry.is_fast(&normalized.file_type_id) {
+                        &fast_hit_tx
+                    } else {
+                        &slow_hit_tx
+                    };
+                    if let Err(err) = tx.send(normalized) {
                         warn!("hit channel closed while sending hit: {err}");
                         break;
                     }
@@ -279,6 +292,69 @@ impl OverlapTracker {
     }
 }
 
+/// Per-type concurrency semaphore map shared across slow carve workers.
+pub type TypeSemaphores = Arc<HashMap<String, Arc<CountingSemaphore>>>;
+
+/// A simple blocking counting semaphore for per-type concurrency limits.
+pub struct CountingSemaphore {
+    state: std::sync::Mutex<usize>,
+    cond: std::sync::Condvar,
+    max: usize,
+}
+
+impl CountingSemaphore {
+    pub fn new(max: usize) -> Self {
+        // Internal-only: callers (build_type_semaphores) filter max==0 before construction.
+        debug_assert!(max > 0, "CountingSemaphore max must be > 0");
+        assert!(max > 0, "CountingSemaphore max must be > 0");
+        Self {
+            state: std::sync::Mutex::new(0),
+            cond: std::sync::Condvar::new(),
+            max,
+        }
+    }
+
+    /// Block until a permit is available, then return a guard that releases on drop.
+    pub fn acquire(&self) -> SemaphoreGuard<'_> {
+        // Poisoned mutex means a prior thread panicked; propagating is the safest choice.
+        let mut active = self.state.lock().expect("semaphore lock poisoned");
+        while *active >= self.max {
+            active = self.cond.wait(active).expect("semaphore condvar poisoned");
+        }
+        *active += 1;
+        SemaphoreGuard { sem: self }
+    }
+
+    fn release(&self) {
+        let mut active = self.state.lock().expect("semaphore lock poisoned");
+        *active = active.saturating_sub(1);
+        self.cond.notify_one();
+    }
+}
+
+pub struct SemaphoreGuard<'a> {
+    sem: &'a CountingSemaphore,
+}
+
+impl Drop for SemaphoreGuard<'_> {
+    fn drop(&mut self) {
+        self.sem.release();
+    }
+}
+
+/// Build per-type semaphores from carver_limits configuration.
+pub fn build_type_semaphores(limits: &HashMap<String, CarverLimits>) -> TypeSemaphores {
+    let mut map = HashMap::new();
+    for (type_id, lim) in limits {
+        if let Some(max) = lim.max_concurrent {
+            if max > 0 {
+                map.insert(type_id.clone(), Arc::new(CountingSemaphore::new(max)));
+            }
+        }
+    }
+    Arc::new(map)
+}
+
 /// Spawn file carving worker threads
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_carve_workers(
@@ -302,6 +378,7 @@ pub fn spawn_carve_workers(
     duplicates_found: Arc<AtomicU64>,
     duplicates_skipped: Arc<AtomicU64>,
     skip_duplicates: bool,
+    type_semaphores: Option<TypeSemaphores>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -323,6 +400,7 @@ pub fn spawn_carve_workers(
         let dedup_tracker = dedup_tracker.clone();
         let duplicates_found = duplicates_found.clone();
         let duplicates_skipped = duplicates_skipped.clone();
+        let type_semaphores = type_semaphores.clone();
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
@@ -384,6 +462,13 @@ pub fn spawn_carve_workers(
                         continue;
                     }
                 }
+
+                // Acquire per-type semaphore if configured (Phase B: concurrency limit)
+                let _type_permit = type_semaphores.as_ref().and_then(
+                    |sems: &Arc<HashMap<String, Arc<CountingSemaphore>>>| {
+                        sems.get(hit.file_type_id.as_str()).map(|sem| sem.acquire())
+                    },
+                );
 
                 let carve_start = Instant::now();
                 let result = handler.process_hit(&hit, &ctx);
@@ -561,5 +646,56 @@ mod tests {
         // Type should be removed entirely from the map
         assert!(tracker.ranges.is_empty());
         assert!(!tracker.is_overlapping("gif", 150));
+    }
+
+    #[test]
+    fn counting_semaphore_limits_concurrency() {
+        let sem = CountingSemaphore::new(2);
+        let _g1 = sem.acquire();
+        let _g2 = sem.acquire();
+        // Third acquire would block, but we can test state via try pattern:
+        // Instead, test that releasing allows reacquire
+        drop(_g1);
+        let _g3 = sem.acquire(); // should not block
+        drop(_g2);
+        drop(_g3);
+    }
+
+    #[test]
+    fn counting_semaphore_release_on_drop() {
+        let sem = Arc::new(CountingSemaphore::new(1));
+        {
+            let _g = sem.acquire();
+            // Guard held, active == 1
+        }
+        // Guard dropped, active == 0, should be able to acquire again
+        let _g2 = sem.acquire();
+    }
+
+    #[test]
+    fn build_type_semaphores_from_config() {
+        let mut limits = HashMap::new();
+        limits.insert(
+            "sqlite".to_string(),
+            CarverLimits {
+                max_concurrent: Some(2),
+            },
+        );
+        limits.insert(
+            "mp3".to_string(),
+            CarverLimits {
+                max_concurrent: None,
+            },
+        );
+        limits.insert(
+            "pdf".to_string(),
+            CarverLimits {
+                max_concurrent: Some(0),
+            },
+        );
+        let sems = build_type_semaphores(&limits);
+        assert!(sems.contains_key("sqlite"));
+        assert!(!sems.contains_key("mp3")); // None → no semaphore
+        assert!(!sems.contains_key("pdf")); // max_concurrent=0 → no semaphore
     }
 }

@@ -22,8 +22,8 @@ use crate::checkpoint::{CheckpointState, save_checkpoint};
 use crate::chunk::{ChunkIter, ScanChunk, chunk_count};
 use crate::config::Config;
 use crate::constants::{
-    CHANNEL_CAPACITY_MULTIPLIER, HIT_CHANNEL_MULTIPLIER, METADATA_FLUSH_INTERVAL_SECS,
-    MIN_CHANNEL_CAPACITY,
+    CHANNEL_CAPACITY_MULTIPLIER, FAST_HIT_CHANNEL_MULTIPLIER, METADATA_FLUSH_INTERVAL_SECS,
+    MIN_CHANNEL_CAPACITY, SLOW_HIT_CHANNEL_MULTIPLIER,
 };
 use crate::dedup::DedupTracker;
 use crate::evidence::EvidenceSource;
@@ -196,8 +196,10 @@ pub fn run_pipeline_with_cancel(
 struct PipelineChannels {
     scan_tx: crossbeam_channel::Sender<ScanJob>,
     scan_rx: crossbeam_channel::Receiver<ScanJob>,
-    hit_tx: crossbeam_channel::Sender<crate::scanner::NormalizedHit>,
-    hit_rx: crossbeam_channel::Receiver<crate::scanner::NormalizedHit>,
+    fast_hit_tx: crossbeam_channel::Sender<crate::scanner::NormalizedHit>,
+    fast_hit_rx: crossbeam_channel::Receiver<crate::scanner::NormalizedHit>,
+    slow_hit_tx: crossbeam_channel::Sender<crate::scanner::NormalizedHit>,
+    slow_hit_rx: crossbeam_channel::Receiver<crate::scanner::NormalizedHit>,
     meta_tx: crossbeam_channel::Sender<MetadataEvent>,
     meta_rx: crossbeam_channel::Receiver<MetadataEvent>,
     string_tx: Option<crossbeam_channel::Sender<StringJob>>,
@@ -249,7 +251,8 @@ impl PipelineCounters {
 struct WorkerHandles {
     meta_handle: std::thread::JoinHandle<()>,
     scan_handles: Vec<std::thread::JoinHandle<()>>,
-    carve_handles: Vec<std::thread::JoinHandle<()>>,
+    fast_carve_handles: Vec<std::thread::JoinHandle<()>>,
+    slow_carve_handles: Vec<std::thread::JoinHandle<()>>,
     string_handles: Vec<std::thread::JoinHandle<()>>,
 }
 
@@ -427,9 +430,14 @@ impl<'a> PipelineRunner<'a> {
             .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
             .max(MIN_CHANNEL_CAPACITY);
         let (scan_tx, scan_rx) = bounded::<ScanJob>(channel_cap);
-        let (hit_tx, hit_rx) = bounded(
+        let (fast_hit_tx, fast_hit_rx) = bounded(
             channel_cap
-                .saturating_mul(HIT_CHANNEL_MULTIPLIER)
+                .saturating_mul(FAST_HIT_CHANNEL_MULTIPLIER)
+                .max(MIN_CHANNEL_CAPACITY),
+        );
+        let (slow_hit_tx, slow_hit_rx) = bounded(
+            channel_cap
+                .saturating_mul(SLOW_HIT_CHANNEL_MULTIPLIER)
                 .max(MIN_CHANNEL_CAPACITY),
         );
         let (meta_tx, meta_rx) = bounded::<MetadataEvent>(channel_cap * 16);
@@ -444,8 +452,10 @@ impl<'a> PipelineRunner<'a> {
         PipelineChannels {
             scan_tx,
             scan_rx,
-            hit_tx,
-            hit_rx,
+            fast_hit_tx,
+            fast_hit_rx,
+            slow_hit_tx,
+            slow_hit_rx,
             meta_tx,
             meta_rx,
             string_tx,
@@ -466,6 +476,25 @@ impl<'a> PipelineRunner<'a> {
             None
         };
 
+        // Split carve workers into fast/slow pools
+        let raw_ratio = self.cfg.fast_carve_worker_ratio;
+        if !(0.0..=1.0).contains(&raw_ratio) {
+            warn!("fast_carve_worker_ratio={raw_ratio} is outside [0.0, 1.0], clamping");
+        }
+        let ratio = raw_ratio.clamp(0.0, 1.0);
+        let (fast_count, slow_count) = if self.workers < 2 || ratio == 0.0 {
+            // Single-worker mode or ratio=0: all hits go through the slow pool.
+            // Scan workers send all hits to slow channel (split_enabled=false).
+            (0usize, self.workers.max(1))
+        } else {
+            let fc = (self.workers as f64 * ratio).round() as usize;
+            let fc = fc.max(1).min(self.workers - 1);
+            let sc = self.workers - fc;
+            (fc, sc)
+        };
+
+        info!("carve worker split: fast={fast_count} slow={slow_count} (ratio={ratio:.2})");
+
         let meta_handle = workers::spawn_metadata_thread(
             meta_sink,
             channels.meta_rx.clone(),
@@ -477,7 +506,10 @@ impl<'a> PipelineRunner<'a> {
             self.sig_scanner.clone(),
             self.string_scanner.clone(),
             channels.scan_rx.clone(),
-            channels.hit_tx.clone(),
+            channels.fast_hit_tx.clone(),
+            channels.slow_hit_tx.clone(),
+            self.carve_registry.clone(),
+            fast_count > 0, // split_enabled: classify hits only when fast pool exists
             channels.string_tx.clone(),
             channels.meta_tx.clone(),
             self.cfg.run_id.clone(),
@@ -488,13 +520,44 @@ impl<'a> PipelineRunner<'a> {
             counters.scan_time_ms.clone(),
         );
 
-        let carve_handles = workers::spawn_carve_workers(
-            self.workers,
+        // Build per-type semaphores from carver_limits config
+        let type_semaphores = workers::build_type_semaphores(&self.cfg.carver_limits);
+
+        let fast_carve_handles = if fast_count > 0 {
+            workers::spawn_carve_workers(
+                fast_count,
+                self.carve_registry.clone(),
+                self.evidence.clone(),
+                self.cfg.run_id.clone(),
+                self.run_output_dir.clone(),
+                channels.fast_hit_rx.clone(),
+                channels.meta_tx.clone(),
+                counters.carve_limiter.clone(),
+                counters.carve_errors.clone(),
+                counters.carve_time_ms.clone(),
+                counters.files_rejected.clone(),
+                counters.files_prevalidation_rejected.clone(),
+                self.cfg.deferred_buffer_kb * 1024,
+                self.metadata_only,
+                counters.overlap_skipped.clone(),
+                crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
+                dedup_tracker.clone(),
+                counters.duplicates_found.clone(),
+                counters.duplicates_skipped.clone(),
+                self.cfg.skip_duplicate_files,
+                None, // fast workers: no per-type semaphores
+            )
+        } else {
+            Vec::new()
+        };
+
+        let slow_carve_handles = workers::spawn_carve_workers(
+            slow_count,
             self.carve_registry.clone(),
             self.evidence.clone(),
             self.cfg.run_id.clone(),
             self.run_output_dir.clone(),
-            channels.hit_rx.clone(),
+            channels.slow_hit_rx.clone(),
             channels.meta_tx.clone(),
             counters.carve_limiter.clone(),
             counters.carve_errors.clone(),
@@ -509,6 +572,7 @@ impl<'a> PipelineRunner<'a> {
             counters.duplicates_found.clone(),
             counters.duplicates_skipped.clone(),
             self.cfg.skip_duplicate_files,
+            Some(type_semaphores),
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
@@ -532,7 +596,8 @@ impl<'a> PipelineRunner<'a> {
         WorkerHandles {
             meta_handle,
             scan_handles,
-            carve_handles,
+            fast_carve_handles,
+            slow_carve_handles,
             string_handles,
         }
     }
@@ -730,20 +795,25 @@ impl<'a> PipelineRunner<'a> {
     ) -> Result<PipelineStats> {
         let PipelineChannels {
             scan_tx,
-            hit_tx,
+            fast_hit_tx,
+            slow_hit_tx,
             string_tx,
             meta_tx,
             ..
         } = channels;
 
         drop(scan_tx);
-        drop(hit_tx);
+        drop(fast_hit_tx);
+        drop(slow_hit_tx);
         drop(string_tx);
 
         for handle in handles.scan_handles {
             let _ = handle.join();
         }
-        for handle in handles.carve_handles {
+        for handle in handles.fast_carve_handles {
+            let _ = handle.join();
+        }
+        for handle in handles.slow_carve_handles {
             let _ = handle.join();
         }
         for handle in handles.string_handles {

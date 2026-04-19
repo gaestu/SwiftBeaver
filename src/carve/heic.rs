@@ -54,6 +54,10 @@ impl CarveHandler for HeicCarveHandler {
         "heic"
     }
 
+    fn is_fast(&self) -> bool {
+        true
+    }
+
     fn extension(&self) -> &str {
         &self.extension
     }

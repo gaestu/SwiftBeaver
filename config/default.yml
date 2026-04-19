@@ -33,6 +33,8 @@ hash_algorithms:
   - sha256
 enable_deduplication: false
 skip_duplicate_files: false
+fast_carve_worker_ratio: 0.25
+carver_limits: {}
 file_types:
   - id: "jpeg"
     extensions: ["jpg", "jpeg"]

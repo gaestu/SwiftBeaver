@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -94,7 +95,17 @@ pub struct Config {
     pub enable_deduplication: bool,
     #[serde(default)]
     pub skip_duplicate_files: bool,
+    #[serde(default = "default_fast_carve_worker_ratio")]
+    pub fast_carve_worker_ratio: f64,
+    #[serde(default)]
+    pub carver_limits: HashMap<String, CarverLimits>,
     pub file_types: Vec<FileTypeConfig>,
+}
+
+/// Per-carver concurrency limits (optional, default: unlimited).
+#[derive(Debug, Deserialize, Clone)]
+pub struct CarverLimits {
+    pub max_concurrent: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +221,10 @@ fn default_hash_algorithms() -> Vec<String> {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_fast_carve_worker_ratio() -> f64 {
+    crate::constants::DEFAULT_FAST_WORKER_RATIO
 }
 
 impl Config {

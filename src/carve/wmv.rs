@@ -37,6 +37,10 @@ impl CarveHandler for WmvCarveHandler {
         "wmv"
     }
 
+    fn is_fast(&self) -> bool {
+        true
+    }
+
     fn extension(&self) -> &str {
         &self.extension
     }

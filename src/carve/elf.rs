@@ -32,6 +32,10 @@ impl CarveHandler for ElfCarveHandler {
         "elf"
     }
 
+    fn is_fast(&self) -> bool {
+        true
+    }
+
     fn extension(&self) -> &str {
         &self.extension
     }

@@ -24,11 +24,21 @@ pub const DEFAULT_CHUNK_SIZE_MIB: u64 = 64;
 /// Default overlap in KiB for chunk scanning
 pub const DEFAULT_OVERLAP_KIB: u64 = 64;
 
-/// Hit channel capacity multiplier (relative to base channel capacity).
-/// Higher values reduce scan-worker stalls when carve workers are slow.
-pub const HIT_CHANNEL_MULTIPLIER: usize = 8;
-
 /// Minimum interval in seconds between metadata flush events sent from the
 /// scan loop.  This prevents flush storms when progress reporting fires
 /// frequently (e.g. every chunk with `--progress-interval-secs 0`).
 pub const METADATA_FLUSH_INTERVAL_SECS: u64 = 10;
+
+/// Default fraction of carve workers assigned to the fast queue (0.0–1.0).
+pub const DEFAULT_FAST_WORKER_RATIO: f64 = 0.25;
+
+/// Hit channel capacity multiplier for the **fast** carve queue.
+/// Large because fast carves drain quickly and we want high throughput.
+/// Note: each pending NormalizedHit holds an Arc to a chunk (~64 MiB default).
+/// In practice, hits from the same chunk share the Arc, so real memory impact
+/// is much lower than `slots × chunk_size`.
+pub const FAST_HIT_CHANNEL_MULTIPLIER: usize = 16;
+
+/// Hit channel capacity multiplier for the **slow** carve queue.
+/// Smaller to bound memory from large pending carves.
+pub const SLOW_HIT_CHANNEL_MULTIPLIER: usize = 4;
