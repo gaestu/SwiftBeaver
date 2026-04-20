@@ -112,9 +112,7 @@ impl CarveHandler for RtfCarveHandler {
                         continue;
                     }
 
-                    if control_buf == b"bin" {
-                        bin_len = bin_len.max(0);
-                    }
+                    // bin_len is set from digit parsing above; no clamping needed.
 
                     in_control = false;
                     control_buf.clear();
