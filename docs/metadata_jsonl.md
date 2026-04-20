@@ -125,6 +125,45 @@ Each line in `metadata/browser_downloads.jsonl` is a JSON object with:
 
 Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
 
+## Windows artefacts (`windows_artefacts.jsonl`)
+
+Each line in `metadata/windows_artefacts.jsonl` is a JSON object with:
+
+- `run_id`
+- `artefact_type` (`lnk`, `prefetch`, `evtx`, `registry`)
+- `offset`
+- `size`
+- `target_path`
+- `working_dir`
+- `creation_time`
+- `access_time`
+- `write_time`
+- `file_size`
+- `volume_serial`
+- `local_base_path`
+- `network_path`
+- `executable_name`
+- `prefetch_hash`
+- `run_count`
+- `last_run_times_json`
+- `volume_paths_json`
+- `referenced_files_json`
+- `version`
+- `first_chunk`
+- `last_chunk`
+- `record_count_estimate`
+- `log_name`
+- `timestamp`
+- `hive_name`
+- `hive_type`
+- `root_key_name`
+- `tool_version`
+- `config_hash`
+- `evidence_path`
+- `evidence_sha256`
+
+Variant-specific fields are nullable. Array-like Prefetch fields are serialized as JSON strings.
+
 ## Run summary (`run_summary.jsonl`)
 
 Each line in `metadata/run_summary.jsonl` is a JSON object with:

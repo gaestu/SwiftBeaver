@@ -31,6 +31,7 @@ pub mod tiff;
 pub mod wav;
 pub mod webm;
 pub mod webp;
+pub mod windows;
 pub mod wmv;
 pub mod xz;
 pub mod zip;

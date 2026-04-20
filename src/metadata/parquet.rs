@@ -12,7 +12,9 @@ use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 
 use crate::carve::CarvedFile;
+use crate::carve::windows::WindowsArtefactRecord;
 use crate::config::Config;
+use crate::metadata::windows::flatten_windows_artefact;
 use crate::metadata::{MetadataError, MetadataSink, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
@@ -42,6 +44,7 @@ enum ParquetCategory {
     BrowserHistory,
     BrowserCookies,
     BrowserDownloads,
+    WindowsArtefacts,
     EntropyRegions,
     RunSummary,
 }
@@ -63,6 +66,7 @@ impl ParquetCategory {
             ParquetCategory::BrowserHistory => "browser_history.parquet",
             ParquetCategory::BrowserCookies => "browser_cookies.parquet",
             ParquetCategory::BrowserDownloads => "browser_downloads.parquet",
+            ParquetCategory::WindowsArtefacts => "windows_artefacts.parquet",
             ParquetCategory::EntropyRegions => "entropy_regions.parquet",
             ParquetCategory::RunSummary => "run_summary.parquet",
         }
@@ -185,6 +189,37 @@ struct BrowserDownloadRow {
 }
 
 #[derive(Debug, Clone)]
+struct WindowsArtefactRow {
+    artefact_type: String,
+    offset: i64,
+    size: i64,
+    target_path: Option<String>,
+    working_dir: Option<String>,
+    creation_time_utc: Option<i64>,
+    access_time_utc: Option<i64>,
+    write_time_utc: Option<i64>,
+    file_size: Option<i64>,
+    volume_serial: Option<String>,
+    local_base_path: Option<String>,
+    network_path: Option<String>,
+    executable_name: Option<String>,
+    prefetch_hash: Option<String>,
+    run_count: Option<i64>,
+    last_run_times_json: Option<String>,
+    volume_paths_json: Option<String>,
+    referenced_files_json: Option<String>,
+    version: Option<i32>,
+    first_chunk: Option<i64>,
+    last_chunk: Option<i64>,
+    record_count_estimate: Option<i64>,
+    log_name: Option<String>,
+    timestamp_utc: Option<i64>,
+    hive_name: Option<String>,
+    hive_type: Option<String>,
+    root_key_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 struct EntropyRegionRow {
     global_start: i64,
     global_end: i64,
@@ -215,6 +250,7 @@ enum CategoryBuffer {
     History(Vec<BrowserHistoryRow>),
     Cookies(Vec<BrowserCookieRow>),
     Downloads(Vec<BrowserDownloadRow>),
+    Windows(Vec<WindowsArtefactRow>),
     Entropy(Vec<EntropyRegionRow>),
     Summary(Vec<RunSummaryRow>),
 }
@@ -249,6 +285,7 @@ impl CategoryWriter {
             ParquetCategory::BrowserHistory => CategoryBuffer::History(Vec::new()),
             ParquetCategory::BrowserCookies => CategoryBuffer::Cookies(Vec::new()),
             ParquetCategory::BrowserDownloads => CategoryBuffer::Downloads(Vec::new()),
+            ParquetCategory::WindowsArtefacts => CategoryBuffer::Windows(Vec::new()),
             ParquetCategory::EntropyRegions => CategoryBuffer::Entropy(Vec::new()),
             ParquetCategory::RunSummary => CategoryBuffer::Summary(Vec::new()),
             _ => CategoryBuffer::Files(Vec::new()),
@@ -368,6 +405,21 @@ impl CategoryWriter {
         }
     }
 
+    fn append_windows(&mut self, row: WindowsArtefactRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::Windows(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "windows artefact row on non-windows category".to_string(),
+            )),
+        }
+    }
+
     fn append_entropy(&mut self, row: EntropyRegionRow) -> Result<(), MetadataError> {
         match &mut self.buffer {
             CategoryBuffer::Entropy(rows) => {
@@ -438,6 +490,11 @@ impl CategoryWriter {
                 rows.clear();
                 batch
             }
+            CategoryBuffer::Windows(rows) => {
+                let batch = build_windows_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
             CategoryBuffer::Entropy(rows) => {
                 let batch = build_entropy_batch(&self.context, rows, &self.schema)?;
                 rows.clear();
@@ -476,6 +533,7 @@ impl CategoryWriter {
             CategoryBuffer::History(rows) => rows.len(),
             CategoryBuffer::Cookies(rows) => rows.len(),
             CategoryBuffer::Downloads(rows) => rows.len(),
+            CategoryBuffer::Windows(rows) => rows.len(),
             CategoryBuffer::Entropy(rows) => rows.len(),
             CategoryBuffer::Summary(rows) => rows.len(),
         }
@@ -500,6 +558,7 @@ struct ParquetSinkInner {
     browser_history: Option<CategoryWriter>,
     browser_cookies: Option<CategoryWriter>,
     browser_downloads: Option<CategoryWriter>,
+    windows_artefacts: Option<CategoryWriter>,
     entropy_regions: Option<CategoryWriter>,
     run_summary: Option<CategoryWriter>,
 }
@@ -524,6 +583,7 @@ impl ParquetSinkInner {
             ParquetCategory::BrowserHistory => &mut self.browser_history,
             ParquetCategory::BrowserCookies => &mut self.browser_cookies,
             ParquetCategory::BrowserDownloads => &mut self.browser_downloads,
+            ParquetCategory::WindowsArtefacts => &mut self.windows_artefacts,
             ParquetCategory::EntropyRegions => &mut self.entropy_regions,
             ParquetCategory::RunSummary => &mut self.run_summary,
         };
@@ -587,6 +647,9 @@ impl ParquetSinkInner {
         if let Some(writer) = &mut self.browser_downloads {
             writer.finish()?;
         }
+        if let Some(writer) = &mut self.windows_artefacts {
+            writer.finish()?;
+        }
         if let Some(writer) = &mut self.entropy_regions {
             writer.finish()?;
         }
@@ -638,6 +701,9 @@ impl ParquetSinkInner {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.browser_downloads {
+            writer.flush_buffer()?;
+        }
+        if let Some(writer) = &mut self.windows_artefacts {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.entropy_regions {
@@ -693,6 +759,7 @@ impl ParquetSink {
                 browser_history: None,
                 browser_cookies: None,
                 browser_downloads: None,
+                windows_artefacts: None,
                 entropy_regions: None,
                 run_summary: None,
             }),
@@ -809,6 +876,43 @@ impl MetadataSink for ParquetSink {
         let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::BrowserDownloads)?;
         writer.append_download(row)
+    }
+
+    fn record_windows_artefact(&self, record: &WindowsArtefactRecord) -> Result<(), MetadataError> {
+        let flat = flatten_windows_artefact(record)?;
+        let row = WindowsArtefactRow {
+            artefact_type: flat.artefact_type,
+            offset: to_i64(flat.offset)?,
+            size: to_i64(flat.size)?,
+            target_path: flat.target_path,
+            working_dir: flat.working_dir,
+            creation_time_utc: flat.creation_time.map(to_micros),
+            access_time_utc: flat.access_time.map(to_micros),
+            write_time_utc: flat.write_time.map(to_micros),
+            file_size: flat.file_size.map(|value| value as i64),
+            volume_serial: flat.volume_serial,
+            local_base_path: flat.local_base_path,
+            network_path: flat.network_path,
+            executable_name: flat.executable_name,
+            prefetch_hash: flat.prefetch_hash,
+            run_count: flat.run_count.map(to_i64).transpose()?,
+            last_run_times_json: flat.last_run_times_json,
+            volume_paths_json: flat.volume_paths_json,
+            referenced_files_json: flat.referenced_files_json,
+            version: flat.version.map(to_i32).transpose()?,
+            first_chunk: flat.first_chunk.map(to_i64).transpose()?,
+            last_chunk: flat.last_chunk.map(to_i64).transpose()?,
+            record_count_estimate: flat.record_count_estimate.map(to_i64).transpose()?,
+            log_name: flat.log_name,
+            timestamp_utc: flat.timestamp.map(to_micros),
+            hive_name: flat.hive_name,
+            hive_type: flat.hive_type,
+            root_key_name: flat.root_key_name,
+        };
+
+        let mut inner = self.lock_inner()?;
+        let writer = inner.get_or_create_writer(ParquetCategory::WindowsArtefacts)?;
+        writer.append_windows(row)
     }
 
     fn record_run_summary(&self, summary: &RunSummary) -> Result<(), MetadataError> {
@@ -1052,6 +1156,56 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             ),
             Field::new("total_bytes", DataType::Int64, true),
             Field::new("state", DataType::Utf8, true),
+        ])),
+        ParquetCategory::WindowsArtefacts => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("artefact_type", DataType::Utf8, false),
+            Field::new("offset", DataType::Int64, false),
+            Field::new("size", DataType::Int64, false),
+            Field::new("target_path", DataType::Utf8, true),
+            Field::new("working_dir", DataType::Utf8, true),
+            Field::new(
+                "creation_time_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new(
+                "access_time_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new(
+                "write_time_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new("file_size", DataType::Int64, true),
+            Field::new("volume_serial", DataType::Utf8, true),
+            Field::new("local_base_path", DataType::Utf8, true),
+            Field::new("network_path", DataType::Utf8, true),
+            Field::new("executable_name", DataType::Utf8, true),
+            Field::new("prefetch_hash", DataType::Utf8, true),
+            Field::new("run_count", DataType::Int64, true),
+            Field::new("last_run_times_json", DataType::Utf8, true),
+            Field::new("volume_paths_json", DataType::Utf8, true),
+            Field::new("referenced_files_json", DataType::Utf8, true),
+            Field::new("version", DataType::Int32, true),
+            Field::new("first_chunk", DataType::Int64, true),
+            Field::new("last_chunk", DataType::Int64, true),
+            Field::new("record_count_estimate", DataType::Int64, true),
+            Field::new("log_name", DataType::Utf8, true),
+            Field::new(
+                "timestamp_utc",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+            Field::new("hive_name", DataType::Utf8, true),
+            Field::new("hive_type", DataType::Utf8, true),
+            Field::new("root_key_name", DataType::Utf8, true),
         ])),
         ParquetCategory::EntropyRegions => Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
@@ -1522,6 +1676,118 @@ fn build_downloads_batch(
         .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
 }
 
+fn build_windows_batch(
+    ctx: &ParquetContext,
+    rows: &[WindowsArtefactRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut artefact_type = StringBuilder::new();
+    let mut offset = Int64Builder::new();
+    let mut size = Int64Builder::new();
+    let mut target_path = StringBuilder::new();
+    let mut working_dir = StringBuilder::new();
+    let mut creation_time = TimestampMicrosecondBuilder::new();
+    let mut access_time = TimestampMicrosecondBuilder::new();
+    let mut write_time = TimestampMicrosecondBuilder::new();
+    let mut file_size = Int64Builder::new();
+    let mut volume_serial = StringBuilder::new();
+    let mut local_base_path = StringBuilder::new();
+    let mut network_path = StringBuilder::new();
+    let mut executable_name = StringBuilder::new();
+    let mut prefetch_hash = StringBuilder::new();
+    let mut run_count = Int64Builder::new();
+    let mut last_run_times_json = StringBuilder::new();
+    let mut volume_paths_json = StringBuilder::new();
+    let mut referenced_files_json = StringBuilder::new();
+    let mut version = Int32Builder::new();
+    let mut first_chunk = Int64Builder::new();
+    let mut last_chunk = Int64Builder::new();
+    let mut record_count_estimate = Int64Builder::new();
+    let mut log_name = StringBuilder::new();
+    let mut timestamp = TimestampMicrosecondBuilder::new();
+    let mut hive_name = StringBuilder::new();
+    let mut hive_type = StringBuilder::new();
+    let mut root_key_name = StringBuilder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        artefact_type.append_value(&row.artefact_type);
+        offset.append_value(row.offset);
+        size.append_value(row.size);
+        target_path.append_option(row.target_path.as_deref());
+        working_dir.append_option(row.working_dir.as_deref());
+        creation_time.append_option(row.creation_time_utc);
+        access_time.append_option(row.access_time_utc);
+        write_time.append_option(row.write_time_utc);
+        file_size.append_option(row.file_size);
+        volume_serial.append_option(row.volume_serial.as_deref());
+        local_base_path.append_option(row.local_base_path.as_deref());
+        network_path.append_option(row.network_path.as_deref());
+        executable_name.append_option(row.executable_name.as_deref());
+        prefetch_hash.append_option(row.prefetch_hash.as_deref());
+        run_count.append_option(row.run_count);
+        last_run_times_json.append_option(row.last_run_times_json.as_deref());
+        volume_paths_json.append_option(row.volume_paths_json.as_deref());
+        referenced_files_json.append_option(row.referenced_files_json.as_deref());
+        version.append_option(row.version);
+        first_chunk.append_option(row.first_chunk);
+        last_chunk.append_option(row.last_chunk);
+        record_count_estimate.append_option(row.record_count_estimate);
+        log_name.append_option(row.log_name.as_deref());
+        timestamp.append_option(row.timestamp_utc);
+        hive_name.append_option(row.hive_name.as_deref());
+        hive_type.append_option(row.hive_type.as_deref());
+        root_key_name.append_option(row.root_key_name.as_deref());
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(artefact_type.finish()),
+        Arc::new(offset.finish()),
+        Arc::new(size.finish()),
+        Arc::new(target_path.finish()),
+        Arc::new(working_dir.finish()),
+        Arc::new(creation_time.finish()),
+        Arc::new(access_time.finish()),
+        Arc::new(write_time.finish()),
+        Arc::new(file_size.finish()),
+        Arc::new(volume_serial.finish()),
+        Arc::new(local_base_path.finish()),
+        Arc::new(network_path.finish()),
+        Arc::new(executable_name.finish()),
+        Arc::new(prefetch_hash.finish()),
+        Arc::new(run_count.finish()),
+        Arc::new(last_run_times_json.finish()),
+        Arc::new(volume_paths_json.finish()),
+        Arc::new(referenced_files_json.finish()),
+        Arc::new(version.finish()),
+        Arc::new(first_chunk.finish()),
+        Arc::new(last_chunk.finish()),
+        Arc::new(record_count_estimate.finish()),
+        Arc::new(log_name.finish()),
+        Arc::new(timestamp.finish()),
+        Arc::new(hive_name.finish()),
+        Arc::new(hive_type.finish()),
+        Arc::new(root_key_name.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
 fn build_entropy_batch(
     ctx: &ParquetContext,
     rows: &[EntropyRegionRow],
@@ -1758,6 +2024,10 @@ fn join_errors(errors: &[String]) -> Option<String> {
 
 fn to_i64(value: u64) -> Result<i64, MetadataError> {
     i64::try_from(value).map_err(|_| MetadataError::Other("value exceeds i64 range".to_string()))
+}
+
+fn to_i32(value: u32) -> Result<i32, MetadataError> {
+    i32::try_from(value).map_err(|_| MetadataError::Other("value exceeds i32 range".to_string()))
 }
 
 fn to_micros(value: chrono::NaiveDateTime) -> i64 {

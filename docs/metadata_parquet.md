@@ -163,6 +163,45 @@ Note: `sqlite_page` and `sqlite_wal` are carve-only file outputs and do not emit
 
 Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
 
+## Windows artefacts
+
+`windows_artefacts.parquet` schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `artefact_type` (string)
+- `offset` (int64)
+- `size` (int64)
+- `target_path` (string, nullable)
+- `working_dir` (string, nullable)
+- `creation_time_utc` (timestamp micros, nullable)
+- `access_time_utc` (timestamp micros, nullable)
+- `write_time_utc` (timestamp micros, nullable)
+- `file_size` (int64, nullable)
+- `volume_serial` (string, nullable)
+- `local_base_path` (string, nullable)
+- `network_path` (string, nullable)
+- `executable_name` (string, nullable)
+- `prefetch_hash` (string, nullable)
+- `run_count` (int64, nullable)
+- `last_run_times_json` (string, nullable)
+- `volume_paths_json` (string, nullable)
+- `referenced_files_json` (string, nullable)
+- `version` (int32, nullable)
+- `first_chunk` (int64, nullable)
+- `last_chunk` (int64, nullable)
+- `record_count_estimate` (int64, nullable)
+- `log_name` (string, nullable)
+- `timestamp_utc` (timestamp micros, nullable)
+- `hive_name` (string, nullable)
+- `hive_type` (string, nullable)
+- `root_key_name` (string, nullable)
+
+Variant-specific fields are nullable. Array-like Prefetch fields are stored as JSON strings.
+
 ## Run summary
 
 `run_summary.parquet` schema:

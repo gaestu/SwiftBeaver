@@ -2,9 +2,12 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Mutex;
 
+use chrono::SecondsFormat;
 use serde::Serialize;
 
 use crate::carve::CarvedFile;
+use crate::carve::windows::WindowsArtefactRecord;
+use crate::metadata::windows::flatten_windows_artefact;
 use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
@@ -16,6 +19,7 @@ pub struct CsvSink {
     evidence_sha256: String,
     files_writer: Mutex<csv::Writer<File>>,
     strings_writer: Mutex<csv::Writer<File>>,
+    windows_writer: Mutex<csv::Writer<File>>,
     history_writer: Mutex<csv::Writer<File>>,
     cookies_writer: Mutex<csv::Writer<File>>,
     downloads_writer: Mutex<csv::Writer<File>>,
@@ -54,6 +58,42 @@ struct StringArtefactCsv<'a> {
     encoding: &'a str,
     global_start: u64,
     global_end: u64,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
+#[derive(Serialize)]
+struct WindowsArtefactCsv<'a> {
+    run_id: &'a str,
+    artefact_type: &'a str,
+    offset: u64,
+    size: u64,
+    target_path: Option<&'a str>,
+    working_dir: Option<&'a str>,
+    creation_time: Option<String>,
+    access_time: Option<String>,
+    write_time: Option<String>,
+    file_size: Option<u64>,
+    volume_serial: Option<&'a str>,
+    local_base_path: Option<&'a str>,
+    network_path: Option<&'a str>,
+    executable_name: Option<&'a str>,
+    prefetch_hash: Option<&'a str>,
+    run_count: Option<u64>,
+    last_run_times_json: Option<&'a str>,
+    volume_paths_json: Option<&'a str>,
+    referenced_files_json: Option<&'a str>,
+    version: Option<u32>,
+    first_chunk: Option<u64>,
+    last_chunk: Option<u64>,
+    record_count_estimate: Option<u64>,
+    log_name: Option<&'a str>,
+    timestamp: Option<String>,
+    hive_name: Option<&'a str>,
+    hive_type: Option<&'a str>,
+    root_key_name: Option<&'a str>,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -162,6 +202,7 @@ impl CsvSink {
 
         let files_file = File::create(meta_dir.join("carved_files.csv"))?;
         let strings_file = File::create(meta_dir.join("string_artefacts.csv"))?;
+        let windows_file = File::create(meta_dir.join("windows_artefacts.csv"))?;
         let history_file = File::create(meta_dir.join("browser_history.csv"))?;
         let cookies_file = File::create(meta_dir.join("browser_cookies.csv"))?;
         let downloads_file = File::create(meta_dir.join("browser_downloads.csv"))?;
@@ -174,6 +215,9 @@ impl CsvSink {
         let mut strings_writer = csv::WriterBuilder::new()
             .has_headers(false)
             .from_writer(strings_file);
+        let mut windows_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(windows_file);
         let mut history_writer = csv::WriterBuilder::new()
             .has_headers(false)
             .from_writer(history_file);
@@ -219,6 +263,41 @@ impl CsvSink {
             "encoding",
             "global_start",
             "global_end",
+            "tool_version",
+            "config_hash",
+            "evidence_path",
+            "evidence_sha256",
+        ])?;
+
+        windows_writer.write_record([
+            "run_id",
+            "artefact_type",
+            "offset",
+            "size",
+            "target_path",
+            "working_dir",
+            "creation_time",
+            "access_time",
+            "write_time",
+            "file_size",
+            "volume_serial",
+            "local_base_path",
+            "network_path",
+            "executable_name",
+            "prefetch_hash",
+            "run_count",
+            "last_run_times_json",
+            "volume_paths_json",
+            "referenced_files_json",
+            "version",
+            "first_chunk",
+            "last_chunk",
+            "record_count_estimate",
+            "log_name",
+            "timestamp",
+            "hive_name",
+            "hive_type",
+            "root_key_name",
             "tool_version",
             "config_hash",
             "evidence_path",
@@ -315,6 +394,7 @@ impl CsvSink {
             evidence_sha256: evidence_sha256.to_string(),
             files_writer: Mutex::new(files_writer),
             strings_writer: Mutex::new(strings_writer),
+            windows_writer: Mutex::new(windows_writer),
             history_writer: Mutex::new(history_writer),
             cookies_writer: Mutex::new(cookies_writer),
             downloads_writer: Mutex::new(downloads_writer),
@@ -372,6 +452,50 @@ impl MetadataSink for CsvSink {
             .strings_writer
             .lock()
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
+        guard.serialize(record)?;
+        Ok(())
+    }
+
+    fn record_windows_artefact(&self, record: &WindowsArtefactRecord) -> Result<(), MetadataError> {
+        let flat = flatten_windows_artefact(record)?;
+        let record = WindowsArtefactCsv {
+            run_id: &flat.run_id,
+            artefact_type: &flat.artefact_type,
+            offset: flat.offset,
+            size: flat.size,
+            target_path: flat.target_path.as_deref(),
+            working_dir: flat.working_dir.as_deref(),
+            creation_time: flat.creation_time.map(format_csv_datetime),
+            access_time: flat.access_time.map(format_csv_datetime),
+            write_time: flat.write_time.map(format_csv_datetime),
+            file_size: flat.file_size,
+            volume_serial: flat.volume_serial.as_deref(),
+            local_base_path: flat.local_base_path.as_deref(),
+            network_path: flat.network_path.as_deref(),
+            executable_name: flat.executable_name.as_deref(),
+            prefetch_hash: flat.prefetch_hash.as_deref(),
+            run_count: flat.run_count,
+            last_run_times_json: flat.last_run_times_json.as_deref(),
+            volume_paths_json: flat.volume_paths_json.as_deref(),
+            referenced_files_json: flat.referenced_files_json.as_deref(),
+            version: flat.version,
+            first_chunk: flat.first_chunk,
+            last_chunk: flat.last_chunk,
+            record_count_estimate: flat.record_count_estimate,
+            log_name: flat.log_name.as_deref(),
+            timestamp: flat.timestamp.map(format_csv_datetime),
+            hive_name: flat.hive_name.as_deref(),
+            hive_type: flat.hive_type.as_deref(),
+            root_key_name: flat.root_key_name.as_deref(),
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self
+            .windows_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("windows writer lock poisoned".into()))?;
         guard.serialize(record)?;
         Ok(())
     }
@@ -511,6 +635,10 @@ impl MetadataSink for CsvSink {
             .strings_writer
             .lock()
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
+        let mut windows = self
+            .windows_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("windows writer lock poisoned".into()))?;
         let mut history = self
             .history_writer
             .lock()
@@ -533,6 +661,7 @@ impl MetadataSink for CsvSink {
             .map_err(|_| MetadataError::Other("entropy writer lock poisoned".into()))?;
         files.flush()?;
         strings.flush()?;
+        windows.flush()?;
         history.flush()?;
         cookies.flush()?;
         downloads.flush()?;
@@ -551,9 +680,16 @@ fn artefact_kind_label(kind: &ArtefactKind) -> &'static str {
     }
 }
 
+fn format_csv_datetime(value: chrono::NaiveDateTime) -> String {
+    value.and_utc().to_rfc3339_opts(SecondsFormat::Micros, true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::carve::windows::{
+        EvtxArtefact, LnkArtefact, PrefetchArtefact, RegistryHiveArtefact, WindowsArtefactRecord,
+    };
     use crate::metadata::RunSummary;
     use tempfile::tempdir;
 
@@ -598,6 +734,23 @@ mod tests {
             global_end: 120,
         };
         sink.record_string(&artefact).expect("record string");
+
+        let windows_record = WindowsArtefactRecord::Lnk(LnkArtefact {
+            run_id: "run1".to_string(),
+            offset: 4096,
+            size: 512,
+            target_path: Some(r"C:\Users\Alice\Desktop\report.txt".to_string()),
+            working_dir: Some(r"C:\Users\Alice\Desktop".to_string()),
+            creation_time: None,
+            access_time: None,
+            write_time: None,
+            file_size: 128,
+            volume_serial: Some("ABCD-1234".to_string()),
+            local_base_path: Some(r"C:\Users\Alice\Desktop\report.txt".to_string()),
+            network_path: None,
+        });
+        sink.record_windows_artefact(&windows_record)
+            .expect("record windows artefact");
 
         let history = crate::parsers::browser::BrowserHistoryRecord {
             run_id: "run1".to_string(),
@@ -682,6 +835,12 @@ mod tests {
         assert!(
             dir.path()
                 .join("metadata")
+                .join("windows_artefacts.csv")
+                .exists()
+        );
+        assert!(
+            dir.path()
+                .join("metadata")
                 .join("browser_history.csv")
                 .exists()
         );
@@ -704,5 +863,86 @@ mod tests {
                 .join("entropy_regions.csv")
                 .exists()
         );
+    }
+
+    #[test]
+    fn windows_artefact_variants_serialize_to_csv() {
+        let dir = tempdir().expect("tempdir");
+        let sink = CsvSink::new(
+            "run_windows",
+            "0.1.0",
+            "hash",
+            Path::new("/evidence.dd"),
+            "",
+            dir.path(),
+        )
+        .expect("csv sink");
+
+        let ts = chrono::DateTime::from_timestamp(1_700_000_000, 0)
+            .expect("timestamp")
+            .naive_utc();
+        let records = vec![
+            WindowsArtefactRecord::Lnk(LnkArtefact {
+                run_id: "run_windows".to_string(),
+                offset: 1,
+                size: 76,
+                target_path: Some(r"C:\Temp\a.txt".to_string()),
+                working_dir: Some(r"C:\Temp".to_string()),
+                creation_time: Some(ts),
+                access_time: Some(ts),
+                write_time: Some(ts),
+                file_size: 42,
+                volume_serial: Some("ABCD-1234".to_string()),
+                local_base_path: Some(r"C:\Temp\a.txt".to_string()),
+                network_path: None,
+            }),
+            WindowsArtefactRecord::Prefetch(PrefetchArtefact {
+                run_id: "run_windows".to_string(),
+                offset: 2,
+                size: 512,
+                executable_name: "CMD.EXE".to_string(),
+                prefetch_hash: "00112233".to_string(),
+                run_count: 3,
+                last_run_times: vec![ts],
+                volume_paths: vec![r"\Device\HarddiskVolume1".to_string()],
+                referenced_files: vec![r"C:\Windows\System32\cmd.exe".to_string()],
+                version: 30,
+            }),
+            WindowsArtefactRecord::Evtx(EvtxArtefact {
+                run_id: "run_windows".to_string(),
+                offset: 3,
+                size: 4096,
+                first_chunk: 0,
+                last_chunk: 10,
+                record_count_estimate: 128,
+                log_name: Some("Security".to_string()),
+            }),
+            WindowsArtefactRecord::RegistryHive(RegistryHiveArtefact {
+                run_id: "run_windows".to_string(),
+                offset: 4,
+                size: 4096,
+                timestamp: Some(ts),
+                hive_name: Some("SOFTWARE".to_string()),
+                hive_type: Some("SOFTWARE".to_string()),
+                root_key_name: Some("Microsoft".to_string()),
+            }),
+        ];
+
+        for record in &records {
+            sink.record_windows_artefact(record)
+                .expect("record windows artefact");
+        }
+
+        sink.flush().expect("flush");
+
+        let content =
+            std::fs::read_to_string(dir.path().join("metadata").join("windows_artefacts.csv"))
+                .expect("read csv");
+        assert!(content.contains("artefact_type"));
+        assert!(content.contains("lnk"));
+        assert!(content.contains("prefetch"));
+        assert!(content.contains("evtx"));
+        assert!(content.contains("registry"));
+        assert!(content.contains("2023-11-14T22:13:20.000000Z"));
     }
 }

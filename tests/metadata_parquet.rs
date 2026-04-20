@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 
 use swiftbeaver::carve::CarvedFile;
+use swiftbeaver::carve::windows::{
+    EvtxArtefact, LnkArtefact, PrefetchArtefact, RegistryHiveArtefact, WindowsArtefactRecord,
+};
 use swiftbeaver::config;
 use swiftbeaver::metadata::{self, EntropyRegion, MetadataBackendKind, RunSummary};
 use swiftbeaver::parsers::browser::{
@@ -62,6 +65,57 @@ fn parquet_writes_expected_files() {
     sink.record_string(&artefact).expect("record url");
 
     let visit_time = chrono::DateTime::from_timestamp(1_600_000_000, 0).map(|dt| dt.naive_utc());
+    let windows_records = vec![
+        WindowsArtefactRecord::Lnk(LnkArtefact {
+            run_id: "run_001".to_string(),
+            offset: 2048,
+            size: 512,
+            target_path: Some(r"C:\Users\Alice\Desktop\report.txt".to_string()),
+            working_dir: Some(r"C:\Users\Alice\Desktop".to_string()),
+            creation_time: visit_time,
+            access_time: visit_time,
+            write_time: visit_time,
+            file_size: 64,
+            volume_serial: Some("ABCD-1234".to_string()),
+            local_base_path: Some(r"C:\Users\Alice\Desktop\report.txt".to_string()),
+            network_path: None,
+        }),
+        WindowsArtefactRecord::Prefetch(PrefetchArtefact {
+            run_id: "run_001".to_string(),
+            offset: 4096,
+            size: 1024,
+            executable_name: "CMD.EXE".to_string(),
+            prefetch_hash: "00112233".to_string(),
+            run_count: 7,
+            last_run_times: visit_time.iter().copied().collect(),
+            volume_paths: vec![r"\Device\HarddiskVolume1".to_string()],
+            referenced_files: vec![r"C:\Windows\System32\cmd.exe".to_string()],
+            version: 30,
+        }),
+        WindowsArtefactRecord::Evtx(EvtxArtefact {
+            run_id: "run_001".to_string(),
+            offset: 8192,
+            size: 4096,
+            first_chunk: 0,
+            last_chunk: 3,
+            record_count_estimate: 128,
+            log_name: Some("Security".to_string()),
+        }),
+        WindowsArtefactRecord::RegistryHive(RegistryHiveArtefact {
+            run_id: "run_001".to_string(),
+            offset: 12288,
+            size: 4096,
+            timestamp: visit_time,
+            hive_name: Some("SOFTWARE".to_string()),
+            hive_type: Some("SOFTWARE".to_string()),
+            root_key_name: Some("Microsoft".to_string()),
+        }),
+    ];
+    for record in &windows_records {
+        sink.record_windows_artefact(record)
+            .expect("record windows artefact");
+    }
+
     let record = BrowserHistoryRecord {
         run_id: "run_001".to_string(),
         browser: "chrome".to_string(),
@@ -137,6 +191,7 @@ fn parquet_writes_expected_files() {
     let history_path = parquet_dir.join("browser_history.parquet");
     let cookies_path = parquet_dir.join("browser_cookies.parquet");
     let downloads_path = parquet_dir.join("browser_downloads.parquet");
+    let windows_path = parquet_dir.join("windows_artefacts.parquet");
     let summary_path = parquet_dir.join("run_summary.parquet");
     let entropy_path = parquet_dir.join("entropy_regions.parquet");
 
@@ -145,6 +200,7 @@ fn parquet_writes_expected_files() {
     assert!(history_path.exists());
     assert!(cookies_path.exists());
     assert!(downloads_path.exists());
+    assert!(windows_path.exists());
     assert!(summary_path.exists());
     assert!(entropy_path.exists());
 
@@ -153,6 +209,7 @@ fn parquet_writes_expected_files() {
     assert_eq!(count_rows(&history_path), 1);
     assert_eq!(count_rows(&cookies_path), 1);
     assert_eq!(count_rows(&downloads_path), 1);
+    assert_eq!(count_rows(&windows_path), 4);
     assert_eq!(count_rows(&summary_path), 1);
     assert_eq!(count_rows(&entropy_path), 1);
 
@@ -161,6 +218,8 @@ fn parquet_writes_expected_files() {
     assert_has_column(&history_path, "evidence_sha256");
     assert_has_column(&cookies_path, "evidence_sha256");
     assert_has_column(&downloads_path, "evidence_sha256");
+    assert_has_column(&windows_path, "artefact_type");
+    assert_has_column(&windows_path, "evidence_sha256");
     assert_has_column(&summary_path, "evidence_sha256");
     assert_has_column(&entropy_path, "evidence_sha256");
     assert_has_column(&entropy_path, "entropy");
