@@ -1,8 +1,8 @@
-use std::fs::File;
-
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const GIF87A: &[u8] = b"GIF87a";
@@ -33,19 +33,36 @@ impl CarveHandler for GifCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 6];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[..] != GIF87A && &buf[..] != GIF89A {
+            return Ok(PreValidation::Reject("gif header mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let (full_path, rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
+        let mut stream = CarveStream::new(ctx, hit.global_offset, self.max_size, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;
@@ -103,16 +120,16 @@ impl CarveHandler for GifCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_msg) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
             }
         }
 
-        let (size, md5_hex, sha256_hex) = stream.finish()?;
+        let (size, md5_hex, sha256_hex, mut writer) = stream.finalize()?;
         if size < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -122,21 +139,26 @@ impl CarveHandler for GifCarveHandler {
             hit.global_offset + size - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 

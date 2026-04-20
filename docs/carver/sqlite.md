@@ -12,7 +12,7 @@ The SQLite carver extracts SQLite database files by detecting the database heade
 
 ## Carving Algorithm
 
-The SQLite carver uses metadata-driven size calculation:
+The SQLite carver uses metadata-driven size calculation combined with page-by-page validation:
 
 ### 1. Header Parsing (100 bytes)
 
@@ -59,46 +59,56 @@ let page_size = if page_size_raw == 1 {
 
 Valid page sizes: 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536
 
-### 3. Database Size Calculation
+### 3. Page-by-Page Validation
 
-```rust
-let page_count = u32::from_be_bytes([header[28], header[29], header[30], header[31]]);
-let total_size = if page_count == 0 {
-    page_size as u64  // Single-page database
-} else {
-    page_size as u64 * page_count as u64
-};
-```
+After the header page is written, each subsequent page is examined before being written:
 
-### 4. Carving
+1. **Peek** at the first byte of the page (the B-tree page type byte)
+2. **Check** if it is a valid SQLite page type:
+   - `0x00` — free page / overflow page
+   - `0x02` — index B-tree interior page
+   - `0x05` — table B-tree interior page
+   - `0x0A` — index B-tree leaf page
+   - `0x0D` — table B-tree leaf page
+3. **Track** consecutive invalid pages. If the count reaches the threshold (`sqlite_max_consecutive_invalid_pages`, default **3**), carving stops early — the database boundary has likely been passed.
+4. **Write** the full page regardless (valid or invalid) to preserve evidence up to the termination point.
 
-```rust
-let target_size = total_size.min(max_size);
-stream.read_exact((target_size - 100) as usize)?;
-```
+### 4. Validated Flag
 
-Reads exactly the calculated size (or max_size, whichever is smaller).
+After all pages are processed, the `validated` flag is determined by two criteria:
+
+- The ratio of valid pages to total examined pages must be ≥ `sqlite_min_valid_page_ratio` (default **0.5**)
+- Carving must not have been stopped early by the consecutive-invalid threshold
+
+Both conditions must be true for `validated = true`.
 
 ## Validation
 
 - **Validated**: `true` if:
   - Header matches "SQLite format 3\0"
   - Page size is valid
-  - Complete database size is read
+  - Valid-page ratio ≥ `sqlite_min_valid_page_ratio` (default 0.5)
+  - No early termination from consecutive invalid pages
 - **Truncated**: `true` if:
-  - EOF reached before complete size
+  - EOF reached before all pages read
   - max_size enforced
 - **Invalid**: Removed if:
   - Header mismatch
   - Page size invalid
-  - Total size < 100 bytes
 
 ## Size Constraints
 
 - **Default min_size**: 100 bytes (size of SQLite header)
-- **Default max_size**: 1 GB
+- **Default max_size**: 100 MiB
 - Minimum viable SQLite: 512 bytes (single page at min page size)
 - Files below min_size are discarded
+
+## Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `sqlite_max_consecutive_invalid_pages` | 3 | Number of consecutive invalid page types before early termination |
+| `sqlite_min_valid_page_ratio` | 0.5 | Minimum ratio of valid pages for `validated=true` |
 
 ## Hash Computation
 
@@ -167,7 +177,7 @@ fn test_sqlite_carver() {
 
 - **Deleted records**: Database may contain deleted data in free pages
 - **WAL mode**: If database was in WAL mode, -wal and -shm files may exist separately
-- **Corruption**: Carves database even if corrupted (integrity check not performed)
+- **Corruption**: Page-by-page validation detects non-SQLite data; early termination prevents carving past the real database boundary
 - **Timestamps**: Database header contains no timestamps (check file metadata)
 - **Encryption**: Cannot detect if database is encrypted (SQLCipher uses same header)
 
@@ -197,7 +207,7 @@ Page 2-N (B-tree Pages):
 ## Known Limitations
 
 1. **WAL files not included**: Write-Ahead Log files must be carved separately
-2. **No integrity check**: Does not validate b-tree structure or checksums
+2. **No deep integrity check**: Validates page-type bytes but does not verify full b-tree structure, cell pointers, or checksums
 3. **Assumes contiguous**: Does not handle fragmented databases
 4. **Page count trusted**: Relies on header metadata (could be incorrect in corrupted DB)
 

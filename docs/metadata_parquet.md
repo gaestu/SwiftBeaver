@@ -36,6 +36,8 @@ Schema:
 - `validated` (bool)
 - `truncated` (bool)
 - `error` (string, nullable)
+- `is_duplicate` (bool)
+- `duplicate_of_offset` (int64, nullable)
 
 ## String artefacts
 
@@ -114,8 +116,9 @@ Phone schema:
 - `row_id` (int64, nullable)
 - `table_name` (string, nullable)
 
-Page-level recovery emits `browser="sqlite_page"` and `visit_source="page_scan"` with best-effort `title` and `visit_time_utc`.
 Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
+Note: `sqlite_page` and `sqlite_wal` are carve-only file outputs and do not emit browser row metadata.
 
 ## Browser cookies
 
@@ -173,8 +176,15 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `chunks_processed` (int64)
 - `hits_found` (int64)
 - `files_carved` (int64)
+- `files_rejected` (int64)
+- `files_prevalidation_rejected` (int64)
+- `overlap_skipped` (int64)
 - `string_spans` (int64)
 - `artefacts_extracted` (int64)
+- `duplicates_found` (int64)
+- `duplicates_skipped` (int64)
+
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts same-type hits skipped because they landed inside a range already carved by that worker.
 
 ## Entropy regions
 

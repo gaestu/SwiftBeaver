@@ -48,8 +48,9 @@ fn cancel_flag_stops_pipeline_early() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
+        1,
         1,
         64,
         0,
@@ -59,6 +60,7 @@ fn cancel_flag_stops_pipeline_early() {
         cancel_flag,
         None,
         None,
+        false,
     )
     .expect("pipeline");
 

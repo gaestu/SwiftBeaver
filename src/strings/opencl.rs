@@ -52,6 +52,8 @@ __kernel void scan_ascii_spans(
     uint window = 0;
     const uint HTTP = 0x68747470;
     const uint WWW = 0x7777772e;
+    const uint FTP = 0x6674703a;
+    const uint FTPS = 0x66747073;
 
     while ((ulong)(gid + len) < data_len) {
         uchar c = data[gid + len];
@@ -63,7 +65,7 @@ __kernel void scan_ascii_spans(
             lower = (uchar)(lower + 32);
         }
         window = (window << 8) | (uint)lower;
-        if (window == HTTP || window == WWW) {
+        if (window == HTTP || window == WWW || window == FTP || window == FTPS) {
             flags |= 16;
         }
         if (c == '@') {

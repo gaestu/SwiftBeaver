@@ -42,10 +42,41 @@ stream.read_exact(remaining as usize)?;
 
 ## Validation
 
+### RIFF Structure Validation
+
 - **Validated**: `true` if:
   - "RIFF" signature matches
   - "WAVE" form type matches
   - Size field is reasonable (>= 4)
+  - Valid `fmt ` subchunk found within first 64 KB
+
+### Audio Format Validation (fmt chunk)
+
+The carver validates the `fmt ` subchunk to prevent false positives:
+
+| Field | Valid Values | Description |
+|-------|--------------|-------------|
+| Audio Format | 0x0001 (PCM), 0x0003 (IEEE Float) | Compression format |
+| Channels | 1-8 | Number of audio channels |
+| Sample Rate | 8,000 - 192,000 Hz | Samples per second |
+| Bits per Sample | 8, 16, 24, 32 | Bit depth |
+
+Files with invalid audio parameters are rejected as false positives.
+
+### Size and Duration Validation
+
+Additional checks prevent false positives from corrupt or implausible size fields:
+
+| Check | Threshold | Description |
+|-------|-----------|-------------|
+| Near-max RIFF size | chunk_size ≥ 0xFFFFFF00 | Rejects sentinel/placeholder values near u32::MAX |
+| Data subchunk consistency | data_size > RIFF total_size | Rejects data chunks larger than their container |
+| Duration plausibility | > 3 hours | Rejects unreasonably long implied audio duration |
+
+Duration is calculated from the `data` subchunk size and `fmt` byte rate. The 3-hour limit matches the MP3 carver's maximum duration.
+
+### Validation Status
+
 - **Truncated**: `true` if:
   - max_size reached before complete file
   - EOF reached before complete file
@@ -53,11 +84,14 @@ stream.read_exact(remaining as usize)?;
   - "RIFF" signature mismatch
   - "WAVE" form type mismatch
   - Size field < 4 bytes
+  - RIFF chunk_size near u32::MAX (corrupt/sentinel)
+  - `data` subchunk size exceeds RIFF container
+  - Implied audio duration exceeds 3 hours
 
 ## Size Constraints
 
 - **Default min_size**: 44 bytes (minimal WAV with tiny PCM data)
-- **Default max_size**: 2 GB
+- **Default max_size**: 500 MB
 - Minimum viable WAV: 44 bytes (RIFF header + fmt chunk + data chunk header)
 - Files below min_size are discarded
 

@@ -3,13 +3,11 @@
 //! ICO files have a small header with directory entries containing offsets/sizes.
 //! Enhanced validation verifies that at least one entry contains valid BMP or PNG data.
 
-use std::fs::File;
-
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 /// BMP signature at start of image data within ICO
@@ -76,15 +74,49 @@ impl CarveHandler for IcoCarveHandler {
         "ico"
     }
 
+    fn is_fast(&self) -> bool {
+        true
+    }
+
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 6];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0] != 0x00 || buf[1] != 0x00 {
+            return Ok(PreValidation::Reject(
+                "ico reserved bytes invalid".to_string(),
+            ));
+        }
+        let icon_type = u16::from_le_bytes([buf[2], buf[3]]);
+        if icon_type != 1 && icon_type != 2 {
+            return Ok(PreValidation::Reject("ico type invalid".to_string()));
+        }
+        let count = u16::from_le_bytes([buf[4], buf[5]]);
+        if count == 0 || count > 255 {
+            return Ok(PreValidation::Reject(
+                "ico image count implausible".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let header = read_exact_at(ctx, hit.global_offset, 6)
             .ok_or_else(|| CarveError::Invalid("ico header too short".to_string()))?;
         if header[0] != 0 || header[1] != 0 {
@@ -161,47 +193,49 @@ impl CarveHandler for IcoCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             total_end,
-            &mut file,
-            &mut md5,
-            &mut sha256,
+            &full_path,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated: !eof_truncated,
-            truncated: eof_truncated,
-            errors: Vec::new(),
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !eof_truncated,
+                truncated: eof_truncated,
+                errors: Vec::new(),
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -274,16 +308,24 @@ mod tests {
             global_offset: 0,
             file_type_id: "ico".to_string(),
             pattern_id: "ico_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.size > 0);
     }
 }

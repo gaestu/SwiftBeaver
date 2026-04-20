@@ -6,7 +6,7 @@ The default config is `config/default.yml`.
 
 - `run_id` (string): optional; if empty, a timestamp-based ID is generated.
 - `overlap_bytes` (u64): overlap between chunks.
-- `max_files` (u64, optional): stop after carving this many files.
+- `max_files` (u64, optional): strict cap on carved files; the pipeline stops once the limit is reached.
 - `max_memory_mib` (u64, optional): limit address space in MiB (Unix only).
 - `max_open_files` (u64, optional): limit max open file descriptors (Unix only).
 - `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.
@@ -22,15 +22,29 @@ The default config is `config/default.yml`.
 - `enable_entropy_detection` (bool): enable entropy region detection.
 - `entropy_window_size` (usize): window size (bytes) used for entropy calculation.
 - `entropy_threshold` (float): entropy threshold for marking high-entropy regions.
-- `enable_sqlite_page_recovery` (bool): enable SQLite page-level URL recovery when DB parsing fails.
+- `sqlite_page_max_hits_per_chunk` (usize): cap for `sqlite_page` scanner hits per chunk to limit single-byte marker overload.
+- `sqlite_wal_max_consecutive_checksum_failures` (u32): maximum consecutive WAL frames allowed to fail full rolling checksum validation before carving stops. This controls stop behavior, not frame filtering; mismatching frames observed before the stop threshold may still be included in carved bytes. Set to `0` to stop at the first checksum mismatch.
 - `opencl_platform_index` (usize, optional): select OpenCL platform by index.
 - `opencl_device_index` (usize, optional): select OpenCL device by index.
 - `zip_allowed_kinds` (list, optional): restrict ZIP outputs to `zip`, `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`, `epub` when set.
 - `ole_allowed_kinds` (list, optional): restrict OLE outputs to `doc`, `xls`, `ppt` when set.
 - `quicktime_mode` (string): handling for QuickTime; `mov` (default) keeps MOV separate, `mp4` treats QuickTime as MP4.
+- `deferred_buffer_kb` (usize): kilobytes to buffer in memory before creating an output file on disk. Deferred creation avoids the create-write-delete I/O cycle for candidates that fail structural validation during carving. Set to `0` to disable deferral (eager file creation, matching pre-deferred behavior). Default: `64`.
+- `ewf_cache_segments` (usize): number of 64 KiB segments to cache in the EWF read-through LRU cache. Each segment consumes 64 KiB of memory. Default: `4096` (256 MiB total cache). Set to `0` to disable caching.
+- `ewf_reader_handles` (usize): number of independent libewf handles to open for parallel EWF decompression. Each handle decompresses independently, enabling concurrent reads from different pipeline threads. Default: `0` (auto-detect: `min(4, max(2, num_cpus/4))`). Set to `1` to disable pooling and use a single serialized handle.
+- `hash_algorithms` (list of strings): hash algorithms to compute for each carved file. Supported: `md5`, `sha256`. Default: `["md5", "sha256"]`. Unknown names produce a warning and are ignored.
+- `enable_deduplication` (bool): enable deduplication tracking based on SHA256 hashes. When enabled, each carved file's metadata includes `is_duplicate` and `duplicate_of_offset` fields. Requires `sha256` in `hash_algorithms` (added automatically if missing). Default: `false`. Note: the total number of duplicates is deterministic, but which specific file is marked as the "original" versus "duplicate" may vary between runs due to parallel processing order.
+- `skip_duplicate_files` (bool): skip writing duplicate files to disk when deduplication is enabled. Metadata is still recorded for all files. Requires `enable_deduplication`. Default: `false`. Note: when enabled, duplicate detection uses zero-write dedup — SHA-256 hashes are computed during the carve (validation) phase before any disk I/O, so duplicate files are discarded without ever being written to disk.
+- `fast_carve_worker_ratio` (f64): fraction of carve workers assigned to the fast queue (0.0–1.0). Fast carvers (BMP, ICO, ELF, TIFF, WebP, HEIC, MOV, LRF, MOBI, WMV, Bzip2, Gzip) are routed to a separate worker pool so they are not blocked behind slow, I/O-heavy carvers (SQLite, MP3, PDF, etc.). When `carve_workers < 2`, all hits go through a single pool. Default: `0.25`.
+- `write_workers` (usize): number of dedicated I/O writer threads for flushing carved files to disk. Carve workers perform CPU-bound validation, parsing and hashing, then hand off the validated result to writer threads for disk I/O. Fewer writer threads are typically needed compared to carve workers, since SSDs can saturate with limited parallelism. Default: `4`.
+- `scan_workers` (usize, optional): override the number of scan worker threads. Defaults to the `--workers` CLI value (CPU core count). Scan workers are CPU-bound and should typically match the core count.
+- `carve_workers` (usize, optional): override the number of carve worker threads. Defaults to the `--workers` CLI value (CPU core count). Carve workers are I/O-bound, so scaling them beyond the CPU core count can improve throughput on fast storage.
+- `carver_limits` (map): per-carver concurrency limits. Each key is a carver type ID (e.g. `sqlite`, `mp3`), value is an object with `max_concurrent` (optional usize) specifying the maximum number of slow carve workers that may process this type simultaneously. Default: `{}` (unlimited for all types).
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.
+Note: `sqlite_page` and `sqlite_wal` are carve-only outputs; enable/disable them via `file_types` and CLI type filters (`--types` / `--enable-types`).
+Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, and `overlap_skipped` for same-type hits skipped because they fall inside a range already carved by that worker.
 
 ## File type configuration
 
@@ -42,7 +56,7 @@ Each entry in `file_types` contains:
 - `footer_patterns`: footer signatures used by the `footer` validator
 - `max_size`: maximum carve size in bytes
 - `min_size`: minimum carve size in bytes
-- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `pdf`, `zip`, `webp`, `bmp`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `footer`)
+- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `sqlite_wal`, `sqlite_page`, `pdf`, `zip`, `webp`, `bmp`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `footer`)
 - `require_eocd`: optional; for ZIP, require an EOCD before carving (prevents large false positives)
 
 The `footer` validator performs a simple header-to-footer carve for formats without a dedicated handler.

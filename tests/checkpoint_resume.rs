@@ -94,8 +94,9 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
+        1,
         1,
         64,
         0,
@@ -105,6 +106,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
         cancel_flag,
         None,
         checkpoint_cfg,
+        false,
     )
     .expect("pipeline");
 
@@ -144,8 +146,9 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
         evidence,
         sig_scanner,
         None,
-        meta_sink,
+        vec![meta_sink],
         &run_output_dir,
+        1,
         1,
         64,
         0,
@@ -155,6 +158,7 @@ fn resume_from_checkpoint_skips_scanned_chunks() {
         cancel_flag,
         None,
         checkpoint_cfg,
+        false,
     )
     .expect("pipeline");
 

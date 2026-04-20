@@ -1,0 +1,75 @@
+• Here’s a focused recommendation set to upgrade SwiftBeaver for your unallocated‑with‑timestamps goal, based on its current design (SQLite carver + JSONL outputs) and the limitations called out in your wiki.
+
+  Priority 1 — Timestamps from intact DBs
+
+  - Parse visit timestamps from carved SQLite files (not just URLs).
+      - Chromium: urls.last_visit_time, visits.visit_time (WebKit microseconds since 1601).
+      - Firefox: moz_places.last_visit_date, moz_historyvisits.visit_date (PRTime microseconds since 1970).
+  - Emit these directly in metadata/browser_history.jsonl as visit_time + a visit_source such as db or sqlite_row.
+
+  Priority 2 — WAL + page recovery (for unallocated/fragments)
+
+  - Add WAL detection & parsing to recover pages not in the main DB.
+      - WAL header magic is documented by SQLite (two magic values); parse frames and extract pages.
+  - Page‑level recovery: parse b‑tree leaf pages and freelist pages to extract history rows even if the DB is corrupted or missing pages.
+  - Emit browser="sqlite_page" and visit_source="page_scan" (you already define this) with a confidence score and offsets.
+
+  Priority 3 — Unallocated‑only scanning
+
+  - Add a “filesystem‑aware unallocated mode” to avoid scanning allocated space.
+      - Option A: accept a prefiltered unallocated stream (e.g., SleuthKit blkls) as input.
+      - Option B: integrate a lightweight TSK/MFT bitmap reader in SwiftBeaver to build unallocated ranges.
+  - Include partition_index, fs_type, block_size, and range info in output metadata.
+
+  SQLite carving improvements
+
+  - Keep header‑based carve (fast) but add “fragment mode”:
+      - If header is found but page count looks invalid or truncated, fall back to page‑scan for that DB region.
+  - Record offsets/lengths per carved DB:
+      - global_start, global_end, db_size, truncated, and a carve_kind (full_db / page_scan / wal_frame).
+
+  Browser‑specific extraction (beyond history)
+
+  - Cookies: Chromium cookies table; Firefox moz_cookies with PRTime timestamps.
+  - Downloads: Chromium downloads + downloads_url_chains; Firefox moz_annos/moz_downloads (if present).
+  - Consider emitting browser_cookies.jsonl and browser_downloads.jsonl with timestamps similar to history.
+
+  Provenance + dedupe
+
+  - Include source_file / source_db path, db_offset, and page_no for page‑scan entries.
+  - Add a record_hash to dedupe (URL + timestamp + source).
+  - Add confidence (full db > wal page > page scan).
+
+  Testing upgrades
+
+  - Golden images that include:
+      - intact History DBs,
+      - History in WAL only,
+      - deleted rows (freelist),
+      - fragmented DBs,
+      - pure unallocated streams.
+  - Assertions should verify visit_time extraction for each browser and each recovery method.
+
+  Why this aligns with your goal
+
+  - Intact DB parsing gives immediate, high‑confidence timestamps.
+  - WAL + page scan recovers data after Deep Freeze / deletion (unallocated).
+  - Unallocated‑only mode reduces noise and improves runtime on big images.
+
+• Short answer: unallocated‑only scanning doesn’t have to be significantly slower, and in many cases it’s faster because you scan fewer bytes. The main trade‑off is I/O pattern: full‑disk scanning is perfectly sequential, while unallocated scanning introduces seeks between unallocated runs.
+
+  Key points
+
+  - If you precompute unallocated runs (LBA ranges) and read them in order, you still stream sequentially within each run; the only overhead is the seeks between runs.
+  - If free space is large and contiguous, unallocated‑only is much faster. If it’s highly fragmented, the seeks can reduce throughput, but you’re still skipping allocated data.
+  - On compressed formats (E01), random access is a bit more expensive, but the cost is usually outweighed when you skip a lot of data.
+  - You will miss artefacts in allocated files and file slack unless you add an optional “include slack” mode.
+
+  Recommendation for SwiftBeaver
+
+  - Make unallocated‑only a selectable mode, not the default.
+  - Build a run‑list from filesystem metadata and feed it into your chunk scheduler; keep large sequential reads inside each run.
+  - Add a “min‑gap” threshold: if an allocated gap is tiny, just scan through it to avoid too many seeks.
+  - Preserve original offsets (LBA + partition) in metadata so results remain forensically meaningful.
+
+  If you want, I can sketch the run‑list + scheduler interface for SwiftBeaver so it stays streaming‑friendly.

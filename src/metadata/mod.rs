@@ -17,8 +17,13 @@ pub struct RunSummary {
     pub chunks_processed: u64,
     pub hits_found: u64,
     pub files_carved: u64,
+    pub files_rejected: u64,
+    pub files_prevalidation_rejected: u64,
+    pub overlap_skipped: u64,
     pub string_spans: u64,
     pub artefacts_extracted: u64,
+    pub duplicates_found: u64,
+    pub duplicates_skipped: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -35,6 +40,18 @@ pub enum MetadataBackendKind {
     Jsonl,
     Csv,
     Parquet,
+}
+
+impl MetadataBackendKind {
+    /// Whether this backend supports multiple independent sink instances
+    /// writing to the same output directory without file conflicts.
+    ///
+    /// Parquet uses lazy per-category writers so each shard only creates
+    /// the files it needs. CSV and JSONL eagerly create all output files
+    /// in `new()`, so multiple instances would truncate each other.
+    pub fn supports_sharding(self) -> bool {
+        matches!(self, MetadataBackendKind::Parquet)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -79,8 +96,13 @@ pub enum MetadataError {
 ///     chunks_processed: 0,
 ///     hits_found: 0,
 ///     files_carved: 0,
+///     files_rejected: 0,
+///     files_prevalidation_rejected: 0,
+///     overlap_skipped: 0,
 ///     string_spans: 0,
 ///     artefacts_extracted: 0,
+///     duplicates_found: 0,
+///     duplicates_skipped: 0,
 /// };
 /// sink.record_run_summary(&summary).unwrap();
 /// sink.flush().unwrap();
@@ -126,6 +148,7 @@ impl MetadataSink for DryRunSink {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_sink(
     backend: MetadataBackendKind,
     cfg: &crate::config::Config,

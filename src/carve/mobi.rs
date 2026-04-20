@@ -2,13 +2,11 @@
 //!
 //! Uses PDB record offsets to estimate file size; best-effort heuristic.
 
-use std::fs::File;
-
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const PDB_HEADER_LEN: usize = 78;
@@ -36,15 +34,78 @@ impl CarveHandler for MobiCarveHandler {
         "mobi"
     }
 
+    fn is_fast(&self) -> bool {
+        true
+    }
+
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        // The MOBI scanner is configured to hit on the BOOKMOBI magic at byte 60
+        // within the PDB header, so pre-validation normalizes back to the true file
+        // start before checking the container fields.
+        let Some(start_offset) = offset.checked_sub(MOBI_OFFSET) else {
+            return Ok(PreValidation::Reject(
+                "mobi hit before PDB header start".to_string(),
+            ));
+        };
+
+        let mut header = [0u8; PDB_HEADER_LEN];
+        let n = evidence
+            .read_at(start_offset, &mut header)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < header.len() {
+            return Ok(PreValidation::Reject("pdb header too short".to_string()));
+        }
+        if &header[60..68] != MOBI_MAGIC {
+            return Ok(PreValidation::Reject("mobi magic mismatch".to_string()));
+        }
+
+        let record_count = u16::from_be_bytes([header[76], header[77]]) as usize;
+        if record_count == 0 || record_count > 4096 {
+            return Ok(PreValidation::Reject(format!(
+                "implausible PDB record count {}",
+                record_count
+            )));
+        }
+
+        let record_list_len = record_count * 8;
+        let mut record_list = vec![0u8; record_list_len];
+        let n = evidence
+            .read_at(start_offset + PDB_HEADER_LEN as u64, &mut record_list)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < record_list_len {
+            return Ok(PreValidation::Reject(
+                "pdb record list truncated".to_string(),
+            ));
+        }
+
+        let first_offset = u32::from_be_bytes([
+            record_list[0],
+            record_list[1],
+            record_list[2],
+            record_list[3],
+        ]) as u64;
+        if first_offset < PDB_HEADER_LEN as u64 + record_list_len as u64 {
+            return Ok(PreValidation::Reject(
+                "first PDB record overlaps header".to_string(),
+            ));
+        }
+
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let start_offset = if hit.pattern_id == "mobi_pdb" {
             if hit.global_offset < MOBI_OFFSET {
                 return Ok(None);
@@ -112,47 +173,49 @@ impl CarveHandler for MobiCarveHandler {
             &self.extension,
             start_offset,
         )?;
-        let mut file = File::create(&full_path)?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             start_offset,
             total_end,
-            &mut file,
-            &mut md5,
-            &mut sha256,
+            &full_path,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             start_offset
         } else {
             start_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: start_offset,
-            global_end,
-            size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated: !eof_truncated,
-            truncated: eof_truncated,
-            errors: Vec::new(),
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: start_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !eof_truncated,
+                truncated: eof_truncated,
+                errors: Vec::new(),
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -168,7 +231,7 @@ fn read_exact_at(ctx: &ExtractionContext, offset: u64, len: usize) -> Option<Vec
 #[cfg(test)]
 mod tests {
     use super::MobiCarveHandler;
-    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::carve::{CarveHandler, ExtractionContext, PreValidation};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
     use tempfile::tempdir;
@@ -212,16 +275,52 @@ mod tests {
             global_offset: 60,
             file_type_id: "mobi".to_string(),
             pattern_id: "mobi_pdb".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert_eq!(carved.size, data.len() as u64);
+    }
+
+    #[test]
+    fn pre_validate_accepts_valid_mobi() {
+        let data = minimal_mobi();
+        let evidence = SliceEvidence { data };
+        let handler = MobiCarveHandler::new("mobi".to_string(), 0, 0);
+
+        assert_eq!(
+            handler.pre_validate(&evidence, 60).expect("pre_validate"),
+            PreValidation::Proceed
+        );
+    }
+
+    #[test]
+    fn pre_validate_rejects_bad_record_count() {
+        let mut data = minimal_mobi();
+        data[76..78].copy_from_slice(&(0u16).to_be_bytes());
+        let evidence = SliceEvidence { data };
+        let handler = MobiCarveHandler::new("mobi".to_string(), 0, 0);
+
+        assert!(
+            matches!(
+                handler.pre_validate(&evidence, 60).expect("pre_validate"),
+                PreValidation::Reject(reason) if reason.contains("record count")
+            ),
+            "invalid record counts should be rejected during pre-validation"
+        );
     }
 }

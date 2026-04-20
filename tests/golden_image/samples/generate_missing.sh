@@ -25,7 +25,7 @@ trap "rm -rf $TEMP_DIR" EXIT
 #------------------------------------------------------------------------------
 # BMP - Missing from images/
 #------------------------------------------------------------------------------
-echo "[1/8] Generating BMP..."
+echo "[1/9] Generating BMP..."
 if command -v convert &> /dev/null; then
     convert -size 50x50 xc:purple BMP3:images/test.bmp
     echo "  ✓ Created images/test.bmp"
@@ -36,10 +36,10 @@ fi
 #------------------------------------------------------------------------------
 # RAR - Missing from archives/
 #------------------------------------------------------------------------------
-echo "[2/8] Generating RAR..."
+echo "[2/9] Generating RAR..."
 mkdir -p archives
 echo "This is test content for RAR archive." > "$TEMP_DIR/test_content.txt"
-echo "Created: $(date)" >> "$TEMP_DIR/test_content.txt"
+echo "Created: 2025-01-01T00:00:00Z" >> "$TEMP_DIR/test_content.txt"
 
 if command -v rar &> /dev/null; then
     rar a -ep archives/test.rar "$TEMP_DIR/test_content.txt" > /dev/null
@@ -53,9 +53,9 @@ fi
 #------------------------------------------------------------------------------
 # 7z - Missing from archives/
 #------------------------------------------------------------------------------
-echo "[3/8] Generating 7z..."
+echo "[3/9] Generating 7z..."
 echo "This is test content for 7z archive." > "$TEMP_DIR/test_content_7z.txt"
-echo "Created: $(date)" >> "$TEMP_DIR/test_content_7z.txt"
+echo "Created: 2025-01-01T00:00:00Z" >> "$TEMP_DIR/test_content_7z.txt"
 
 if command -v 7z &> /dev/null; then
     7z a archives/test.7z "$TEMP_DIR/test_content_7z.txt" > /dev/null
@@ -67,7 +67,7 @@ fi
 #------------------------------------------------------------------------------
 # TAR variants - Missing from archives/
 #------------------------------------------------------------------------------
-echo "[4/8] Generating TAR archives..."
+echo "[4/9] Generating TAR archives..."
 echo "Test content for tar archive" > "$TEMP_DIR/tarfile.txt"
 
 tar -cf archives/test.tar -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/test.tar"
@@ -89,7 +89,7 @@ fi
 #------------------------------------------------------------------------------
 # PPTX - Missing from documents/
 #------------------------------------------------------------------------------
-echo "[5/8] Generating PPTX..."
+echo "[5/9] Generating PPTX..."
 # Create minimal PPTX (ZIP with specific structure)
 PPTX_DIR="$TEMP_DIR/pptx_build"
 mkdir -p "$PPTX_DIR/_rels" "$PPTX_DIR/ppt/_rels" "$PPTX_DIR/ppt/slides/_rels" "$PPTX_DIR/ppt/slides" "$PPTX_DIR/ppt/slideLayouts" "$PPTX_DIR/ppt/slideMasters"
@@ -148,7 +148,7 @@ echo "  ✓ Created documents/test.pptx"
 #------------------------------------------------------------------------------
 # SQLite - Missing from databases/
 #------------------------------------------------------------------------------
-echo "[6/8] Generating SQLite databases..."
+echo "[6/9] Generating SQLite databases..."
 mkdir -p databases
 
 # Generic test SQLite
@@ -277,9 +277,108 @@ EOF
 echo "  ✓ Created databases/places.sqlite (Firefox-style)"
 
 #------------------------------------------------------------------------------
+# Browser forensic fixtures for golden image (downloads, deleted rows, WAL)
+#------------------------------------------------------------------------------
+echo "[7/9] Generating browser forensic fixtures..."
+
+# Chromium-style downloads fixture
+sqlite3 databases/browser_downloads.sqlite << 'EOF'
+CREATE TABLE downloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_path TEXT NOT NULL,
+    start_time INTEGER,
+    end_time INTEGER,
+    total_bytes INTEGER,
+    state INTEGER
+);
+CREATE TABLE downloads_url_chains (
+    id INTEGER NOT NULL,
+    chain_index INTEGER NOT NULL,
+    url TEXT NOT NULL
+);
+INSERT INTO downloads (id, target_path, start_time, end_time, total_bytes, state) VALUES
+    (1, '/home/user/Downloads/sample.zip', 13380600000000000, 13380600001000000, 4096, 1);
+INSERT INTO downloads_url_chains (id, chain_index, url) VALUES
+    (1, 0, 'https://downloads.example.com/sample.zip');
+EOF
+echo "  ✓ Created databases/browser_downloads.sqlite"
+
+# Deleted-row fixture (keeps deleted content in free pages/freelist)
+sqlite3 databases/browser_history_deleted.sqlite << 'EOF'
+PRAGMA secure_delete=OFF;
+CREATE TABLE urls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL,
+    title TEXT,
+    last_visit_time INTEGER NOT NULL
+);
+CREATE TABLE visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url INTEGER NOT NULL,
+    visit_time INTEGER NOT NULL,
+    transition INTEGER DEFAULT 0
+);
+INSERT INTO urls (id, url, title, last_visit_time) VALUES
+    (1, 'https://kept.example.com/', 'Kept Row', 13380700000000000),
+    (2, 'https://deleted.example.com/', 'Deleted Row', 13380750000000000);
+INSERT INTO visits (url, visit_time, transition) VALUES
+    (1, 13380700000000000, 805306368),
+    (2, 13380750000000000, 805306376);
+DELETE FROM visits WHERE url = 2;
+DELETE FROM urls WHERE id = 2;
+EOF
+echo "  ✓ Created databases/browser_history_deleted.sqlite"
+
+# WAL fixture (contains -wal sidecar for future WAL parsing tests)
+rm -f databases/browser_history_wal.sqlite databases/browser_history_wal.sqlite-wal databases/browser_history_wal.sqlite-shm databases/browser_history_wal_snapshot.bin
+sqlite3 databases/browser_history_wal.sqlite << 'EOF'
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=OFF;
+PRAGMA wal_autocheckpoint=0;
+CREATE TABLE urls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL,
+    title TEXT,
+    last_visit_time INTEGER NOT NULL
+);
+CREATE TABLE visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url INTEGER NOT NULL,
+    visit_time INTEGER NOT NULL,
+    transition INTEGER DEFAULT 0
+);
+INSERT INTO urls (id, url, title, last_visit_time) VALUES
+    (1, 'https://wal.example.com/base', 'WAL Base', 13380800000000000);
+INSERT INTO visits (url, visit_time, transition) VALUES
+    (1, 13380800000000000, 805306368);
+BEGIN;
+INSERT INTO urls (id, url, title, last_visit_time) VALUES
+    (2, 'https://wal.example.com/uncheckpointed', 'WAL Pending', 13380850000000000);
+INSERT INTO visits (url, visit_time, transition) VALUES
+    (2, 13380850000000000, 805306376);
+COMMIT;
+.system cp databases/browser_history_wal.sqlite-wal databases/browser_history_wal_snapshot.bin
+EOF
+if [[ -f databases/browser_history_wal_snapshot.bin ]]; then
+    mv -f databases/browser_history_wal_snapshot.bin databases/browser_history_wal.sqlite-wal
+fi
+if [[ -f databases/browser_history_wal.sqlite-wal ]]; then
+    echo "  ✓ Created databases/browser_history_wal.sqlite (+ -wal)"
+else
+    echo "  ! Created databases/browser_history_wal.sqlite (no -wal sidecar on this sqlite build)"
+fi
+
+# Synthetic isolated SQLite page fragment fixture
+# (single validated 4096-byte table-leaf page for sqlite_page carving tests)
+dd if=/dev/zero of=databases/sqlite_orphan_page.bin bs=4096 count=1 2>/dev/null
+echo -n "0d000000010ff0000ff0" | xxd -r -p | dd of=databases/sqlite_orphan_page.bin bs=1 seek=0 conv=notrunc 2>/dev/null
+echo -n "01" | xxd -r -p | dd of=databases/sqlite_orphan_page.bin bs=1 seek=4080 conv=notrunc 2>/dev/null
+echo "  ✓ Created databases/sqlite_orphan_page.bin"
+
+#------------------------------------------------------------------------------
 # strings.txt - Test data for string scanning
 #------------------------------------------------------------------------------
-echo "[7/8] Generating strings.txt..."
+echo "[8/9] Generating strings.txt..."
 cat > other/strings.txt << 'EOF'
 # Golden Image String Test Data
 # This file contains test patterns for URL/email/phone extraction
@@ -370,7 +469,7 @@ echo "  ✓ Created other/strings.txt"
 #------------------------------------------------------------------------------
 # Tiny media files (optional, for smaller golden image)
 #------------------------------------------------------------------------------
-echo "[8/8] Generating tiny media files (optional)..."
+echo "[9/9] Generating tiny media files (optional)..."
 mkdir -p media_tiny
 
 if command -v ffmpeg &> /dev/null; then

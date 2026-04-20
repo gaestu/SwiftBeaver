@@ -1,6 +1,7 @@
 # HEIC/HEIF Image Carver
 
-**Status:** WIP  
+**Status:** Implemented  
+**Implemented in:** April 2026  
 **Priority:** High  
 **Effort:** Low  
 
@@ -127,9 +128,9 @@ fn determine_heic_size(data: &[u8]) -> Option<u64> {
        - id: "heic_ftyp_20"
          hex: "000000206674797068656963"
        - id: "mif1_ftyp_18"
-         hex: "000000186674797 06D696631"
+         hex: "00000018667479706D696631"
        - id: "mif1_ftyp_1c"
-         hex: "0000001C6674797 06D696631"
+         hex: "0000001C667479706D696631"
      footer_patterns: []
      max_size: 104857600  # 100 MB
      min_size: 100
@@ -182,8 +183,11 @@ fn determine_heic_size(data: &[u8]) -> Option<u64> {
    - Test truncated file handling
    - Test max_size enforcement
 
-6. **Add sample HEIC to test resources:**
-   - Create minimal HEIC test files or use public domain samples
+6. **Add deterministic HEIC/HEIF samples to golden resources:**
+   - `tests/golden_image/samples/images/test_generated.heic` (major brand `heic`)
+   - `tests/golden_image/samples/images/test_generated.heif` (major brand `mif1`)
+   - Regenerate golden image assets:
+     - `cd tests/golden_image && ./generate.sh`
 
 ### Phase 5: Documentation
 

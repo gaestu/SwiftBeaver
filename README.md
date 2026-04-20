@@ -48,7 +48,7 @@ cargo run -- --input /path/to/image.dd --output ./output --scan-strings --scan-u
 
 This creates a run directory under `./output/<run_id>/` with:
 
-- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/bmp/tiff/mp4/mov/rar/7z/wav/avi/mp3/ogg/tar/gz/bz2/xz/doc/xls/ppt/rtf/ico/elf/eml/mobi/fb2/lrf/webm/wmv). ZIPs are classified into docx/xlsx/pptx/odt/ods/odp/epub when entries match. OLE compound documents are classified as doc/xls/ppt.
+- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/sqlite_wal/sqlite_page/bmp/tiff/heic/mp4/mov/rar/7z/wav/avi/mp3/ogg/tar/gz/bz2/xz/doc/xls/ppt/rtf/ico/elf/eml/mobi/fb2/lrf/webm/wmv). ZIPs are classified into docx/xlsx/pptx/odt/ods/odp/epub when entries match. OLE compound documents are classified as doc/xls/ppt.
 - `metadata/` - JSONL records for carved files, string artefacts, and browser history
 
 ## Configuration
@@ -79,10 +79,9 @@ CLI overrides:
 - `--scan-entropy`: enable entropy region detection
 - `--entropy-window-bytes`: overrides `entropy_window_size` when set
 - `--entropy-threshold`: overrides `entropy_threshold` when set
-- `--scan-sqlite-pages`: enable SQLite page-level URL recovery for damaged DBs
 - `--max-bytes`: stop after scanning this many bytes
 - `--max-chunks`: stop after scanning this many chunks
-- `--max-files`: stop after carving this many files
+- `--max-files`: strict cap on carved files; pipeline stops once the limit is reached
 - `--max-memory-mib`: limit address space in MiB (Unix only)
 - `--max-open-files`: limit max open file descriptors (Unix only)
 - `--evidence-sha256`: record a known evidence SHA-256
@@ -97,8 +96,15 @@ CLI overrides:
 - `--enable-types jpeg,png`: enable only listed types (inclusion mode, conflicts with `--types`)
 - `--disable-zip`: disable ZIP carving (skips zip/docx/xlsx/pptx/odt/ods/odp/epub)
 - `--dry-run`: scan and report hits without writing carved files (useful for estimating output size)
+- `--metadata-only` / `--no-carve`: scan, validate, and record metadata (with hashes) but skip writing carved files to disk
 - `--validate-carved`: validate carved files after carving (checks file integrity)
 - `--remove-invalid`: remove invalid carved files (requires `--validate-carved`)
+- `--hash-algorithms md5,sha256`: select hash algorithms to compute (comma-separated; default: md5,sha256)
+- `--dedupe`: enable deduplication tracking (records duplicates in metadata)
+- `--skip-duplicates`: skip writing duplicate files to disk (still records metadata; requires `--dedupe`)
+- `--scan-workers N`: override scan worker thread count (default: `--workers` value). Scan workers are CPU-bound.
+- `--carve-workers N`: override carve worker thread count (default: `--workers` value). Carve workers are I/O-bound; scaling beyond core count can improve throughput on fast storage.
+- `--write-workers N`: number of dedicated I/O writer threads for flushing carved files to disk (default: 4)
 
 QuickTime handling is configurable in `config/default.yml` with `quicktime_mode`:
 - `mov` (default) keeps QuickTime output under `mov`
@@ -107,6 +113,7 @@ QuickTime handling is configurable in `config/default.yml` with `quicktime_mode`
 Note: `--resume-from` requires the same chunk size and overlap used to create the checkpoint.
 
 See `docs/config.md` for the full schema.
+For carve-only SQLite/WAL/page handoff workflow guidance, see `docs/sqlite_carve_handoff.md`.
 
 ## Output metadata (JSONL)
 
@@ -118,6 +125,7 @@ Browser download records are recorded to `metadata/browser_downloads.jsonl`.
 Chromium-based browsers (Chrome/Edge/Brave) share a schema and may be labeled `chrome` in browser outputs.
 Run summaries are recorded to `metadata/run_summary.jsonl`.
 Entropy regions are recorded to `metadata/entropy_regions.jsonl`.
+In carve-only mode, browser metadata files are reserved outputs and may remain empty.
 
 See `docs/metadata_jsonl.md` for the schema.
 CSV output is also available with `--metadata-backend csv` (see `docs/metadata_csv.md`).
@@ -131,7 +139,7 @@ The Phase 2 pipeline:
 2. Chunk scheduler + reader
 3. CPU signature scanner
 4. Optional CPU string scanner + artefact extraction
-5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite/BMP/TIFF/MP4/RAR/7z)
+5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite/BMP/TIFF/HEIC/MP4/RAR/7z)
 6. SQLite parser for browser history
 7. JSONL/CSV metadata sink
 
@@ -198,4 +206,6 @@ cargo test golden --features ewf
 
 ## License
 
-MIT (see `LICENSE`).
+Apache-2.0 (see [LICENSE](LICENSE)).
+
+Third-party licenses and notices: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

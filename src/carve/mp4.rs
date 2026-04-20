@@ -1,11 +1,8 @@
-use std::fs::File;
-use std::io::Write;
-
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const BOX_HEADER_LEN: usize = 8;
@@ -38,11 +35,37 @@ impl CarveHandler for Mp4CarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 12];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[4..8] != b"ftyp" {
+            return Ok(PreValidation::Reject(
+                "mp4 ftyp marker mismatch".to_string(),
+            ));
+        }
+        let size32 = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+        if size32 <= 7 || size32 > 1024 * 1024 {
+            return Ok(PreValidation::Reject(
+                "mp4 ftyp box size implausible".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let mut errors = Vec::new();
         let mut truncated = false;
         let mut seen_ftyp = false;
@@ -115,10 +138,11 @@ impl CarveHandler for Mp4CarveHandler {
                 if box_type != b"ftyp" {
                     return Ok(None);
                 }
-                if let Some(brand) = read_exact_at(ctx, offset.saturating_add(header_len), 4) {
-                    if brand == b"qt  " && !self.allow_quicktime {
-                        return Ok(None);
-                    }
+                if let Some(brand) = read_exact_at(ctx, offset.saturating_add(header_len), 4)
+                    && brand == b"qt  "
+                    && !self.allow_quicktime
+                {
+                    return Ok(None);
                 }
                 seen_ftyp = true;
             }
@@ -149,57 +173,58 @@ impl CarveHandler for Mp4CarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut total_end = last_good;
         if self.max_size > 0 && total_end - hit.global_offset > self.max_size {
             total_end = hit.global_offset + self.max_size;
         }
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             total_end,
-            &mut file,
-            &mut md5,
-            &mut sha256,
+            &full_path,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
         if eof_truncated {
             truncated = true;
             errors.push("eof before MP4 end".to_string());
         }
-        file.flush()?;
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated: !truncated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !truncated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -243,16 +268,24 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = Mp4CarveHandler::new("mp4".to_string(), 8, 0, false);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "mp4".to_string(),
             pattern_id: "mp4_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, mp4.len() as u64);
     }
@@ -281,12 +314,20 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = Mp4CarveHandler::new("mp4".to_string(), 8, 0, false);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "mp4".to_string(),
             pattern_id: "mp4_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
@@ -317,16 +358,24 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = Mp4CarveHandler::new("mp4".to_string(), 8, 0, true);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "mp4".to_string(),
             pattern_id: "mp4_ftyp_18".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, mov.len() as u64);
     }

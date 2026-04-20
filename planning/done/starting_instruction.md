@@ -592,7 +592,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["<your name>"]
 description = "High-speed forensic file and artefact carver with optional GPU acceleration."
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

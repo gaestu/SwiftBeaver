@@ -3,11 +3,11 @@
 //! TAR archives consist of 512-byte headers followed by file data.
 //! The archive ends with two consecutive zero blocks.
 
-use std::fs::File;
-
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const TAR_BLOCK_SIZE: usize = 512;
@@ -39,11 +39,41 @@ impl CarveHandler for TarCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let Some(start_offset) = offset.checked_sub(TAR_USTAR_OFFSET as u64) else {
+            return Ok(PreValidation::Reject(
+                "tar ustar hit before header start".to_string(),
+            ));
+        };
+
+        let mut header = [0u8; TAR_BLOCK_SIZE];
+        let n = evidence
+            .read_at(start_offset, &mut header)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < header.len() {
+            return Ok(PreValidation::Reject("tar header truncated".to_string()));
+        }
+        if header[TAR_USTAR_OFFSET..TAR_USTAR_OFFSET + TAR_USTAR_MAGIC.len()] != *TAR_USTAR_MAGIC {
+            return Ok(PreValidation::Reject(
+                "tar ustar magic mismatch".to_string(),
+            ));
+        }
+        match validate_checksum(&header) {
+            Ok(true) => Ok(PreValidation::Proceed),
+            Ok(false) => Ok(PreValidation::Reject("tar checksum invalid".to_string())),
+            Err(err) => Ok(PreValidation::Reject(err.to_string())),
+        }
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let start_offset = if hit.pattern_id == "tar_ustar" {
             if hit.global_offset < TAR_USTAR_OFFSET as u64 {
                 return Ok(None);
@@ -59,8 +89,7 @@ impl CarveHandler for TarCarveHandler {
             &self.extension,
             start_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut stream = CarveStream::new(ctx.evidence, start_offset, self.max_size, file);
+        let mut stream = CarveStream::new(ctx, start_offset, self.max_size, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;
@@ -92,7 +121,7 @@ impl CarveHandler for TarCarveHandler {
                 }
 
                 let size = parse_octal(&header[124..136])?;
-                let blocks = (size + (TAR_BLOCK_SIZE as u64 - 1)) / TAR_BLOCK_SIZE as u64;
+                let blocks = size.div_ceil(TAR_BLOCK_SIZE as u64);
                 let data_len = blocks.saturating_mul(TAR_BLOCK_SIZE as u64);
                 if data_len > 0 {
                     stream.read_exact(data_len as usize)?;
@@ -109,17 +138,17 @@ impl CarveHandler for TarCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
             }
         }
 
-        let (size, md5_hex, sha256_hex) = stream.finish()?;
+        let (size, md5_hex, sha256_hex, mut writer) = stream.finalize()?;
 
         if size < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -136,21 +165,26 @@ impl CarveHandler for TarCarveHandler {
             start_offset + size - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: start_offset,
-            global_end,
-            size,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: start_offset,
+                global_end,
+                size,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -196,7 +230,7 @@ fn validate_checksum(header: &[u8]) -> Result<bool, CarveError> {
 #[cfg(test)]
 mod tests {
     use super::TarCarveHandler;
-    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::carve::{CarveHandler, ExtractionContext, PreValidation};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
     use tempfile::tempdir;
@@ -261,18 +295,54 @@ mod tests {
             global_offset: 257,
             file_type_id: "tar".to_string(),
             pattern_id: "tar_ustar".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, tar_data.len() as u64);
         assert_eq!(carved.global_start, 0);
+    }
+
+    #[test]
+    fn pre_validate_accepts_valid_tar_ustar_hit() {
+        let tar_data = build_minimal_tar();
+        let evidence = SliceEvidence { data: tar_data };
+        let handler = TarCarveHandler::new("tar".to_string(), 0, 0);
+
+        assert_eq!(
+            handler.pre_validate(&evidence, 257).expect("pre_validate"),
+            PreValidation::Proceed
+        );
+    }
+
+    #[test]
+    fn pre_validate_rejects_invalid_tar_checksum() {
+        let mut tar_data = build_minimal_tar();
+        tar_data[148] = b'9';
+        let evidence = SliceEvidence { data: tar_data };
+        let handler = TarCarveHandler::new("tar".to_string(), 0, 0);
+
+        assert!(
+            matches!(
+                handler.pre_validate(&evidence, 257).expect("pre_validate"),
+                PreValidation::Reject(_)
+            ),
+            "invalid tar headers should be rejected during pre-validation"
+        );
     }
 }

@@ -2,13 +2,11 @@
 //!
 //! We validate the header magic and scan for a footer with a valid CRC32.
 
-use std::fs::File;
-
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const XZ_MAGIC: [u8; 6] = [0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00];
@@ -39,11 +37,29 @@ impl CarveHandler for XzCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 6];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf != XZ_MAGIC {
+            return Ok(PreValidation::Reject("xz magic mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let header = read_exact_at(ctx, hit.global_offset, 12)
             .ok_or_else(|| CarveError::Invalid("xz header too short".to_string()))?;
         if header[0..6] != XZ_MAGIC {
@@ -61,9 +77,7 @@ impl CarveHandler for XzCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut validated = false;
         let mut truncated = false;
@@ -110,16 +124,16 @@ impl CarveHandler for XzCarveHandler {
                     search_start = absolute + 1;
                     continue;
                 }
-                if let Some(footer) = read_exact_at(ctx, footer_start, 12) {
-                    if footer[10..12] == XZ_FOOTER_MAGIC {
-                        let footer_crc =
-                            u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
-                        let computed = crc32(&footer[4..10]);
-                        if footer_crc == computed {
-                            end_offset = Some(footer_end);
-                            validated = true;
-                            break;
-                        }
+                if let Some(footer) = read_exact_at(ctx, footer_start, 12)
+                    && footer[10..12] == XZ_FOOTER_MAGIC
+                {
+                    let footer_crc =
+                        u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
+                    let computed = crc32(&footer[4..10]);
+                    if footer_crc == computed {
+                        end_offset = Some(footer_end);
+                        validated = true;
+                        break;
                     }
                 }
                 search_start = absolute + 1;
@@ -142,13 +156,13 @@ impl CarveHandler for XzCarveHandler {
             errors.push("max_size reached before xz end".to_string());
         }
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             end_offset,
-            &mut file,
-            &mut md5,
-            &mut sha256,
+            &full_path,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
         if eof_truncated {
             truncated = true;
@@ -158,33 +172,37 @@ impl CarveHandler for XzCarveHandler {
         }
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -288,16 +306,24 @@ mod tests {
             global_offset: 0,
             file_type_id: "xz".to_string(),
             pattern_id: "xz_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, data.len() as u64);
     }

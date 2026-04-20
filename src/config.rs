@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use tracing::warn;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FileTypeConfig {
@@ -65,8 +67,14 @@ pub struct Config {
     pub entropy_window_size: usize,
     #[serde(default = "default_entropy_threshold")]
     pub entropy_threshold: f64,
-    #[serde(default)]
-    pub enable_sqlite_page_recovery: bool,
+    #[serde(default = "default_sqlite_page_max_hits_per_chunk")]
+    pub sqlite_page_max_hits_per_chunk: usize,
+    #[serde(default = "default_sqlite_wal_max_consecutive_checksum_failures")]
+    pub sqlite_wal_max_consecutive_checksum_failures: u32,
+    #[serde(default = "default_sqlite_max_consecutive_invalid_pages")]
+    pub sqlite_max_consecutive_invalid_pages: u32,
+    #[serde(default = "default_sqlite_min_valid_page_ratio")]
+    pub sqlite_min_valid_page_ratio: f64,
     pub opencl_platform_index: Option<usize>,
     pub opencl_device_index: Option<usize>,
     #[serde(default)]
@@ -75,7 +83,37 @@ pub struct Config {
     pub ole_allowed_kinds: Option<Vec<String>>,
     #[serde(default = "default_quicktime_mode")]
     pub quicktime_mode: QuicktimeMode,
+    #[serde(default = "default_deferred_buffer_kb")]
+    pub deferred_buffer_kb: usize,
+    #[serde(default = "default_ewf_cache_segments")]
+    pub ewf_cache_segments: usize,
+    #[serde(default = "default_ewf_reader_handles")]
+    pub ewf_reader_handles: usize,
+    #[serde(default = "default_hash_algorithms")]
+    pub hash_algorithms: Vec<String>,
+    #[serde(default)]
+    pub enable_deduplication: bool,
+    #[serde(default)]
+    pub skip_duplicate_files: bool,
+    #[serde(default = "default_fast_carve_worker_ratio")]
+    pub fast_carve_worker_ratio: f64,
+    #[serde(default = "default_write_workers")]
+    pub write_workers: usize,
+    /// Override for scan worker count (None = use CLI workers value)
+    #[serde(default)]
+    pub scan_workers: Option<usize>,
+    /// Override for carve worker count (None = use CLI workers value)
+    #[serde(default)]
+    pub carve_workers: Option<usize>,
+    #[serde(default)]
+    pub carver_limits: HashMap<String, CarverLimits>,
     pub file_types: Vec<FileTypeConfig>,
+}
+
+/// Per-carver concurrency limits (optional, default: unlimited).
+#[derive(Debug, Deserialize, Clone)]
+pub struct CarverLimits {
+    pub max_concurrent: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -157,8 +195,48 @@ fn default_entropy_threshold() -> f64 {
     7.5
 }
 
+fn default_sqlite_page_max_hits_per_chunk() -> usize {
+    2048
+}
+
+fn default_sqlite_wal_max_consecutive_checksum_failures() -> u32 {
+    2
+}
+
+fn default_sqlite_max_consecutive_invalid_pages() -> u32 {
+    3
+}
+
+fn default_sqlite_min_valid_page_ratio() -> f64 {
+    0.5
+}
+
+fn default_deferred_buffer_kb() -> usize {
+    64
+}
+
+fn default_ewf_cache_segments() -> usize {
+    4096
+}
+
+fn default_ewf_reader_handles() -> usize {
+    0
+}
+
+fn default_hash_algorithms() -> Vec<String> {
+    vec!["md5".to_string(), "sha256".to_string()]
+}
+
 fn default_true() -> bool {
     true
+}
+
+fn default_fast_carve_worker_ratio() -> f64 {
+    crate::constants::DEFAULT_FAST_WORKER_RATIO
+}
+
+fn default_write_workers() -> usize {
+    crate::constants::DEFAULT_WRITE_WORKERS
 }
 
 impl Config {
@@ -226,9 +304,67 @@ impl Config {
             self.entropy_threshold = threshold;
         }
 
-        // SQLite page recovery
-        if cli.scan_sqlite_pages {
-            self.enable_sqlite_page_recovery = true;
+        // Hash algorithms
+        if let Some(ref algos) = cli.hash_algorithms {
+            self.hash_algorithms = algos.clone();
+        }
+
+        // Deduplication
+        if cli.dedupe {
+            self.enable_deduplication = true;
+        }
+        if cli.skip_duplicates {
+            self.skip_duplicate_files = true;
+        }
+
+        // Deduplication requires sha256 hashing
+        if self.enable_deduplication
+            && !self
+                .hash_algorithms
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case("sha256"))
+        {
+            warn!("deduplication requires sha256; adding sha256 to hash_algorithms");
+            self.hash_algorithms.push("sha256".to_string());
+        }
+
+        // Validate skip_duplicate_files requires deduplication
+        if self.skip_duplicate_files && !self.enable_deduplication {
+            warn!(
+                "skip_duplicate_files requires enable_deduplication; ignoring skip_duplicate_files"
+            );
+            self.skip_duplicate_files = false;
+        }
+
+        // Write workers
+        if let Some(ww) = cli.write_workers {
+            self.write_workers = ww;
+        }
+        if self.write_workers == 0 {
+            warn!("write_workers must be >= 1; using 1");
+            self.write_workers = 1;
+        }
+
+        // Scan workers
+        if let Some(sw) = cli.scan_workers {
+            self.scan_workers = Some(sw);
+        }
+        if let Some(ref mut sw) = self.scan_workers
+            && *sw == 0
+        {
+            warn!("scan_workers must be >= 1; using 1");
+            *sw = 1;
+        }
+
+        // Carve workers
+        if let Some(cw) = cli.carve_workers {
+            self.carve_workers = Some(cw);
+        }
+        if let Some(ref mut cw) = self.carve_workers
+            && *cw == 0
+        {
+            warn!("carve_workers must be >= 1; using 1");
+            *cw = 1;
         }
     }
 }

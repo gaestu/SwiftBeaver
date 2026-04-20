@@ -19,6 +19,8 @@ Columns:
 - `truncated`
 - `errors`
 - `pattern_id`
+- `is_duplicate`
+- `duplicate_of_offset`
 - `tool_version`
 - `config_hash`
 - `evidence_path`
@@ -56,8 +58,9 @@ Columns:
 - `evidence_path`
 - `evidence_sha256`
 
-Page-level recovery emits `browser=sqlite_page` and `visit_source=page_scan` with best-effort `title` and `visit_time`.
 Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
+Note: `sqlite_page` and `sqlite_wal` are carve-only file outputs and do not emit browser row metadata.
 
 ## browser_cookies.csv
 
@@ -111,12 +114,19 @@ Columns:
 - `chunks_processed`
 - `hits_found`
 - `files_carved`
+- `files_rejected`
+- `files_prevalidation_rejected`
+- `overlap_skipped`
 - `string_spans`
 - `artefacts_extracted`
+- `duplicates_found`
+- `duplicates_skipped`
 - `tool_version`
 - `config_hash`
 - `evidence_path`
 - `evidence_sha256`
+
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts same-type hits skipped because they landed inside a range already carved by that worker.
 
 ## entropy_regions.csv
 

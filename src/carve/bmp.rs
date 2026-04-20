@@ -1,11 +1,8 @@
-use std::fs::File;
-use std::io::Write;
-
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 /// BMP file header is 14 bytes
@@ -47,15 +44,47 @@ impl CarveHandler for BmpCarveHandler {
         "bmp"
     }
 
+    fn is_fast(&self) -> bool {
+        true
+    }
+
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 18];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0..2] != BMP_MAGIC {
+            return Ok(PreValidation::Reject("bmp magic mismatch".to_string()));
+        }
+        let file_size = u32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]);
+        if file_size == 0 {
+            return Ok(PreValidation::Reject("bmp file size is zero".to_string()));
+        }
+        let dib_header_size = u32::from_le_bytes([buf[14], buf[15], buf[16], buf[17]]);
+        if !VALID_DIB_SIZES.contains(&dib_header_size) {
+            return Ok(PreValidation::Reject(
+                "bmp DIB header size invalid".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         // Read BMP header + start of DIB header for validation
         let mut header = [0u8; 58]; // Enough for BMP header + BITMAPINFOHEADER
         let n = ctx
@@ -116,7 +145,7 @@ impl CarveHandler for BmpCarveHandler {
 
                 // Sanity check: file size should be reasonable for dimensions
                 // Row size is padded to 4 bytes
-                let row_size = ((abs_width * bits_per_pixel as u32 + 31) / 32) * 4;
+                let row_size = (abs_width * bits_per_pixel as u32).div_ceil(32) * 4;
                 let pixel_data_size = row_size as u64 * abs_height as u64;
                 let min_expected_size = pixel_offset + pixel_data_size;
 
@@ -133,9 +162,7 @@ impl CarveHandler for BmpCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut total_end = hit.global_offset + file_size;
         let mut truncated = false;
@@ -147,48 +174,51 @@ impl CarveHandler for BmpCarveHandler {
             errors.push("max_size reached before BMP end".to_string());
         }
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             total_end,
-            &mut file,
-            &mut md5,
-            &mut sha256,
+            &full_path,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
         if eof_truncated {
             truncated = true;
             errors.push("eof before BMP end".to_string());
         }
-        file.flush()?;
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated: !truncated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !truncated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -247,16 +277,24 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = BmpCarveHandler::new("bmp".to_string(), 10, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "bmp".to_string(),
             pattern_id: "bmp_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, file_size);
     }
@@ -284,12 +322,20 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = BmpCarveHandler::new("bmp".to_string(), 10, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "bmp".to_string(),
             pattern_id: "bmp_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("carve");
@@ -323,12 +369,20 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = BmpCarveHandler::new("bmp".to_string(), 10, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "bmp".to_string(),
             pattern_id: "bmp_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("carve");

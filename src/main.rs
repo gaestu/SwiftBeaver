@@ -62,6 +62,9 @@ fn main() -> Result<()> {
     if cli_opts.dry_run {
         info!("dry-run mode enabled: no files will be written");
     }
+    if cli_opts.metadata_only {
+        info!("metadata-only mode enabled: carved files will not be written to disk");
+    }
     if cli_opts.validate_carved {
         info!("post-carving validation enabled");
     }
@@ -87,16 +90,42 @@ fn main() -> Result<()> {
     let tool_version = env!("CARGO_PKG_VERSION");
     let evidence_path = cli_opts.input.clone();
 
+    let scan_workers = cfg.scan_workers.unwrap_or(cli_opts.workers);
+    let carve_workers = cfg.carve_workers.unwrap_or(cli_opts.workers);
+
     info!(
-        "starting run_id={} input={} output={} workers={} chunk_mib={}",
+        "starting run_id={} input={} output={} scan_workers={} carve_workers={} chunk_mib={}",
         cfg.run_id,
         cli_opts.input.display(),
         run_output_dir.display(),
-        cli_opts.workers,
+        scan_workers,
+        carve_workers,
         cli_opts.chunk_size_mib
     );
 
-    let evidence_source = evidence::open_source(&cli_opts)?;
+    let ewf_reader_handles = if cfg.ewf_reader_handles == 0 {
+        (num_cpus::get() / 4).clamp(2, 4)
+    } else {
+        let clamped = cfg.ewf_reader_handles.clamp(1, 32);
+        if clamped != cfg.ewf_reader_handles {
+            warn!(
+                "ewf_reader_handles {} clamped to {}",
+                cfg.ewf_reader_handles, clamped
+            );
+        }
+        clamped
+    };
+    info!("EWF reader handles: {ewf_reader_handles}");
+
+    let evidence_source = evidence::open_source(&cli_opts, ewf_reader_handles)?;
+    let evidence_source = if evidence::is_ewf_path(&cli_opts.input) {
+        // Keep the in-process segment cache scoped to EWF inputs. Raw and
+        // device reads already benefit from the OS page cache, while EWF reads
+        // pay decompression overhead that this cache can avoid on repeated hits.
+        evidence::wrap_with_cache(evidence_source, cfg.ewf_cache_segments)
+    } else {
+        evidence_source
+    };
     let evidence_source: Arc<dyn evidence::EvidenceSource> = Arc::from(evidence_source);
 
     if cli_opts.evidence_sha256.is_some() && cli_opts.compute_evidence_sha256 {
@@ -115,10 +144,29 @@ fn main() -> Result<()> {
     };
 
     let meta_backend = util::backend_from_cli(cli_opts.metadata_backend);
-    let meta_sink: Box<dyn metadata::MetadataSink> = if cli_opts.dry_run {
-        metadata::build_dry_run_sink()
+    let meta_sinks: Vec<Box<dyn metadata::MetadataSink>> = if cli_opts.dry_run {
+        vec![metadata::build_dry_run_sink()]
+    } else if meta_backend.supports_sharding() {
+        // Parquet uses lazy per-category writers, so 3 independent sinks
+        // can safely write to the same output directory without conflicts.
+        let mut sinks = Vec::with_capacity(3);
+        for _ in 0..3 {
+            sinks.push(metadata::build_sink(
+                meta_backend,
+                &cfg,
+                &cfg.run_id,
+                tool_version,
+                &loaded.config_hash,
+                &evidence_path,
+                &evidence_sha256,
+                &run_output_dir,
+            )?);
+        }
+        sinks
     } else {
-        metadata::build_sink(
+        // CSV/JSONL sinks eagerly create all output files in new(), so
+        // multiple instances would truncate each other's files.
+        vec![metadata::build_sink(
             meta_backend,
             &cfg,
             &cfg.run_id,
@@ -127,7 +175,7 @@ fn main() -> Result<()> {
             &evidence_path,
             &evidence_sha256,
             &run_output_dir,
-        )?
+        )?]
     };
 
     let sig_scanner = scanner::build_signature_scanner(&cfg, cli_opts.gpu)?;
@@ -186,9 +234,10 @@ fn main() -> Result<()> {
         evidence_source,
         sig_scanner,
         string_scanner,
-        meta_sink,
+        meta_sinks,
         &run_output_dir,
-        cli_opts.workers,
+        scan_workers,
+        carve_workers,
         chunk_size,
         overlap,
         cli_opts.max_bytes,
@@ -197,6 +246,7 @@ fn main() -> Result<()> {
         cancel_flag,
         progress,
         checkpoint_cfg,
+        cli_opts.metadata_only,
     )?;
 
     info!("SwiftBeaver run finished");

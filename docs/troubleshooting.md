@@ -558,7 +558,7 @@ swiftbeaver --input image.dd --output ./out --no-scan-strings
 3. Reduce concurrent carving (edit config):
 ```yaml
 # In config/default.yml (if supported)
-max_carve_workers: 2  # Reduce from default
+carve_workers: 2  # Reduce from default
 ```
 
 4. Use faster metadata backend:

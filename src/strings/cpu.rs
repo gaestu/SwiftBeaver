@@ -203,11 +203,7 @@ pub(crate) fn scan_utf16_runs(
                 });
             }
 
-            if len >= max_len {
-                i = j + 2;
-            } else {
-                i = j + 2;
-            }
+            i = j + 2;
         }
         start_offset += 1;
     }
@@ -217,7 +213,11 @@ pub(crate) fn scan_utf16_runs(
 
 pub(crate) fn span_flags_ascii(slice: &[u8]) -> u32 {
     let mut flags_out = 0u32;
-    if contains_case_insensitive(slice, b"http") || contains_case_insensitive(slice, b"www.") {
+    if contains_case_insensitive(slice, b"http")
+        || contains_case_insensitive(slice, b"www.")
+        || contains_case_insensitive(slice, b"ftp://")
+        || contains_case_insensitive(slice, b"ftps://")
+    {
         flags_out |= flags::URL_LIKE;
     }
     if slice.contains(&b'@') {
@@ -237,7 +237,7 @@ fn contains_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
     for window in haystack.windows(needle.len()) {
         let mut matched = true;
         for (b, n) in window.iter().zip(needle.iter()) {
-            if b.to_ascii_lowercase() != n.to_ascii_lowercase() {
+            if !b.eq_ignore_ascii_case(n) {
                 matched = false;
                 break;
             }
@@ -378,6 +378,13 @@ mod tests {
         assert!((flags & flags::URL_LIKE) != 0);
         assert!((flags & flags::EMAIL_LIKE) != 0);
         assert!((flags & flags::PHONE_LIKE) != 0);
+    }
+
+    #[test]
+    fn sets_url_hint_for_ftp_ascii() {
+        let data = b"mirror ftp://downloads.example.com/tool.zip";
+        let flags = span_flags_ascii(data);
+        assert!((flags & flags::URL_LIKE) != 0);
     }
 
     #[test]

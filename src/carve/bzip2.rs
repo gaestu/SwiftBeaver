@@ -2,17 +2,17 @@
 //!
 //! We scan for the byte-aligned end marker as a best-effort heuristic.
 
-use std::fs::File;
-
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const BZIP2_MAGIC: [u8; 3] = [0x42, 0x5A, 0x68];
 const BZIP2_END: [u8; 6] = [0x17, 0x72, 0x45, 0x38, 0x50, 0x90];
+/// Maximum bytes to search for footer before giving up (10MB)
+const BZIP2_SEARCH_LIMIT: u64 = 10 * 1024 * 1024;
 
 pub struct Bzip2CarveHandler {
     extension: String,
@@ -35,15 +35,42 @@ impl CarveHandler for Bzip2CarveHandler {
         "bzip2"
     }
 
+    fn is_fast(&self) -> bool {
+        true
+    }
+
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 4];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf[0..3] != BZIP2_MAGIC {
+            return Ok(PreValidation::Reject("bzip2 magic mismatch".to_string()));
+        }
+        if !(b'1'..=b'9').contains(&buf[3]) {
+            return Ok(PreValidation::Reject(
+                "bzip2 block size invalid".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let header = read_exact_at(ctx, hit.global_offset, 4)
             .ok_or_else(|| CarveError::Invalid("bzip2 header too short".to_string()))?;
         if header[0..3] != BZIP2_MAGIC {
@@ -59,9 +86,7 @@ impl CarveHandler for Bzip2CarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut validated = false;
         let mut truncated = false;
@@ -102,6 +127,14 @@ impl CarveHandler for Bzip2CarveHandler {
                 break;
             }
 
+            // Early termination: if we've searched past BZIP2_SEARCH_LIMIT without
+            // finding the footer, this is likely a false positive
+            let bytes_searched = offset.saturating_sub(hit.global_offset);
+            if bytes_searched > BZIP2_SEARCH_LIMIT && !validated {
+                // Searched too far without finding footer - likely false positive
+                return Ok(None);
+            }
+
             offset = offset.saturating_add(buf.len() as u64);
             if buf.len() >= BZIP2_END.len() - 1 {
                 carry = buf[buf.len() - (BZIP2_END.len() - 1)..].to_vec();
@@ -116,13 +149,13 @@ impl CarveHandler for Bzip2CarveHandler {
             errors.push("max_size reached before bzip2 end".to_string());
         }
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             end_offset,
-            &mut file,
-            &mut md5,
-            &mut sha256,
+            &full_path,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
         if eof_truncated {
             truncated = true;
@@ -132,33 +165,37 @@ impl CarveHandler for Bzip2CarveHandler {
         }
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -227,17 +264,104 @@ mod tests {
             global_offset: 0,
             file_type_id: "bzip2".to_string(),
             pattern_id: "bzip2_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, data.len() as u64);
+    }
+
+    #[test]
+    fn rejects_when_footer_not_found_within_limit() {
+        // Create bzip2 header followed by data larger than BZIP2_SEARCH_LIMIT (10MB)
+        // without a valid footer - this should be rejected as a false positive
+        let mut data = Vec::new();
+        data.extend_from_slice(b"BZh9");
+        // Add 11MB of zeros (exceeds 10MB search limit)
+        data.extend(vec![0u8; 11 * 1024 * 1024]);
+        // No end marker added - simulates false positive
+
+        let evidence = SliceEvidence { data };
+        let handler = Bzip2CarveHandler::new("bz2".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "bzip2".to_string(),
+            pattern_id: "bzip2_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
+        };
+
+        // Should reject because footer not found within 10MB search limit
+        let carved = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(
+            carved.is_none(),
+            "should reject when footer not found within search limit"
+        );
+    }
+
+    #[test]
+    fn accepts_footer_within_limit() {
+        // Create bzip2 with footer at ~5MB (within limit)
+        let mut data = Vec::new();
+        data.extend_from_slice(b"BZh9");
+        data.extend(vec![0u8; 5 * 1024 * 1024]); // 5MB of data
+        data.extend_from_slice(&[0x17, 0x72, 0x45, 0x38, 0x50, 0x90]); // footer
+
+        let evidence = SliceEvidence { data: data.clone() };
+        let handler = Bzip2CarveHandler::new("bz2".to_string(), 0, 0);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "bzip2".to_string(),
+            pattern_id: "bzip2_header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
+        };
+
+        // Should accept because footer found within limit
+        let carved = handler.process_hit(&hit, &ctx).expect("process");
+        let carved = carved
+            .expect("should carve file with footer within limit")
+            .flush()
+            .expect("flush");
+        assert!(carved.validated);
     }
 }

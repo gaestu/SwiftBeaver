@@ -15,6 +15,39 @@ use tracing::{debug, warn};
 use crate::carve::{self, CarveRegistry};
 use crate::config::Config;
 use crate::metadata::MetadataBackendKind;
+use crate::scanner::NormalizedHit;
+
+struct DryRunCarveHandler {
+    file_type: String,
+    extension: String,
+}
+
+impl DryRunCarveHandler {
+    fn new(file_type: String, extension: String) -> Self {
+        Self {
+            file_type,
+            extension,
+        }
+    }
+}
+
+impl carve::CarveHandler for DryRunCarveHandler {
+    fn file_type(&self) -> &str {
+        &self.file_type
+    }
+
+    fn extension(&self) -> &str {
+        &self.extension
+    }
+
+    fn process_hit(
+        &self,
+        _hit: &NormalizedHit,
+        _ctx: &carve::ExtractionContext,
+    ) -> Result<Option<carve::PendingCarve>, carve::CarveError> {
+        Ok(None)
+    }
+}
 
 /// Convert CLI metadata backend to internal enum
 pub fn backend_from_cli(backend: crate::cli::MetadataBackend) -> MetadataBackendKind {
@@ -44,6 +77,7 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
     match OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(&probe_path)
     {
         Ok(_) => {
@@ -139,10 +173,6 @@ fn set_limit(resource: libc::__rlimit_resource_t, requested: u64, label: &str) -
 /// Build the carve registry from configuration
 /// If dry_run is true, creates a registry that won't write files to disk
 pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry> {
-    // For dry-run mode, we still need the registry to track hits but won't write files
-    // The actual file writing is skipped in the carve handlers when dry_run is enabled
-    let _ = dry_run; // Currently handled by not creating output dirs
-
     let mut handlers: HashMap<String, Box<dyn carve::CarveHandler>> = HashMap::new();
     let allow_quicktime = matches!(cfg.quicktime_mode, crate::config::QuicktimeMode::Mp4);
     let mut mp4_ext = "mp4".to_string();
@@ -160,6 +190,115 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
             }
         }
     }
+
+    if dry_run {
+        for file_type in &cfg.file_types {
+            let ext = file_type
+                .extensions
+                .first()
+                .cloned()
+                .unwrap_or_else(|| file_type.id.clone());
+            let ext = carve::sanitize_extension(&ext);
+            handlers.insert(
+                file_type.id.clone(),
+                Box::new(DryRunCarveHandler::new(file_type.id.clone(), ext)),
+            );
+        }
+        return Ok(CarveRegistry::new(handlers));
+    }
+
+    fn boxed<T: carve::CarveHandler + 'static>(handler: T) -> Box<dyn carve::CarveHandler> {
+        Box::new(handler)
+    }
+
+    type SimpleBuilder = fn(String, u64, u64) -> Box<dyn carve::CarveHandler>;
+    let mut simple_builders: HashMap<&'static str, SimpleBuilder> = HashMap::new();
+    simple_builders.insert("jpeg", |ext, min, max| {
+        boxed(carve::jpeg::JpegCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("png", |ext, min, max| {
+        boxed(carve::png::PngCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("gif", |ext, min, max| {
+        boxed(carve::gif::GifCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("sqlite_page", |ext, min, max| {
+        boxed(carve::sqlite_page::SqlitePageCarveHandler::new(
+            ext, min, max,
+        ))
+    });
+    simple_builders.insert("pdf", |ext, min, max| {
+        boxed(carve::pdf::PdfCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("gzip", |ext, min, max| {
+        boxed(carve::gzip::GzipCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("bzip2", |ext, min, max| {
+        boxed(carve::bzip2::Bzip2CarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("xz", |ext, min, max| {
+        boxed(carve::xz::XzCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("tar", |ext, min, max| {
+        boxed(carve::tar::TarCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("webp", |ext, min, max| {
+        boxed(carve::webp::WebpCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("bmp", |ext, min, max| {
+        boxed(carve::bmp::BmpCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("tiff", |ext, min, max| {
+        boxed(carve::tiff::TiffCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("rar", |ext, min, max| {
+        boxed(carve::rar::RarCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("sevenz", |ext, min, max| {
+        boxed(carve::sevenz::SevenZCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("wav", |ext, min, max| {
+        boxed(carve::wav::WavCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("avi", |ext, min, max| {
+        boxed(carve::avi::AviCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("webm", |ext, min, max| {
+        boxed(carve::webm::WebmCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("wmv", |ext, min, max| {
+        boxed(carve::wmv::WmvCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("mp3", |ext, min, max| {
+        boxed(carve::mp3::Mp3CarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("ogg", |ext, min, max| {
+        boxed(carve::ogg::OggCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("rtf", |ext, min, max| {
+        boxed(carve::rtf::RtfCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("ico", |ext, min, max| {
+        boxed(carve::ico::IcoCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("elf", |ext, min, max| {
+        boxed(carve::elf::ElfCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("eml", |ext, min, max| {
+        boxed(carve::eml::EmlCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("mobi", |ext, min, max| {
+        boxed(carve::mobi::MobiCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("fb2", |ext, min, max| {
+        boxed(carve::fb2::Fb2CarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("lrf", |ext, min, max| {
+        boxed(carve::lrf::LrfCarveHandler::new(ext, min, max))
+    });
+    simple_builders.insert("heic", |ext, min, max| {
+        boxed(carve::heic::HeicCarveHandler::new(ext, min, max))
+    });
 
     for file_type in &cfg.file_types {
         let validator = if file_type.validator.trim().is_empty() {
@@ -181,57 +320,15 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
             );
         }
 
+        if let Some(builder) = simple_builders.get(validator) {
+            handlers.insert(
+                file_type.id.clone(),
+                builder(ext, file_type.min_size, file_type.max_size),
+            );
+            continue;
+        }
+
         match validator {
-            "jpeg" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::jpeg::JpegCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "png" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::png::PngCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "gif" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::gif::GifCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "sqlite" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::sqlite::SqliteCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "pdf" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::pdf::PdfCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
             "zip" => {
                 handlers.insert(
                     file_type.id.clone(),
@@ -244,76 +341,6 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                     )),
                 );
             }
-            "gzip" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::gzip::GzipCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "bzip2" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::bzip2::Bzip2CarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "xz" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::xz::XzCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "tar" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::tar::TarCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "webp" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::webp::WebpCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "bmp" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::bmp::BmpCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "tiff" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::tiff::TiffCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
             "mp4" => {
                 handlers.insert(
                     file_type.id.clone(),
@@ -322,46 +349,6 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                         file_type.min_size,
                         file_type.max_size,
                         allow_quicktime,
-                    )),
-                );
-            }
-            "rar" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::rar::RarCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "sevenz" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::sevenz::SevenZCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "wav" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::wav::WavCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "avi" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::avi::AviCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
                     )),
                 );
             }
@@ -386,33 +373,26 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                 };
                 handlers.insert(file_type.id.clone(), handler);
             }
-            "webm" => {
+            "sqlite" => {
                 handlers.insert(
                     file_type.id.clone(),
-                    Box::new(carve::webm::WebmCarveHandler::new(
+                    Box::new(carve::sqlite::SqliteCarveHandler::new(
                         ext,
                         file_type.min_size,
                         file_type.max_size,
+                        cfg.sqlite_max_consecutive_invalid_pages,
+                        cfg.sqlite_min_valid_page_ratio,
                     )),
                 );
             }
-            "wmv" => {
+            "sqlite_wal" => {
                 handlers.insert(
                     file_type.id.clone(),
-                    Box::new(carve::wmv::WmvCarveHandler::new(
+                    Box::new(carve::sqlite_wal::SqliteWalCarveHandler::new(
                         ext,
                         file_type.min_size,
                         file_type.max_size,
-                    )),
-                );
-            }
-            "mp3" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::mp3::Mp3CarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
+                        cfg.sqlite_wal_max_consecutive_checksum_failures,
                     )),
                 );
             }
@@ -424,86 +404,6 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                         file_type.min_size,
                         file_type.max_size,
                         cfg.ole_allowed_kinds.clone(),
-                    )),
-                );
-            }
-            "ogg" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::ogg::OggCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "rtf" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::rtf::RtfCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "ico" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::ico::IcoCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "elf" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::elf::ElfCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "eml" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::eml::EmlCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "mobi" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::mobi::MobiCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "fb2" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::fb2::Fb2CarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
-                    )),
-                );
-            }
-            "lrf" => {
-                handlers.insert(
-                    file_type.id.clone(),
-                    Box::new(carve::lrf::LrfCarveHandler::new(
-                        ext,
-                        file_type.min_size,
-                        file_type.max_size,
                     )),
                 );
             }
@@ -697,8 +597,11 @@ fn is_ole_kind(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_output_dir, filter_file_types};
+    use super::{build_carve_registry, ensure_output_dir, filter_file_types};
+    use crate::carve::ExtractionContext;
     use crate::config;
+    use crate::evidence::RawFileSource;
+    use crate::scanner::NormalizedHit;
     use std::fs::File;
     use tempfile::tempdir;
 
@@ -766,5 +669,45 @@ mod tests {
         let _ = File::create(&file_path).expect("create file");
         let err = ensure_output_dir(&file_path).expect_err("should fail");
         assert!(err.to_string().contains("not a directory"));
+    }
+
+    #[test]
+    fn dry_run_registry_does_not_write_carved_files() {
+        let loaded = config::load_config(None).expect("config");
+        let mut cfg = loaded.config;
+        let unknown = filter_file_types(&mut cfg, Some(&["jpeg".to_string()]), false);
+        assert!(unknown.is_empty());
+
+        let registry = build_carve_registry(&cfg, true).expect("registry");
+        let handler = registry.get("jpeg").expect("jpeg handler");
+
+        let dir = tempdir().expect("tempdir");
+        let evidence_path = dir.path().join("evidence.bin");
+        std::fs::write(&evidence_path, [0xFF, 0xD8, 0xFF, 0xD9]).expect("write evidence");
+        let evidence = RawFileSource::open(&evidence_path).expect("open evidence");
+
+        let output_root = dir.path().join("carved");
+        let ctx = ExtractionContext {
+            run_id: "dry_run_test",
+            output_root: &output_root,
+            evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
+        };
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "jpeg".to_string(),
+            pattern_id: "jpeg_soi".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
+        };
+
+        let carved = handler.process_hit(&hit, &ctx).expect("process hit");
+        assert!(carved.is_none());
+        assert!(!output_root.exists());
     }
 }

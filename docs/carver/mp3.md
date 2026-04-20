@@ -2,13 +2,16 @@
 
 ## Overview
 
-The MP3 carver extracts MPEG Audio Layer III files by detecting ID3 tags and/or MPEG frame sync words, then parsing frames sequentially until end of valid audio data.
+The MP3 carver extracts MPEG Audio Layer III files by detecting ID3 tags and/or MPEG frame sync words, probing the candidate in-memory, then parsing frames sequentially until end of valid audio data.
 
 ## Signature Detection
 
 **ID3v2 Pattern**: `ID3` (ASCII bytes: 0x49 0x44 0x33)
 - Preferred starting point when present
 - Contains tag size information for accurate positioning
+- **Version validation**: Major version must be 2, 3, or 4 (the only valid ID3v2 versions)
+- **Syncsafe byte validation**: Bytes 6–9 must each have MSB=0 per spec
+- **Size cap**: Total tag size (header + data) capped at 32 MB
 
 **MPEG Frame Sync Patterns**:
 - `0xFF 0xFB`: MPEG1 Layer III, no CRC
@@ -70,9 +73,16 @@ let frame_size = (144 * bitrate * 1000) / sample_rate + padding;
 let frame_size = (72 * bitrate * 1000) / sample_rate + padding;
 ```
 
-### 4. Frame Validation
+### 4. Read-Only Candidate Probe
 
-For sync-word detection (no ID3), requires minimum 3 consecutive valid frames:
+Before any output file is created, the carver probes the candidate directly from evidence:
+
+- **ID3-backed candidates**: require a valid ID3v2 header plus at least **2** consecutive audio frames after the tag.
+- **Sync-word-only candidates**: require at least **5** consecutive audio frames.
+- In both cases, the accepted frames must agree on **MPEG version**, **layer**, and **sample rate**.
+- **Bitrate is allowed to vary**, so normal VBR files are still accepted.
+
+For sync-word-only detection, the probe still requires a minimum **5** consecutive valid frames:
 
 ```rust
 let mut valid_frames = 0;
@@ -87,29 +97,54 @@ loop {
     stream.read_exact(frame_size - 4)?;  // Read frame data
 }
 
-if valid_frames < MIN_FRAMES_FOR_SYNC_VALIDATION {
+if valid_frames < MIN_FRAMES_FOR_SYNC_VALIDATION {  // MIN_FRAMES = 5
     return Ok(None);  // Too few frames, likely false positive
 }
 ```
 
+### 5. Additional Validation (False Positive Mitigation)
+
+The MP3 carver includes additional checks to reduce false positives:
+
+1. **Version, layer, and sample-rate consistency**: All accepted frames must match the same MPEG version, layer, and sample rate. If any of those values changes, carving stops before the mismatched frame is written.
+
+2. **VBR preserved**: Bitrate changes are allowed, so normal variable-bitrate streams are not rejected just because adjacent frames use different bitrates.
+
+3. **Maximum duration**: Files with estimated duration > 1 hour are rejected as implausible.
+
+```rust
+const MAX_DURATION_SECONDS: u64 = 60 * 60;  // 1 hour
+let duration = total_samples / sample_rate;
+if duration > MAX_DURATION_SECONDS {
+    break;  // Stop carving
+}
+```
+
+4. **Interior frame rejection**: For sync-word-only candidates, a backward lookback reads up to 1441 bytes (the maximum MPEG frame size) before the hit offset. If a valid MPEG frame header is found whose computed frame size lands exactly at the hit offset, the candidate is an interior frame within an existing MP3 stream and is rejected. This eliminates massive over-carving (~814x duplicates per real file) caused by the scanner matching the sync word at every frame boundary. ID3-backed candidates are not affected by this check.
+
 ## Validation
 
 - **Validated**: `true` if:
-  - ID3 tag found and parsed, OR
-  - At least 3 consecutive valid MPEG frames found
+  - ID3-backed candidates reach at least **2** consecutive consistent audio frames after the tag
+  - Sync-word-only candidates reach at least **5** consecutive consistent audio frames
 - **Truncated**: `true` if:
   - max_size reached during frame parsing
   - EOF reached mid-frame
 - **Invalid**: Removed if:
-  - Less than 3 valid frames (sync-word detection)
+  - The probe finds too few consistent frames for the candidate type
+  - MPEG version, layer, or sample rate becomes inconsistent before the candidate reaches its validation threshold
   - Frame header validation fails
+  - Sync-word candidate is an interior frame within an existing MP3 stream (backward lookback check)
 
 ## Size Constraints
 
 - **Default min_size**: 128 bytes
 - **Default max_size**: 50 MB
+- **Maximum frames per file**: 100,000 (carving stops after this limit; file is kept if already validated)
 - Minimum viable MP3: ~200 bytes (ID3 tag + few frames)
 - Files below min_size are discarded
+
+> **Tip:** For media-heavy images (e.g. containing podcasts or audiobooks), raise `max_size` in your config override. At 128 kbps a 1-hour MP3 is ~57 MB.
 
 ## Hash Computation
 
@@ -142,6 +177,12 @@ Golden image framework with various MP3 types:
    - Valid frame count correct
    - Files playable in media players
 
+Unit tests in `src/carve/mp3.rs` also cover:
+
+- rejecting weak sync-word hits during `pre_validate()`
+- rejecting mixed-version and mixed-layer sync candidates during the read-only probe
+- accepting short ID3-backed VBR streams without requiring constant bitrate
+
 ## Edge Cases Handled
 
 1. **VBR files**: Xing/VBRI headers parsed (contain frame count)
@@ -150,6 +191,7 @@ Golden image framework with various MP3 types:
 4. **Padding frames**: Frames with padding bit set
 5. **CRC protection**: Frames with 16-bit CRC after header
 6. **Free bitrate**: Bitrate index 0000 (not commonly used)
+7. **Interior frames**: Sync-word hits that fall inside an existing MP3 stream are rejected via backward lookback, preventing per-frame duplication
 
 ## Performance Characteristics
 

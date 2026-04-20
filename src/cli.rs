@@ -38,8 +38,16 @@ pub struct CliOptions {
     #[arg(long, default_value_t = num_cpus::get())]
     pub workers: usize,
 
+    /// Number of scan worker threads (defaults to --workers)
+    #[arg(long)]
+    pub scan_workers: Option<usize>,
+
+    /// Number of carve worker threads (defaults to --workers)
+    #[arg(long)]
+    pub carve_workers: Option<usize>,
+
     /// Chunk size, in MiB
-    #[arg(long, default_value_t = 512)]
+    #[arg(long, default_value_t = crate::constants::DEFAULT_CHUNK_SIZE_MIB)]
     pub chunk_size_mib: u64,
 
     /// Chunk overlap, in KiB (overrides config when set)
@@ -106,10 +114,6 @@ pub struct CliOptions {
     #[arg(long)]
     pub entropy_threshold: Option<f64>,
 
-    /// Enable SQLite page-level URL recovery when DB parsing fails
-    #[arg(long)]
-    pub scan_sqlite_pages: bool,
-
     /// Stop after scanning this many bytes (approximate limit)
     #[arg(long)]
     pub max_bytes: Option<u64>,
@@ -162,6 +166,10 @@ pub struct CliOptions {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Metadata-only mode: scan and record metadata but don't write carved files
+    #[arg(long, alias = "no-carve", conflicts_with_all = ["validate_carved", "remove_invalid", "dry_run"])]
+    pub metadata_only: bool,
+
     /// Validate carved files after extraction (runs file magic check)
     #[arg(long)]
     pub validate_carved: bool,
@@ -169,6 +177,22 @@ pub struct CliOptions {
     /// Remove files that fail post-carving validation (requires --validate-carved)
     #[arg(long, requires = "validate_carved")]
     pub remove_invalid: bool,
+
+    /// Hash algorithms to compute (comma-separated: md5,sha256)
+    #[arg(long, value_delimiter = ',')]
+    pub hash_algorithms: Option<Vec<String>>,
+
+    /// Enable deduplication tracking (records duplicates in metadata)
+    #[arg(long)]
+    pub dedupe: bool,
+
+    /// Skip writing duplicate files to disk (still records metadata; requires --dedupe)
+    #[arg(long, requires = "dedupe")]
+    pub skip_duplicates: bool,
+
+    /// Number of dedicated I/O writer threads for flushing carved files to disk
+    #[arg(long)]
+    pub write_workers: Option<usize>,
 }
 
 pub fn parse() -> CliOptions {
@@ -244,18 +268,6 @@ mod tests {
         assert!(opts.scan_entropy);
         assert_eq!(opts.entropy_window_bytes, Some(2048));
         assert_eq!(opts.entropy_threshold, Some(7.2));
-    }
-
-    #[test]
-    fn parses_sqlite_page_flag() {
-        let opts = CliOptions::try_parse_from([
-            "SwiftBeaver",
-            "--input",
-            "image.dd",
-            "--scan-sqlite-pages",
-        ])
-        .expect("parse");
-        assert!(opts.scan_sqlite_pages);
     }
 
     #[test]

@@ -1,3 +1,6 @@
+Status: Implemented  
+Implemented in version: unreleased
+
 # Pipeline scaling and refactor plan
 
 Short description: reduce memory usage in large scans, enforce max_files strictly,

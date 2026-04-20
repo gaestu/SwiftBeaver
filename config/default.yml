@@ -16,12 +16,26 @@ parquet_row_group_size: 10000
 enable_entropy_detection: false
 entropy_window_size: 4096
 entropy_threshold: 7.5
-enable_sqlite_page_recovery: false
+sqlite_page_max_hits_per_chunk: 2048
+sqlite_wal_max_consecutive_checksum_failures: 2
+sqlite_max_consecutive_invalid_pages: 3
+sqlite_min_valid_page_ratio: 0.5
 opencl_platform_index:
 opencl_device_index:
 zip_allowed_kinds:
 ole_allowed_kinds:
 quicktime_mode: mov
+deferred_buffer_kb: 64
+ewf_cache_segments: 4096
+ewf_reader_handles: 0
+hash_algorithms:
+  - md5
+  - sha256
+enable_deduplication: false
+skip_duplicate_files: false
+fast_carve_worker_ratio: 0.25
+write_workers: 4
+carver_limits: {}
 file_types:
   - id: "jpeg"
     extensions: ["jpg", "jpeg"]
@@ -39,7 +53,7 @@ file_types:
         hex: "89504E470D0A1A0A"
     footer_patterns: []
     max_size: 104857600
-    min_size: 100
+    min_size: 500
     validator: "png"
   - id: "gif"
     extensions: ["gif"]
@@ -58,9 +72,31 @@ file_types:
       - id: "sqlite_header"
         hex: "53514C69746520666F726D6174203300"
     footer_patterns: []
-    max_size: 536870912
+    max_size: 104857600
     min_size: 100
     validator: "sqlite"
+  - id: "sqlite_wal"
+    extensions: ["sqlite-wal"]
+    header_patterns:
+      - id: "sqlite_wal_magic_82"
+        hex: "377F0682"
+      - id: "sqlite_wal_magic_83"
+        hex: "377F0683"
+    footer_patterns: []
+    max_size: 536870912
+    min_size: 32
+    validator: "sqlite_wal"
+  - id: "sqlite_page"
+    extensions: ["sqlite-page"]
+    header_patterns:
+      - id: "sqlite_page_table_leaf"
+        hex: "0D"
+      - id: "sqlite_page_index_leaf"
+        hex: "0A"
+    footer_patterns: []
+    max_size: 65536
+    min_size: 512
+    validator: "sqlite_page"
   - id: "pdf"
     extensions: ["pdf"]
     header_patterns:
@@ -76,7 +112,7 @@ file_types:
       - id: "zip_header"
         hex: "504B0304"
     footer_patterns: []
-    max_size: 104857600
+    max_size: 10485760
     min_size: 32
     validator: "zip"
     require_eocd: true
@@ -106,9 +142,34 @@ file_types:
       - id: "tiff_be_header"
         hex: "4D4D002A"
     footer_patterns: []
-    max_size: 104857600
-    min_size: 8
+    max_size: 52428800
+    min_size: 256
     validator: "tiff"
+  - id: "heic"
+    extensions: ["heic", "heif", "hif"]
+    header_patterns:
+      # HEIC with ftyp size 24 (0x18)
+      - id: "heic_ftyp_18"
+        hex: "000000186674797068656963"
+      # HEIC with ftyp size 28 (0x1C)
+      - id: "heic_ftyp_1c"
+        hex: "0000001C6674797068656963"
+      # HEIC with ftyp size 32 (0x20)
+      - id: "heic_ftyp_20"
+        hex: "000000206674797068656963"
+      # HEIF mif1 brand with ftyp size 24 (0x18)
+      - id: "mif1_ftyp_18"
+        hex: "00000018667479706D696631"
+      # HEIF mif1 brand with ftyp size 28 (0x1C)
+      - id: "mif1_ftyp_1c"
+        hex: "0000001C667479706D696631"
+      # HEIF mif1 brand with ftyp size 32 (0x20)
+      - id: "mif1_ftyp_20"
+        hex: "00000020667479706D696631"
+    footer_patterns: []
+    max_size: 104857600
+    min_size: 100
+    validator: "heic"
   - id: "mp4"
     extensions: ["mp4", "m4a", "m4v"]
     header_patterns:
@@ -150,7 +211,7 @@ file_types:
       - id: "wav_riff"
         hex: "52494646"
     footer_patterns: []
-    max_size: 1073741824
+    max_size: 524288000
     min_size: 44
     validator: "wav"
   - id: "avi"
@@ -160,7 +221,7 @@ file_types:
         hex: "52494646"
     footer_patterns: []
     max_size: 4294967296
-    min_size: 128
+    min_size: 4096
     validator: "avi"
   - id: "mp3"
     extensions: ["mp3"]
@@ -172,7 +233,7 @@ file_types:
       - id: "mp3_sync_fa"
         hex: "FFFA"
     footer_patterns: []
-    max_size: 104857600
+    max_size: 52428800        # 50 MB
     min_size: 128
     validator: "mp3"
   - id: "ole"
@@ -181,7 +242,7 @@ file_types:
       - id: "ole_cfb"
         hex: "D0CF11E0A1B11AE1"
     footer_patterns: []
-    max_size: 536870912
+    max_size: 104857600  # 100 MiB
     min_size: 512
     validator: "ole"
   - id: "tar"
@@ -208,7 +269,7 @@ file_types:
       - id: "bzip2_header"
         hex: "425A68"
     footer_patterns: []
-    max_size: 1073741824
+    max_size: 104857600
     min_size: 14
     validator: "bzip2"
   - id: "xz"
@@ -226,7 +287,7 @@ file_types:
       - id: "ogg_sync"
         hex: "4F676753"
     footer_patterns: []
-    max_size: 1073741824
+    max_size: 104857600
     min_size: 28
     validator: "ogg"
   - id: "mov"
@@ -299,7 +360,7 @@ file_types:
       - id: "eml_received"
         hex: "52656365697665643A"
     footer_patterns: []
-    max_size: 52428800
+    max_size: 10485760
     min_size: 32
     validator: "eml"
   - id: "mobi"
@@ -326,6 +387,6 @@ file_types:
       - id: "lrf_header"
         hex: "4C524600"
     footer_patterns: []
-    max_size: 104857600
+    max_size: 20971520        # 20 MiB
     min_size: 64
     validator: "lrf"

@@ -3,12 +3,13 @@
 //! Enhanced validation requires FictionBook tag or namespace within first 4KB.
 //! Rejects generic XML files that don't contain FictionBook markers.
 
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use sha2::Digest;
 
-use sha2::{Digest, Sha256};
-
-use crate::carve::{CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path};
+use crate::carve::{
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PendingCarve,
+    PreValidation, create_hashers, finalize_hashers, output_path,
+};
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const FB2_HEADER: &[u8] = b"<?xml";
@@ -54,11 +55,31 @@ impl CarveHandler for Fb2CarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 5];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf != b"<?xml" {
+            return Ok(PreValidation::Reject(
+                "fb2 xml declaration mismatch".to_string(),
+            ));
+        }
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         // Early validation: check for FictionBook marker in first 4KB BEFORE creating file
         let preview = read_prefix(ctx, hit.global_offset, MAX_TAG_SEARCH_BYTES);
         if preview.is_empty() {
@@ -81,10 +102,12 @@ impl CarveHandler for Fb2CarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut writer = BufWriter::new(file);
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let mut writer = DeferredWriter::new(
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+            ctx.metadata_only,
+        );
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut validated = false;
         let mut truncated = false;
@@ -136,8 +159,12 @@ impl CarveHandler for Fb2CarveHandler {
                 if write_len > 0 {
                     let slice = &buf[..write_len];
                     writer.write_all(slice)?;
-                    md5.consume(slice);
-                    sha256.update(slice);
+                    if let Some(ref mut m) = md5 {
+                        m.consume(slice);
+                    }
+                    if let Some(ref mut s) = sha256 {
+                        s.update(slice);
+                    }
                     bytes_written = bytes_written.saturating_add(slice.len() as u64);
                 }
                 validated = true;
@@ -145,8 +172,12 @@ impl CarveHandler for Fb2CarveHandler {
             }
 
             writer.write_all(&buf)?;
-            md5.consume(&buf);
-            sha256.update(&buf);
+            if let Some(ref mut m) = md5 {
+                m.consume(&buf);
+            }
+            if let Some(ref mut s) = sha256 {
+                s.update(&buf);
+            }
             bytes_written = bytes_written.saturating_add(buf.len() as u64);
             offset = offset.saturating_add(buf.len() as u64);
 
@@ -162,36 +193,38 @@ impl CarveHandler for Fb2CarveHandler {
             }
         }
 
-        writer.flush()?;
-
         if bytes_written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if bytes_written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + bytes_written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: bytes_written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: bytes_written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -254,16 +287,24 @@ mod tests {
             global_offset: 0,
             file_type_id: "fb2".to_string(),
             pattern_id: "fb2_xml".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert!(carved.validated);
         assert_eq!(carved.size, data.len() as u64);
     }
@@ -278,12 +319,20 @@ mod tests {
             global_offset: 0,
             file_type_id: "fb2".to_string(),
             pattern_id: "fb2_xml".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");
@@ -300,12 +349,20 @@ mod tests {
             global_offset: 0,
             file_type_id: "fb2".to_string(),
             pattern_id: "fb2_xml".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("process");

@@ -5,10 +5,9 @@
 //!
 //! Signature: D0 CF 11 E0 A1 B1 1A E1
 
-use std::fs::File;
-
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path,
 };
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
@@ -25,6 +24,8 @@ const VERSION_4: u16 = 4;
 const SECTOR_SIZE_V3: u64 = 512;
 /// Sector size for version 4
 const SECTOR_SIZE_V4: u64 = 4096;
+/// Maximum FAT sectors allowed (supports files up to ~128MB)
+const MAX_FAT_SECTORS: u32 = 1000;
 
 pub struct OleCarveHandler {
     extension: String,
@@ -122,6 +123,14 @@ fn parse_ole_header(header: &[u8]) -> Result<(u64, u64), CarveError> {
     // Read number of FAT sectors (this tells us how many sectors contain FAT entries)
     let num_fat_sectors = u32::from_le_bytes([header[44], header[45], header[46], header[47]]);
 
+    // Cap FAT sectors to reject implausibly large files
+    if num_fat_sectors > MAX_FAT_SECTORS {
+        return Err(CarveError::Invalid(format!(
+            "ole num_fat_sectors {} exceeds limit {}",
+            num_fat_sectors, MAX_FAT_SECTORS
+        )));
+    }
+
     // Read first directory sector
     let first_dir_sector = u32::from_le_bytes([header[48], header[49], header[50], header[51]]);
 
@@ -199,6 +208,11 @@ fn refine_ole_size(
 ) -> Result<u64, CarveError> {
     let header_size = 512u64; // Always 512 for header
 
+    // Calculate the maximum addressable sector from the FAT capacity
+    let num_fat_sectors = u32::from_le_bytes([header[44], header[45], header[46], header[47]]);
+    let entries_per_fat_sector = sector_size / 4;
+    let max_addressable_sector = num_fat_sectors as u64 * entries_per_fat_sector;
+
     // Read DIFAT entries from header to find FAT sector locations
     let mut fat_sectors = Vec::new();
 
@@ -214,19 +228,24 @@ fn refine_ole_size(
             header[offset + 3],
         ]);
         if sector_id < 0xFFFFFFFA {
-            fat_sectors.push(sector_id);
+            // Validate DIFAT entry is within addressable range
+            if (sector_id as u64) < max_addressable_sector {
+                fat_sectors.push(sector_id);
+            }
         } else {
             break;
         }
     }
 
     if fat_sectors.is_empty() {
-        // No FAT sectors found, return minimal size
+        // No valid FAT sectors found, return minimal size
         return Ok(header_size + sector_size);
     }
 
     // Read all FAT sectors to find the highest sector that's in use
     let mut highest_used_sector: u32 = 0;
+    let mut valid_used_count: u32 = 0;
+    let mut garbage_count: u32 = 0;
 
     // Track FAT sectors themselves as used
     for &fat_sec in &fat_sectors {
@@ -235,9 +254,12 @@ fn refine_ole_size(
         }
     }
 
-    // Read first directory sector from header
+    // Read first directory sector from header — validate it's within addressable range
     let first_dir_sector = u32::from_le_bytes([header[48], header[49], header[50], header[51]]);
-    if first_dir_sector < 0xFFFFFFFA && first_dir_sector > highest_used_sector {
+    if first_dir_sector < 0xFFFFFFFA
+        && (first_dir_sector as u64) < max_addressable_sector
+        && first_dir_sector > highest_used_sector
+    {
         highest_used_sector = first_dir_sector;
     }
 
@@ -276,19 +298,49 @@ fn refine_ole_size(
                 fat_data[byte_offset + 3],
             ]);
 
-            // If this entry is not FREESECT (0xFFFFFFFF), this sector index is used
-            // FREESECT = 0xFFFFFFFF, ENDOFCHAIN = 0xFFFFFFFE, FATSECT = 0xFFFFFFFD, etc.
-            if fat_entry != 0xFFFFFFFF {
-                let sector_index = (base_sector_id + entry_idx) as u32;
-                if sector_index > highest_used_sector && sector_index < 0xFFFFFFFA {
+            // Skip FREESECT entries — they indicate unused sectors
+            if fat_entry == 0xFFFFFFFF {
+                continue;
+            }
+
+            let sector_index = (base_sector_id + entry_idx) as u32;
+
+            if fat_entry >= 0xFFFFFFFA {
+                // Special value (ENDOFCHAIN, FATSECT, DIFSECT, etc.) — valid
+                valid_used_count += 1;
+                if sector_index > highest_used_sector
+                    && (sector_index as u64) < max_addressable_sector
+                {
                     highest_used_sector = sector_index;
                 }
-                // Also check where this entry points to (the chain)
-                if fat_entry < 0xFFFFFFFA && fat_entry > highest_used_sector {
+            } else if (fat_entry as u64) < max_addressable_sector {
+                // Valid chain pointer within addressable range
+                valid_used_count += 1;
+                if sector_index > highest_used_sector
+                    && (sector_index as u64) < max_addressable_sector
+                {
+                    highest_used_sector = sector_index;
+                }
+                if fat_entry > highest_used_sector {
                     highest_used_sector = fat_entry;
                 }
+            } else {
+                // Entry points beyond addressable range — garbage
+                garbage_count += 1;
             }
         }
+    }
+
+    // If garbage entries dominate, the FAT is corrupt (likely false-positive header)
+    // Return a conservative size covering just the FAT sectors plus a small buffer
+    if garbage_count > valid_used_count {
+        tracing::debug!(
+            garbage_count,
+            valid_used_count,
+            "FAT dominated by garbage entries; using conservative size"
+        );
+        let conservative_size = header_size + (fat_sectors.len() as u64 + 2) * sector_size;
+        return Ok(conservative_size.min(max_size));
     }
 
     // File size = header + (highest_sector + 1) * sector_size
@@ -333,7 +385,7 @@ fn classify_ole_kind(
                 continue;
             }
             let name_len = u16::from_le_bytes([entry[64], entry[65]]) as usize;
-            if name_len < 2 || name_len > 64 {
+            if !(2..=64).contains(&name_len) {
                 continue;
             }
             let entry_type = entry[66];
@@ -376,6 +428,11 @@ fn read_fat(
     sector_size: u64,
     max_size: u64,
 ) -> Result<Vec<u32>, CarveError> {
+    // Calculate max addressable sector for bounds validation
+    let num_fat_sectors = u32::from_le_bytes([header[44], header[45], header[46], header[47]]);
+    let entries_per_fat_sector = sector_size / 4;
+    let max_addressable_sector = num_fat_sectors as u64 * entries_per_fat_sector;
+
     let mut fat_sectors = Vec::new();
 
     for i in 0..109 {
@@ -390,7 +447,10 @@ fn read_fat(
             header[offset + 3],
         ]);
         if sector_id < 0xFFFFFFFA {
-            fat_sectors.push(sector_id);
+            // Validate DIFAT entry is within addressable range
+            if (sector_id as u64) < max_addressable_sector {
+                fat_sectors.push(sector_id);
+            }
         } else {
             break;
         }
@@ -448,24 +508,41 @@ impl CarveHandler for OleCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 8];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf != OLE_SIGNATURE {
+            return Ok(PreValidation::Reject("ole signature mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
-        let (mut full_path, mut rel_path) = output_path(
+    ) -> Result<Option<PendingCarve>, CarveError> {
+        let (full_path, mut rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
         let effective_max = if self.max_size > 0 {
             self.max_size
         } else {
-            512 * 1024 * 1024 // 512 MiB default limit
+            100 * 1024 * 1024 // 100 MiB default limit
         };
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, effective_max, file);
+        let mut stream = CarveStream::new(ctx, hit.global_offset, effective_max, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;
@@ -524,18 +601,18 @@ impl CarveHandler for OleCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
             }
         }
 
-        let (size, md5_hex, sha256_hex) = stream.finish()?;
+        let (size, md5_hex, sha256_hex, mut writer) = stream.finalize()?;
 
         // Check minimum size
         if size < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -546,22 +623,26 @@ impl CarveHandler for OleCarveHandler {
             file_type = kind.to_string();
             extension = kind.to_string();
             if file_type != self.file_type() {
+                // Flush to disk before rename so the file exists
+                writer.flush_to_disk()?;
                 if let Ok((new_path, new_rel)) =
                     output_path(ctx.output_root, &file_type, &extension, hit.global_offset)
+                    && new_path
+                        .parent()
+                        .is_none_or(|p| std::fs::create_dir_all(p).is_ok())
+                    && std::fs::rename(&full_path, &new_path).is_ok()
                 {
-                    if std::fs::rename(&full_path, &new_path).is_ok() {
-                        full_path = new_path;
-                        rel_path = new_rel;
-                    }
+                    writer.update_path(new_path);
+                    rel_path = new_rel;
                 }
             }
         }
 
-        if let Some(allowed) = &self.allowed_kinds {
-            if !allowed.contains(&file_type) {
-                let _ = std::fs::remove_file(&full_path);
-                return Ok(None);
-            }
+        if let Some(allowed) = &self.allowed_kinds
+            && !allowed.contains(&file_type)
+        {
+            writer.discard();
+            return Ok(None);
         }
 
         // Check if we hit max_size
@@ -578,21 +659,26 @@ impl CarveHandler for OleCarveHandler {
             hit.global_offset + size - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type,
-            path: rel_path,
-            extension,
-            global_start: hit.global_offset,
-            global_end,
-            size,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type,
+                path: rel_path,
+                extension,
+                global_start: hit.global_offset,
+                global_end,
+                size,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -718,16 +804,24 @@ mod tests {
             global_offset: 0,
             file_type_id: "ole".to_string(),
             pattern_id: "ole_cfb".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = result.expect("carved file");
+        let carved = result.expect("carved file").flush().expect("flush");
 
         assert_eq!(carved.file_type, "ole");
         assert!(carved.validated);
@@ -743,15 +837,119 @@ mod tests {
             global_offset: 0,
             file_type_id: "ole".to_string(),
             pattern_id: "ole_cfb".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn rejects_excessive_fat_sectors() {
+        let mut ole = create_minimal_ole();
+
+        // Set num_fat_sectors to exceed MAX_FAT_SECTORS (1000)
+        ole[44..48].copy_from_slice(&2000u32.to_le_bytes());
+
+        let evidence = SliceEvidence { data: ole };
+        let handler = OleCarveHandler::new("doc".to_string(), 0, 0, None);
+        let hit = NormalizedHit {
+            global_offset: 0,
+            file_type_id: "ole".to_string(),
+            pattern_id: "ole_cfb".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
+        };
+        let dir = tempdir().expect("tempdir");
+        let ctx = ExtractionContext {
+            run_id: "test",
+            output_root: dir.path(),
+            evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
+        };
+
+        // Should reject due to excessive FAT sectors
+        let result = handler.process_hit(&hit, &ctx).expect("process");
+        assert!(result.is_none(), "should reject excessive FAT sectors");
+    }
+
+    #[test]
+    fn accepts_fat_sectors_at_limit() {
+        let mut ole = create_minimal_ole();
+
+        // Set num_fat_sectors to exactly MAX_FAT_SECTORS (1000)
+        ole[44..48].copy_from_slice(&1000u32.to_le_bytes());
+
+        // This will still parse, though size estimation will be large
+        let result = parse_ole_header(&ole);
+        assert!(result.is_ok(), "should accept FAT sectors at limit");
+    }
+
+    #[test]
+    fn test_garbage_fat_produces_small_size() {
+        let mut ole = create_minimal_ole();
+
+        // DIFAT[0] = sector 1, so the FAT lives at file offset 512 + 1*512 = 1024.
+        // With num_fat_sectors=1 and sector_size=512, max_addressable = 1 * 128 = 128.
+        // Fill the actual FAT sector with values far beyond max_addressable — garbage.
+        let fat_start = 1024;
+        for i in 0..(512 / 4) {
+            let offset = fat_start + i * 4;
+            ole[offset..offset + 4].copy_from_slice(&50_000u32.to_le_bytes());
+        }
+
+        let evidence = SliceEvidence { data: ole.clone() };
+        let sector_size = 512u64;
+        let max_size = 100 * 1024 * 1024;
+
+        let size = refine_ole_size(&evidence, 0, &ole[..512], sector_size, max_size)
+            .expect("refine should succeed");
+
+        // With corrupt FAT, size should be conservative (not near max_size).
+        // Conservative: header(512) + (1 fat_sector + 2) * 512 = 512 + 1536 = 2048
+        assert!(
+            size < 100_000,
+            "garbage FAT should produce small size, got {size}"
+        );
+    }
+
+    #[test]
+    fn test_corrupted_fat_bounds_check() {
+        let mut ole = create_minimal_ole();
+
+        // Point DIFAT[0] to sector 5000, far beyond max_addressable_sector (128).
+        // This should be rejected as out-of-range, leaving fat_sectors empty.
+        ole[76..80].copy_from_slice(&5000u32.to_le_bytes());
+
+        let evidence = SliceEvidence { data: ole.clone() };
+        let sector_size = 512u64;
+        let max_size = 100 * 1024 * 1024;
+
+        let size = refine_ole_size(&evidence, 0, &ole[..512], sector_size, max_size)
+            .expect("refine should succeed");
+
+        // DIFAT entry was rejected, no FAT sectors found → minimal: header + sector_size = 1024
+        assert!(
+            size < 10_000,
+            "corrupted DIFAT should produce small size, got {size}"
+        );
     }
 }

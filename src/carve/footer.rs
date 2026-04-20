@@ -1,9 +1,10 @@
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use sha2::Digest;
 
-use sha2::{Digest, Sha256};
-
-use crate::carve::{CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path};
+use crate::carve::{
+    CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PendingCarve,
+    PreValidation, create_hashers, finalize_hashers, output_path,
+};
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 pub struct FooterCarveHandler {
@@ -56,21 +57,50 @@ impl CarveHandler for FooterCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let Some(max_header_len) = self.header_patterns.iter().map(Vec::len).max() else {
+            return Ok(PreValidation::Proceed);
+        };
+        if max_header_len == 0 {
+            return Ok(PreValidation::Proceed);
+        }
+
+        let mut buf = vec![0u8; max_header_len];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < max_header_len {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+
+        if self.header_matches(&buf) {
+            Ok(PreValidation::Proceed)
+        } else {
+            Ok(PreValidation::Reject("footer header mismatch".to_string()))
+        }
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let (full_path, rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut writer = BufWriter::new(file);
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let mut writer = DeferredWriter::new(
+            full_path.clone(),
+            ctx.deferred_buffer_bytes,
+            ctx.metadata_only,
+        );
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
         let mut offset = hit.global_offset;
         let mut bytes_written = 0u64;
@@ -107,7 +137,7 @@ impl CarveHandler for FooterCarveHandler {
             buf.truncate(n);
 
             if bytes_written == 0 && !self.header_matches(&buf) {
-                let _ = std::fs::remove_file(&full_path);
+                writer.discard();
                 return Ok(None);
             }
 
@@ -125,8 +155,12 @@ impl CarveHandler for FooterCarveHandler {
                 if write_len > 0 {
                     let slice = &buf[..write_len];
                     writer.write_all(slice)?;
-                    md5.consume(slice);
-                    sha256.update(slice);
+                    if let Some(ref mut m) = md5 {
+                        m.consume(slice);
+                    }
+                    if let Some(ref mut s) = sha256 {
+                        s.update(slice);
+                    }
                     bytes_written = bytes_written.saturating_add(slice.len() as u64);
                 }
                 validated = true;
@@ -134,8 +168,12 @@ impl CarveHandler for FooterCarveHandler {
             }
 
             writer.write_all(&buf)?;
-            md5.consume(&buf);
-            sha256.update(&buf);
+            if let Some(ref mut m) = md5 {
+                m.consume(&buf);
+            }
+            if let Some(ref mut s) = sha256 {
+                s.update(&buf);
+            }
             bytes_written = bytes_written.saturating_add(buf.len() as u64);
             offset = offset.saturating_add(buf.len() as u64);
 
@@ -151,36 +189,38 @@ impl CarveHandler for FooterCarveHandler {
             }
         }
 
-        writer.flush()?;
-
         if bytes_written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if bytes_written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + bytes_written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: bytes_written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: bytes_written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -219,7 +259,7 @@ fn find_pattern(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::FooterCarveHandler;
-    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::carve::{CarveHandler, ExtractionContext, PreValidation};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
     use tempfile::tempdir;
@@ -259,6 +299,12 @@ mod tests {
             run_id: "run1",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let handler = FooterCarveHandler::new(
@@ -274,17 +320,44 @@ mod tests {
             global_offset: 0,
             file_type_id: "custom".to_string(),
             pattern_id: "header".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler
             .process_hit(&hit, &ctx)
             .expect("process")
-            .expect("carved");
+            .expect("carved")
+            .flush()
+            .expect("flush");
 
         assert!(carved.validated);
         assert_eq!(
             carved.size,
             (header.len() + "payload".len() + footer.len()) as u64
+        );
+    }
+
+    #[test]
+    fn pre_validate_rejects_mismatched_header() {
+        let evidence = SliceEvidence {
+            data: b"BADSpayloadFOOT".to_vec(),
+        };
+        let handler = FooterCarveHandler::new(
+            "custom".to_string(),
+            "bin".to_string(),
+            1,
+            0,
+            vec![b"HEAD".to_vec()],
+            vec![b"FOOT".to_vec()],
+        );
+
+        assert!(
+            matches!(
+                handler.pre_validate(&evidence, 0).expect("pre_validate"),
+                PreValidation::Reject(reason) if reason.contains("mismatch")
+            ),
+            "footer carver should reject non-matching headers during pre-validation"
         );
     }
 }

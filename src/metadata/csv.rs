@@ -38,6 +38,8 @@ struct CarvedFileCsv<'a> {
     truncated: bool,
     errors: String,
     pattern_id: Option<&'a str>,
+    is_duplicate: bool,
+    duplicate_of_offset: Option<u64>,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -120,8 +122,13 @@ struct RunSummaryCsv<'a> {
     chunks_processed: u64,
     hits_found: u64,
     files_carved: u64,
+    files_rejected: u64,
+    files_prevalidation_rejected: u64,
+    overlap_skipped: u64,
     string_spans: u64,
     artefacts_extracted: u64,
+    duplicates_found: u64,
+    duplicates_skipped: u64,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -183,7 +190,7 @@ impl CsvSink {
             .has_headers(false)
             .from_writer(entropy_file);
 
-        files_writer.write_record(&[
+        files_writer.write_record([
             "run_id",
             "file_type",
             "path",
@@ -197,13 +204,15 @@ impl CsvSink {
             "truncated",
             "errors",
             "pattern_id",
+            "is_duplicate",
+            "duplicate_of_offset",
             "tool_version",
             "config_hash",
             "evidence_path",
             "evidence_sha256",
         ])?;
 
-        strings_writer.write_record(&[
+        strings_writer.write_record([
             "run_id",
             "artefact_kind",
             "content",
@@ -216,7 +225,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        history_writer.write_record(&[
+        history_writer.write_record([
             "run_id",
             "browser",
             "profile",
@@ -231,7 +240,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        cookies_writer.write_record(&[
+        cookies_writer.write_record([
             "run_id",
             "browser",
             "profile",
@@ -251,7 +260,7 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        downloads_writer.write_record(&[
+        downloads_writer.write_record([
             "run_id",
             "browser",
             "profile",
@@ -268,21 +277,26 @@ impl CsvSink {
             "evidence_sha256",
         ])?;
 
-        run_writer.write_record(&[
+        run_writer.write_record([
             "run_id",
             "bytes_scanned",
             "chunks_processed",
             "hits_found",
             "files_carved",
+            "files_rejected",
+            "files_prevalidation_rejected",
+            "overlap_skipped",
             "string_spans",
             "artefacts_extracted",
+            "duplicates_found",
+            "duplicates_skipped",
             "tool_version",
             "config_hash",
             "evidence_path",
             "evidence_sha256",
         ])?;
 
-        entropy_writer.write_record(&[
+        entropy_writer.write_record([
             "run_id",
             "global_start",
             "global_end",
@@ -326,6 +340,8 @@ impl MetadataSink for CsvSink {
             truncated: file.truncated,
             errors: file.errors.join("; "),
             pattern_id: file.pattern_id.as_deref(),
+            is_duplicate: file.is_duplicate,
+            duplicate_of_offset: file.duplicate_of_offset,
             tool_version: &self.tool_version,
             config_hash: &self.config_hash,
             evidence_path: &self.evidence_path,
@@ -446,8 +462,13 @@ impl MetadataSink for CsvSink {
             chunks_processed: summary.chunks_processed,
             hits_found: summary.hits_found,
             files_carved: summary.files_carved,
+            files_rejected: summary.files_rejected,
+            files_prevalidation_rejected: summary.files_prevalidation_rejected,
+            overlap_skipped: summary.overlap_skipped,
             string_spans: summary.string_spans,
             artefacts_extracted: summary.artefacts_extracted,
+            duplicates_found: summary.duplicates_found,
+            duplicates_skipped: summary.duplicates_skipped,
             tool_version: &self.tool_version,
             config_hash: &self.config_hash,
             evidence_path: &self.evidence_path,
@@ -563,6 +584,8 @@ mod tests {
             truncated: false,
             errors: Vec::new(),
             pattern_id: Some("jpeg_soi".to_string()),
+            is_duplicate: false,
+            duplicate_of_offset: None,
         };
         sink.record_file(&file).expect("record file");
 
@@ -624,8 +647,13 @@ mod tests {
             chunks_processed: 1,
             hits_found: 2,
             files_carved: 1,
+            files_rejected: 0,
+            files_prevalidation_rejected: 0,
+            overlap_skipped: 0,
             string_spans: 3,
             artefacts_extracted: 4,
+            duplicates_found: 0,
+            duplicates_skipped: 0,
         };
         sink.record_run_summary(&summary).expect("record summary");
         let region = EntropyRegion {

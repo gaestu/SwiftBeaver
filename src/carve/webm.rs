@@ -2,18 +2,19 @@
 //!
 //! Uses EBML headers to validate and reads the Segment element size when known.
 
-use std::fs::File;
-
-use sha2::{Digest, Sha256};
-
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const EBML_ID: u64 = 0x1A45DFA3;
 const SEGMENT_ID: u64 = 0x18538067;
 const DOCTYPE_ID: u64 = 0x4282;
+/// Maximum allowed allocation size for any single EBML element read (1 MiB).
+/// EBML headers are typically small; anything larger indicates corrupt data.
+const MAX_EBML_ELEMENT_SIZE: u64 = 1024 * 1024;
 
 pub struct WebmCarveHandler {
     extension: String,
@@ -40,11 +41,29 @@ impl CarveHandler for WebmCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 4];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if buf != [0x1A, 0x45, 0xDF, 0xA3] {
+            return Ok(PreValidation::Reject("ebml header ID mismatch".to_string()));
+        }
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let (ebml_id, ebml_id_len) = read_vint_id(ctx, hit.global_offset)
             .ok_or_else(|| CarveError::Invalid("ebml id missing".to_string()))?;
         if ebml_id != EBML_ID {
@@ -54,6 +73,11 @@ impl CarveHandler for WebmCarveHandler {
             read_vint_size(ctx, hit.global_offset + ebml_id_len as u64)
                 .ok_or_else(|| CarveError::Invalid("ebml size missing".to_string()))?;
         let ebml_header_start = hit.global_offset + ebml_id_len as u64 + ebml_size_len as u64;
+        if ebml_size > MAX_EBML_ELEMENT_SIZE {
+            return Err(CarveError::Invalid(format!(
+                "ebml header size too large: {ebml_size}"
+            )));
+        }
         let ebml_header = read_exact_at(ctx, ebml_header_start, ebml_size as usize)
             .ok_or_else(|| CarveError::Invalid("ebml header truncated".to_string()))?;
 
@@ -113,17 +137,15 @@ impl CarveHandler for WebmCarveHandler {
             &self.extension,
             hit.global_offset,
         )?;
-        let mut file = File::create(&full_path)?;
-        let mut md5 = md5::Context::new();
-        let mut sha256 = Sha256::new();
+        let (mut md5, mut sha256) = create_hashers(&ctx.hash_config);
 
-        let (written, eof_truncated) = write_range(
+        let (written, eof_truncated, mut writer) = write_range(
             ctx,
             hit.global_offset,
             total_end,
-            &mut file,
-            &mut md5,
-            &mut sha256,
+            &full_path,
+            md5.as_mut(),
+            sha256.as_mut(),
         )?;
 
         let mut truncated = eof_truncated;
@@ -132,33 +154,37 @@ impl CarveHandler for WebmCarveHandler {
         }
 
         if written < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
-        let md5_hex = format!("{:x}", md5.compute());
-        let sha256_hex = hex::encode(sha256.finalize());
+        let (md5_hex, sha256_hex) = finalize_hashers(md5, sha256);
         let global_end = if written == 0 {
             hit.global_offset
         } else {
             hit.global_offset + written - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size: written,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated: !truncated && segment_size.is_some(),
-            truncated,
-            errors: Vec::new(),
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size: written,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated: !truncated && segment_size.is_some(),
+                truncated,
+                errors: Vec::new(),
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -288,16 +314,24 @@ mod tests {
             run_id: "test",
             output_root: &output_root,
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
         let handler = WebmCarveHandler::new("webm".to_string(), 0, 0);
         let hit = NormalizedHit {
             global_offset: 0,
             file_type_id: "webm".to_string(),
             pattern_id: "webm_ebml".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
 
         let carved = handler.process_hit(&hit, &ctx).expect("carve");
-        let carved = carved.expect("carved");
+        let carved = carved.expect("carved").flush().expect("flush");
         assert_eq!(carved.size, data.len() as u64);
         assert!(carved.validated);
     }

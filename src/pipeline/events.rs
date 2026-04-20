@@ -27,3 +27,28 @@ pub enum MetadataEvent {
     /// Flush buffered data to disk
     Flush,
 }
+
+/// Events for the file metadata shard (carved files, browser data, run summary)
+#[derive(Debug)]
+pub enum FileShardEvent {
+    File(CarvedFile),
+    History(BrowserHistoryRecord),
+    Cookie(BrowserCookieRecord),
+    Download(BrowserDownloadRecord),
+    RunSummary(RunSummary),
+    Flush,
+}
+
+/// Events for the string artefact metadata shard
+#[derive(Debug)]
+pub enum StringShardEvent {
+    String(StringArtefact),
+    Flush,
+}
+
+/// Events for the entropy metadata shard
+#[derive(Debug)]
+pub enum EntropyShardEvent {
+    Entropy(EntropyRegion),
+    Flush,
+}

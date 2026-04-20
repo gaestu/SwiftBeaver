@@ -3,11 +3,11 @@
 //! AVI files use the RIFF container format with "AVI " form type.
 //! The file size is embedded in the RIFF header (bytes 4-7).
 
-use std::fs::File;
-
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, output_path, riff,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path, riff,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 pub struct AviCarveHandler {
@@ -35,19 +35,55 @@ impl CarveHandler for AviCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = [0u8; 12];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < buf.len() {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+        if &buf[0..4] != b"RIFF" {
+            return Ok(PreValidation::Reject("avi RIFF magic mismatch".to_string()));
+        }
+        if &buf[8..12] != b"AVI " {
+            return Ok(PreValidation::Reject("avi AVI marker mismatch".to_string()));
+        }
+
+        // Size sanity check: RIFF chunk_size (bytes 4-7) + 8 = total file size
+        let chunk_size = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as u64;
+        let total_size = chunk_size.saturating_add(8);
+        let remaining = evidence.len().saturating_sub(offset);
+        if total_size > remaining {
+            return Ok(PreValidation::Reject(
+                "avi RIFF size exceeds remaining evidence".to_string(),
+            ));
+        }
+        if self.max_size > 0 && total_size > self.max_size {
+            return Ok(PreValidation::Reject(
+                "avi RIFF size exceeds max_size".to_string(),
+            ));
+        }
+
+        Ok(PreValidation::Proceed)
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
-    ) -> Result<Option<CarvedFile>, CarveError> {
+    ) -> Result<Option<PendingCarve>, CarveError> {
         let (full_path, rel_path) = output_path(
             ctx.output_root,
             self.file_type(),
             &self.extension,
             hit.global_offset,
         )?;
-        let file = File::create(&full_path)?;
-        let mut stream = CarveStream::new(ctx.evidence, hit.global_offset, self.max_size, file);
+        let mut stream = CarveStream::new(ctx, hit.global_offset, self.max_size, full_path.clone());
 
         let mut validated = false;
         let mut truncated = false;
@@ -73,6 +109,27 @@ impl CarveHandler for AviCarveHandler {
                 return Err(CarveError::Invalid("avi size too small".to_string()));
             }
 
+            // Validate first sub-chunk is LIST/hdrl
+            let sub_header = stream.read_exact(12)?;
+            if &sub_header[0..4] != b"LIST" {
+                return Err(CarveError::Invalid(
+                    "avi first sub-chunk is not LIST".to_string(),
+                ));
+            }
+            let list_size =
+                u32::from_le_bytes([sub_header[4], sub_header[5], sub_header[6], sub_header[7]])
+                    as u64;
+            if &sub_header[8..12] != b"hdrl" {
+                return Err(CarveError::Invalid(
+                    "avi first LIST chunk is not hdrl".to_string(),
+                ));
+            }
+            if list_size == 0 || list_size > total_size {
+                return Err(CarveError::Invalid(
+                    "avi hdrl LIST chunk size invalid".to_string(),
+                ));
+            }
+
             // Apply max_size limit
             let max_size = if self.max_size > 0 {
                 self.max_size
@@ -81,10 +138,10 @@ impl CarveHandler for AviCarveHandler {
             };
             let target_size = total_size.min(max_size);
 
-            // Read remaining data
-            let remaining = target_size.saturating_sub(12);
+            // Read remaining data (header 12 + sub-chunk header 12 already read)
+            let remaining = target_size.saturating_sub(24);
             if remaining > 0 {
-                stream.read_exact(remaining as usize)?;
+                stream.consume_remaining(remaining)?;
             }
 
             validated = true;
@@ -98,18 +155,18 @@ impl CarveHandler for AviCarveHandler {
                     errors.push(err.to_string());
                 }
                 CarveError::Invalid(_) => {
-                    let _ = std::fs::remove_file(&full_path);
+                    stream.discard();
                     return Ok(None);
                 }
                 other => return Err(other),
             }
         }
 
-        let (size, md5_hex, sha256_hex) = stream.finish()?;
+        let (size, md5_hex, sha256_hex, mut writer) = stream.finalize()?;
 
         // Check minimum size
         if size < self.min_size {
-            let _ = std::fs::remove_file(&full_path);
+            writer.discard();
             return Ok(None);
         }
 
@@ -127,21 +184,26 @@ impl CarveHandler for AviCarveHandler {
             hit.global_offset + size - 1
         };
 
-        Ok(Some(CarvedFile {
-            run_id: ctx.run_id.to_string(),
-            file_type: self.file_type().to_string(),
-            path: rel_path,
-            extension: self.extension.clone(),
-            global_start: hit.global_offset,
-            global_end,
-            size,
-            md5: Some(md5_hex),
-            sha256: Some(sha256_hex),
-            validated,
-            truncated,
-            errors,
-            pattern_id: Some(hit.pattern_id.clone()),
-        }))
+        Ok(Some(PendingCarve::new(
+            CarvedFile {
+                run_id: ctx.run_id.to_string(),
+                file_type: self.file_type().to_string(),
+                path: rel_path,
+                extension: self.extension.clone(),
+                global_start: hit.global_offset,
+                global_end,
+                size,
+                md5: md5_hex,
+                sha256: sha256_hex,
+                validated,
+                truncated,
+                errors,
+                pattern_id: Some(hit.pattern_id.clone()),
+                is_duplicate: false,
+                duplicate_of_offset: None,
+            },
+            writer,
+        )))
     }
 }
 
@@ -149,6 +211,7 @@ impl CarveHandler for AviCarveHandler {
 mod tests {
     use super::*;
     use crate::evidence::{EvidenceError, EvidenceSource};
+    use std::fs::File;
     use std::io::Read;
     use tempfile::tempdir;
 
@@ -232,16 +295,24 @@ mod tests {
             global_offset: 0,
             file_type_id: "avi".to_string(),
             pattern_id: "avi_riff".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = result.expect("carved file");
+        let carved = result.expect("carved file").flush().expect("flush");
 
         assert_eq!(carved.file_type, "avi");
         assert_eq!(carved.size, avi_data.len() as u64);
@@ -262,7 +333,7 @@ mod tests {
         data.extend_from_slice(b"RIFF");
         data.extend_from_slice(&100u32.to_le_bytes());
         data.extend_from_slice(b"WAVE"); // Not AVI
-        data.extend_from_slice(&vec![0u8; 100]);
+        data.extend_from_slice(&[0u8; 100]);
 
         let evidence = SliceEvidence { data };
         let handler = AviCarveHandler::new("avi".to_string(), 0, 0);
@@ -270,12 +341,20 @@ mod tests {
             global_offset: 0,
             file_type_id: "avi".to_string(),
             pattern_id: "avi_riff".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
@@ -293,16 +372,24 @@ mod tests {
             global_offset: 0,
             file_type_id: "avi".to_string(),
             pattern_id: "avi_riff".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");
-        let carved = result.expect("carved file");
+        let carved = result.expect("carved file").flush().expect("flush");
 
         assert!(carved.truncated);
         assert!(carved.size <= 20);
@@ -319,12 +406,20 @@ mod tests {
             global_offset: 0,
             file_type_id: "avi".to_string(),
             pattern_id: "avi_riff".to_string(),
+            chunk_data: None,
+            chunk_start: 0,
         };
         let dir = tempdir().expect("tempdir");
         let ctx = ExtractionContext {
             run_id: "test",
             output_root: dir.path(),
             evidence: &evidence,
+            deferred_buffer_bytes: 0,
+            io_buf: std::cell::RefCell::new(Vec::new()),
+            chunk_data: None,
+            chunk_start: 0,
+            metadata_only: false,
+            hash_config: crate::hash::HashConfig::default(),
         };
 
         let result = handler.process_hit(&hit, &ctx).expect("process");

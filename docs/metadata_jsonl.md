@@ -13,6 +13,8 @@ Each line in `metadata/carved_files.jsonl` is a JSON object with:
 - `sha256`
 - `validated`
 - `truncated`
+- `is_duplicate`
+- `duplicate_of_offset`
 - `errors`
 - `pattern_id`
 - `tool_version`
@@ -37,7 +39,7 @@ Example:
   "truncated": false,
   "errors": [],
   "pattern_id": "jpeg_soi",
-  "tool_version": "0.2.0",
+  "tool_version": "...",
   "config_hash": "...",
   "evidence_path": "/cases/image.dd",
   "evidence_sha256": ""
@@ -76,8 +78,9 @@ Each line in `metadata/browser_history.jsonl` is a JSON object with:
 - `evidence_path`
 - `evidence_sha256`
 
-Page-level recovery emits `browser="sqlite_page"` and `visit_source="page_scan"` with best-effort `title` and `visit_time`.
 Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
+
+Note: `sqlite_page` and `sqlite_wal` are carve-only file outputs and do not emit browser row metadata.
 
 ## Browser cookies (`browser_cookies.jsonl`)
 
@@ -131,12 +134,19 @@ Each line in `metadata/run_summary.jsonl` is a JSON object with:
 - `chunks_processed`
 - `hits_found`
 - `files_carved`
+- `files_rejected`
+- `files_prevalidation_rejected`
+- `overlap_skipped`
 - `string_spans`
 - `artefacts_extracted`
+- `duplicates_found`
+- `duplicates_skipped`
 - `tool_version`
 - `config_hash`
 - `evidence_path`
 - `evidence_sha256`
+
+`files_prevalidation_rejected` counts hits rejected by the carver's lightweight `pre_validate()` checks before any carved file is created. `overlap_skipped` counts same-type hits skipped because their offsets fall inside a byte range that was already carved by that worker.
 
 ## Entropy regions (`entropy_regions.jsonl`)
 

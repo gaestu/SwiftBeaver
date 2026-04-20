@@ -98,6 +98,8 @@ struct FileRow {
     validated: bool,
     truncated: bool,
     error: Option<String>,
+    is_duplicate: bool,
+    duplicate_of_offset: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,8 +198,13 @@ struct RunSummaryRow {
     chunks_processed: i64,
     hits_found: i64,
     files_carved: i64,
+    files_rejected: i64,
+    files_prevalidation_rejected: i64,
+    overlap_skipped: i64,
     string_spans: i64,
     artefacts_extracted: i64,
+    duplicates_found: i64,
+    duplicates_skipped: i64,
 }
 
 enum CategoryBuffer {
@@ -716,6 +723,8 @@ impl MetadataSink for ParquetSink {
             validated: file.validated,
             truncated: file.truncated,
             error: join_errors(&file.errors),
+            is_duplicate: file.is_duplicate,
+            duplicate_of_offset: file.duplicate_of_offset.map(|v| v as i64),
         };
 
         let mut inner = self.lock_inner()?;
@@ -808,8 +817,13 @@ impl MetadataSink for ParquetSink {
             chunks_processed: to_i64(summary.chunks_processed)?,
             hits_found: to_i64(summary.hits_found)?,
             files_carved: to_i64(summary.files_carved)?,
+            files_rejected: to_i64(summary.files_rejected)?,
+            files_prevalidation_rejected: to_i64(summary.files_prevalidation_rejected)?,
+            overlap_skipped: to_i64(summary.overlap_skipped)?,
             string_spans: to_i64(summary.string_spans)?,
             artefacts_extracted: to_i64(summary.artefacts_extracted)?,
+            duplicates_found: to_i64(summary.duplicates_found)?,
+            duplicates_skipped: to_i64(summary.duplicates_skipped)?,
         };
         let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::RunSummary)?;
@@ -880,7 +894,7 @@ fn category_for_file_type(file_type: &str) -> ParquetCategory {
         "jpeg" | "jpg" => ParquetCategory::FilesJpeg,
         "png" => ParquetCategory::FilesPng,
         "gif" => ParquetCategory::FilesGif,
-        "sqlite" | "sqlite_db" => ParquetCategory::FilesSqlite,
+        "sqlite" | "sqlite_db" | "sqlite_wal" | "sqlite_page" => ParquetCategory::FilesSqlite,
         "pdf" => ParquetCategory::FilesPdf,
         "zip" | "docx" | "xlsx" | "pptx" => ParquetCategory::FilesZip,
         "webp" => ParquetCategory::FilesWebp,
@@ -909,6 +923,8 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("validated", DataType::Boolean, false),
             Field::new("truncated", DataType::Boolean, false),
             Field::new("error", DataType::Utf8, true),
+            Field::new("is_duplicate", DataType::Boolean, false),
+            Field::new("duplicate_of_offset", DataType::Int64, true),
         ]));
     }
 
@@ -1058,8 +1074,13 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("chunks_processed", DataType::Int64, false),
             Field::new("hits_found", DataType::Int64, false),
             Field::new("files_carved", DataType::Int64, false),
+            Field::new("files_rejected", DataType::Int64, false),
+            Field::new("files_prevalidation_rejected", DataType::Int64, false),
+            Field::new("overlap_skipped", DataType::Int64, false),
             Field::new("string_spans", DataType::Int64, false),
             Field::new("artefacts_extracted", DataType::Int64, false),
+            Field::new("duplicates_found", DataType::Int64, false),
+            Field::new("duplicates_skipped", DataType::Int64, false),
         ])),
         _ => Arc::new(Schema::empty()),
     }
@@ -1088,6 +1109,8 @@ fn build_files_batch(
     let mut validated = BooleanBuilder::new();
     let mut truncated = BooleanBuilder::new();
     let mut error = StringBuilder::new();
+    let mut is_duplicate = BooleanBuilder::new();
+    let mut duplicate_of_offset = Int64Builder::new();
 
     for row in rows {
         run_id.append_value(&ctx.run_id);
@@ -1108,6 +1131,8 @@ fn build_files_batch(
         validated.append_value(row.validated);
         truncated.append_value(row.truncated);
         error.append_option(row.error.as_deref());
+        is_duplicate.append_value(row.is_duplicate);
+        duplicate_of_offset.append_option(row.duplicate_of_offset);
     }
 
     let arrays: Vec<ArrayRef> = vec![
@@ -1129,6 +1154,8 @@ fn build_files_batch(
         Arc::new(validated.finish()),
         Arc::new(truncated.finish()),
         Arc::new(error.finish()),
+        Arc::new(is_duplicate.finish()),
+        Arc::new(duplicate_of_offset.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)
@@ -1552,8 +1579,13 @@ fn build_summary_batch(
     let mut chunks_processed = Int64Builder::new();
     let mut hits_found = Int64Builder::new();
     let mut files_carved = Int64Builder::new();
+    let mut files_rejected = Int64Builder::new();
+    let mut files_prevalidation_rejected = Int64Builder::new();
+    let mut overlap_skipped = Int64Builder::new();
     let mut string_spans = Int64Builder::new();
     let mut artefacts_extracted = Int64Builder::new();
+    let mut duplicates_found = Int64Builder::new();
+    let mut duplicates_skipped = Int64Builder::new();
 
     for row in rows {
         run_id.append_value(&ctx.run_id);
@@ -1565,8 +1597,13 @@ fn build_summary_batch(
         chunks_processed.append_value(row.chunks_processed);
         hits_found.append_value(row.hits_found);
         files_carved.append_value(row.files_carved);
+        files_rejected.append_value(row.files_rejected);
+        files_prevalidation_rejected.append_value(row.files_prevalidation_rejected);
+        overlap_skipped.append_value(row.overlap_skipped);
         string_spans.append_value(row.string_spans);
         artefacts_extracted.append_value(row.artefacts_extracted);
+        duplicates_found.append_value(row.duplicates_found);
+        duplicates_skipped.append_value(row.duplicates_skipped);
     }
 
     let arrays: Vec<ArrayRef> = vec![
@@ -1579,8 +1616,13 @@ fn build_summary_batch(
         Arc::new(chunks_processed.finish()),
         Arc::new(hits_found.finish()),
         Arc::new(files_carved.finish()),
+        Arc::new(files_rejected.finish()),
+        Arc::new(files_prevalidation_rejected.finish()),
+        Arc::new(overlap_skipped.finish()),
         Arc::new(string_spans.finish()),
         Arc::new(artefacts_extracted.finish()),
+        Arc::new(duplicates_found.finish()),
+        Arc::new(duplicates_skipped.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)
@@ -1650,9 +1692,18 @@ fn parse_url_parts(
     } else if let Some(stripped) = url.strip_prefix("https://") {
         scheme = "https".to_string();
         rest = stripped;
+    } else if let Some(stripped) = url.strip_prefix("ftp://") {
+        scheme = "ftp".to_string();
+        rest = stripped;
+    } else if let Some(stripped) = url.strip_prefix("ftps://") {
+        scheme = "ftps".to_string();
+        rest = stripped;
     } else if url.starts_with("www.") {
         scheme = "http".to_string();
         rest = url;
+    } else if let Some(stripped) = url.strip_prefix("//") {
+        scheme = "http".to_string();
+        rest = stripped;
     }
 
     let mut fragment = None;
@@ -1675,14 +1726,13 @@ fn parse_url_parts(
 
     let mut host = base.to_string();
     let mut port = None;
-    if let Some(pos) = base.rfind(':') {
-        let candidate = &base[pos + 1..];
-        if !candidate.is_empty() && candidate.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(parsed) = candidate.parse::<i32>() {
-                port = Some(parsed);
-                host = base[..pos].to_string();
-            }
-        }
+    if let Some(pos) = base.rfind(':')
+        && !base[pos + 1..].is_empty()
+        && base[pos + 1..].chars().all(|c| c.is_ascii_digit())
+        && let Ok(parsed) = base[pos + 1..].parse::<i32>()
+    {
+        port = Some(parsed);
+        host = base[..pos].to_string();
     }
 
     (scheme, host, port, path, query, fragment)

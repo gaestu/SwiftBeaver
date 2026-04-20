@@ -1,6 +1,6 @@
 # Architecture
 
-SwiftBeaver currently includes SQLite carving, string scanning, browser history extraction,
+SwiftBeaver currently includes SQLite carving, string scanning,
 PDF/ZIP/WEBP carving (with ZIP classification for docx/xlsx/pptx/odt/ods/odp/epub),
 BMP/TIFF/MP4/MOV/RAR/7z carving, WAV/AVI/OGG audio-video carving,
 MP3 audio carving with ID3v2 support, TAR/GZIP/BZIP2/XZ archive carving,
@@ -27,24 +27,25 @@ Both backends compile kernels at scanner initialization and fall back to CPU if 
 ## Pipeline
 
 1. **EvidenceSource** reads a raw file (or E01 with default EWF support enabled, requires `libewf`) into a linear byte space.
-2. **Chunk scheduler** splits the image into overlapping chunks.
+2. **Chunk scheduler** streams the image into overlapping chunks.
 3. **CPU signature scanner** searches for file headers within each chunk.
 4. **CPU string scanner** (optional) extracts printable spans and artefacts.
-5. **Carve workers** validate and extract files from the evidence source.
-6. **SQLite parser** extracts browser history from carved SQLite databases.
-7. **Metadata sink** writes JSONL, CSV, or Parquet records.
+5. **Carve workers** pre-validate hits in-memory (header/magic checks), then validate and extract files from the evidence source.
+6. **Metadata sink** writes JSONL, CSV, or Parquet records. Parquet uses sharded writer threads for parallelism; CSV/JSONL use a single writer thread.
 
 ## Concurrency model
 
 - Reader thread: reads chunks and feeds scan jobs.
 - Scan workers: perform signature scanning and emit normalized hits.
 - Carve workers: validate/extract files and emit metadata.
-- Metadata writer: serializes JSONL/CSV/Parquet records.
+- Metadata writer (Parquet): a router thread dispatches metadata events to 3 per-shard channels. File shard (carved files, browser data, run summary), string shard (artefacts), and entropy shard (entropy regions) each own an independent sink instance for zero write contention.
+- Metadata writer (CSV/JSONL): a single thread processes all metadata events sequentially, since these backends eagerly open all output files on initialization.
 
 ## Modules
 
 - `src/evidence.rs` - raw file evidence source
 - `src/chunk.rs` - chunk scheduling
+- `src/pipeline/limiter.rs` - strict `max_files` limiter
 - `src/scanner/` - CPU signature scanner
 - `src/carve/` - file-type handlers
 - `src/strings/` - printable string scanning and artefact extraction
