@@ -6,9 +6,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use swiftbeaver::config;
 use swiftbeaver::evidence::RawFileSource;
@@ -24,6 +25,7 @@ use swiftbeaver::util;
 #[derive(Debug, Deserialize, Clone)]
 pub struct Manifest {
     pub files: Vec<ManifestFile>,
+    pub raw_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -67,6 +69,35 @@ pub fn load_manifest() -> Option<Manifest> {
     let path = golden_image_dir().join("manifest.json");
     let content = fs::read_to_string(&path).ok()?;
     serde_json::from_str(&content).ok()
+}
+
+static GOLDEN_FIXTURE_CHECK: OnceLock<Result<(), String>> = OnceLock::new();
+
+pub fn ensure_golden_fixture_consistent(manifest: &Manifest) -> Result<(), String> {
+    GOLDEN_FIXTURE_CHECK
+        .get_or_init(|| {
+            let expected = match &manifest.raw_sha256 {
+                Some(raw_sha256) => raw_sha256,
+                None => return Ok(()),
+            };
+
+            let raw_path = golden_raw_path();
+            let raw_bytes = fs::read(&raw_path)
+                .map_err(|err| format!("failed to read {}: {err}", raw_path.display()))?;
+            let actual = format!("{:x}", Sha256::digest(&raw_bytes));
+
+            if actual == *expected {
+                Ok(())
+            } else {
+                Err(format!(
+                    "golden fixture mismatch: manifest raw_sha256={} but {} hashes to {}. Regenerate with `bash tests/golden_image/generate.sh --no-e01`.",
+                    expected,
+                    raw_path.display(),
+                    actual
+                ))
+            }
+        })
+        .clone()
 }
 
 /// Check if golden image is available
@@ -243,7 +274,12 @@ macro_rules! skip_without_golden_image {
 macro_rules! load_manifest_or_skip {
     () => {
         match common::load_manifest() {
-            Some(m) => m,
+            Some(m) => {
+                if let Err(err) = common::ensure_golden_fixture_consistent(&m) {
+                    panic!("{err}");
+                }
+                m
+            }
             None => {
                 eprintln!("Skipping: manifest.json not found");
                 return;

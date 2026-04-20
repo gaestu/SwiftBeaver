@@ -1,6 +1,6 @@
 {
   "description": "Golden test image - ALL sample files for SwiftBeaver testing",
-  "generated": "2026-04-19T21:10:08Z",
+  "generated": "2026-04-20T07:15:58Z",
   "alignment": 4096,
   "sample_dir": "samples",
   "files": [
@@ -175,51 +175,11 @@
     }
 ,
     {
-      "path": "databases/browser_downloads.sqlite",
-      "category": "databases",
-      "extension": "sqlite",
-      "offset": 5279744,
-      "offset_hex": "0x509000",
-      "size": 16384,
-      "sha256": "587da79f85931d10e306717ba474c90658636af78bfd752c83e73b0a13d71cc2"
-    }
-,
-    {
-      "path": "databases/browser_history_deleted.sqlite",
-      "category": "databases",
-      "extension": "sqlite",
-      "offset": 5296128,
-      "offset_hex": "0x50D000",
-      "size": 16384,
-      "sha256": "ef324ce73e007329cea1a41fe3dceb07ac6f8d97fd1c255c27faa7cab48d9773"
-    }
-,
-    {
-      "path": "databases/browser_history_wal.sqlite",
-      "category": "databases",
-      "extension": "sqlite",
-      "offset": 5312512,
-      "offset_hex": "0x511000",
-      "size": 16384,
-      "sha256": "2722a6498393de88c069e8c799b4d64c649a1a101187758f6968552abc60aec9"
-    }
-,
-    {
-      "path": "databases/browser_history_wal.sqlite-wal",
-      "category": "databases",
-      "extension": "sqlite-wal",
-      "offset": 5328896,
-      "offset_hex": "0x515000",
-      "size": 49472,
-      "sha256": "784e7522b43b7a400e5bd5c9137ec067503321781b195e4f5096efb8153fdeca"
-    }
-,
-    {
       "path": "databases/Cookies",
       "category": "databases",
       "extension": "",
-      "offset": 5382144,
-      "offset_hex": "0x522000",
+      "offset": 5279744,
+      "offset_hex": "0x509000",
       "size": 12288,
       "sha256": "fef92c64d6331b0ca96c11e9dd14b2a261f81580a5ec9981002732ca74e8ba47"
     }
@@ -228,10 +188,50 @@
       "path": "databases/History",
       "category": "databases",
       "extension": "",
-      "offset": 5394432,
-      "offset_hex": "0x525000",
+      "offset": 5292032,
+      "offset_hex": "0x50C000",
       "size": 28672,
       "sha256": "2185f2d705d546737c961717898900f3e56f8c3fe993a7dd188dd49e61b6b88f"
+    }
+,
+    {
+      "path": "databases/browser_downloads.sqlite",
+      "category": "databases",
+      "extension": "sqlite",
+      "offset": 5320704,
+      "offset_hex": "0x513000",
+      "size": 16384,
+      "sha256": "587da79f85931d10e306717ba474c90658636af78bfd752c83e73b0a13d71cc2"
+    }
+,
+    {
+      "path": "databases/browser_history_deleted.sqlite",
+      "category": "databases",
+      "extension": "sqlite",
+      "offset": 5337088,
+      "offset_hex": "0x517000",
+      "size": 16384,
+      "sha256": "ef324ce73e007329cea1a41fe3dceb07ac6f8d97fd1c255c27faa7cab48d9773"
+    }
+,
+    {
+      "path": "databases/browser_history_wal.sqlite",
+      "category": "databases",
+      "extension": "sqlite",
+      "offset": 5353472,
+      "offset_hex": "0x51B000",
+      "size": 16384,
+      "sha256": "2722a6498393de88c069e8c799b4d64c649a1a101187758f6968552abc60aec9"
+    }
+,
+    {
+      "path": "databases/browser_history_wal.sqlite-wal",
+      "category": "databases",
+      "extension": "sqlite-wal",
+      "offset": 5369856,
+      "offset_hex": "0x51F000",
+      "size": 49472,
+      "sha256": "784e7522b43b7a400e5bd5c9137ec067503321781b195e4f5096efb8153fdeca"
     }
 ,
     {
@@ -255,23 +255,23 @@
     }
 ,
     {
-      "path": "databases/test_forensic.sqlite",
+      "path": "databases/test.sqlite",
       "category": "databases",
       "extension": "sqlite",
       "offset": 5439488,
       "offset_hex": "0x530000",
-      "size": 16384,
-      "sha256": "1bfee51b527b27bc89c5e640a5ebbffe9a9b4b27994fec035c20ff846be4df9d"
+      "size": 8192,
+      "sha256": "c3f42a00183f2c430efc303eff78599d447afdd410ef229f1e92c4a04284bd3f"
     }
 ,
     {
-      "path": "databases/test.sqlite",
+      "path": "databases/test_forensic.sqlite",
       "category": "databases",
       "extension": "sqlite",
-      "offset": 5455872,
-      "offset_hex": "0x534000",
-      "size": 8192,
-      "sha256": "c3f42a00183f2c430efc303eff78599d447afdd410ef229f1e92c4a04284bd3f"
+      "offset": 5447680,
+      "offset_hex": "0x532000",
+      "size": 16384,
+      "sha256": "1bfee51b527b27bc89c5e640a5ebbffe9a9b4b27994fec035c20ff846be4df9d"
     }
 ,
     {
@@ -695,11 +695,21 @@
     }
 ,
     {
+      "path": "other/Title.html",
+      "category": "other",
+      "extension": "html",
+      "offset": 14786560,
+      "offset_hex": "0xE1A000",
+      "size": 137453,
+      "sha256": "9e19cef41076fa800c188e5a8fa79b8ac3d114decb9cac3569f9f2dee47724ac"
+    }
+,
+    {
       "path": "other/file_example_CSV_5000.csv",
       "category": "other",
       "extension": "csv",
-      "offset": 14786560,
-      "offset_hex": "0xE1A000",
+      "offset": 14925824,
+      "offset_hex": "0xE3C000",
       "size": 284042,
       "sha256": "1b3583796b56fe56fcf36cb854e42cffcb115476b3d797d54c90a105fd160c72"
     }
@@ -708,8 +718,8 @@
       "path": "other/file_example_JSON_1kb.json",
       "category": "other",
       "extension": "json",
-      "offset": 15073280,
-      "offset_hex": "0xE60000",
+      "offset": 15212544,
+      "offset_hex": "0xE82000",
       "size": 20471,
       "sha256": "aa20e971f6a0a7c482f3ed70cc6edc115eb577f987322ba42e5c3869e1d714d1"
     }
@@ -718,8 +728,8 @@
       "path": "other/file_example_XML_24kb.xml.xml",
       "category": "other",
       "extension": "xml",
-      "offset": 15093760,
-      "offset_hex": "0xE65000",
+      "offset": 15233024,
+      "offset_hex": "0xE87000",
       "size": 23972,
       "sha256": "1b7c71ab47d7bc73aa7173cd59f639fd0fd7c9c790ce89ed9f76700d50720a0e"
     }
@@ -728,8 +738,8 @@
       "path": "other/forensic_patterns.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 15118336,
-      "offset_hex": "0xE6B000",
+      "offset": 15257600,
+      "offset_hex": "0xE8D000",
       "size": 1593,
       "sha256": "d090a94f610d57ed031e9d72325df2259d80e5c8ffd36df2fef4a1e9ae7a846b"
     }
@@ -738,8 +748,8 @@
       "path": "other/sample1.azw3",
       "category": "other",
       "extension": "azw3",
-      "offset": 15122432,
-      "offset_hex": "0xE6C000",
+      "offset": 15261696,
+      "offset_hex": "0xE8E000",
       "size": 221012,
       "sha256": "e025ac6644a5b0c038812321d8388666ba79f9d6ffe44d07d81cda9683c83158"
     }
@@ -748,8 +758,8 @@
       "path": "other/sample1.epub",
       "category": "other",
       "extension": "epub",
-      "offset": 15343616,
-      "offset_hex": "0xEA2000",
+      "offset": 15482880,
+      "offset_hex": "0xEC4000",
       "size": 191468,
       "sha256": "cc32ef8bed8a8ffb18c7006fca824f8f9e5f7cfc2d0348871dacb99fe8220a66"
     }
@@ -758,8 +768,8 @@
       "path": "other/sample1.fb2",
       "category": "other",
       "extension": "fb2",
-      "offset": 15536128,
-      "offset_hex": "0xED1000",
+      "offset": 15675392,
+      "offset_hex": "0xEF3000",
       "size": 275044,
       "sha256": "a4944358f701e8e2675415e995e40e13f387a93f6e5ca2bd467731e27c34ed87"
     }
@@ -768,8 +778,8 @@
       "path": "other/sample1.lrf",
       "category": "other",
       "extension": "lrf",
-      "offset": 15814656,
-      "offset_hex": "0xF15000",
+      "offset": 15953920,
+      "offset_hex": "0xF37000",
       "size": 105900,
       "sha256": "585357c4ba9d5ed8795a81a8044a7d484cc265695d5913a2480645bad4cff1bb"
     }
@@ -778,8 +788,8 @@
       "path": "other/source.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 15921152,
-      "offset_hex": "0xF2F000",
+      "offset": 16060416,
+      "offset_hex": "0xF51000",
       "size": 606,
       "sha256": "0d7de69351a3a798107dfc752912361077970bfd594c0ade6df48aea676afde3"
     }
@@ -788,8 +798,8 @@
       "path": "other/strings.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 15925248,
-      "offset_hex": "0xF30000",
+      "offset": 16064512,
+      "offset_hex": "0xF52000",
       "size": 2250,
       "sha256": "e1dbe0cdebdb84e51dd4dba416384c6a225d7175c3126cbde23bf7741dde5b9c"
     }
@@ -798,8 +808,8 @@
       "path": "other/test_config.yaml",
       "category": "other",
       "extension": "yaml",
-      "offset": 15929344,
-      "offset_hex": "0xF31000",
+      "offset": 16068608,
+      "offset_hex": "0xF53000",
       "size": 558,
       "sha256": "de7fd266d4b00939b92280e9a39dd7a2453c46c45d741407b4f44a284a0d5361"
     }
@@ -808,8 +818,8 @@
       "path": "other/test_data.json",
       "category": "other",
       "extension": "json",
-      "offset": 15933440,
-      "offset_hex": "0xF32000",
+      "offset": 16072704,
+      "offset_hex": "0xF54000",
       "size": 440,
       "sha256": "2a05546a89c6d175912825b2eb65539d72bda5c5da19cc4e75f96fd854699610"
     }
@@ -818,20 +828,10 @@
       "path": "other/test_logs.jsonl",
       "category": "other",
       "extension": "jsonl",
-      "offset": 15937536,
-      "offset_hex": "0xF33000",
+      "offset": 16076800,
+      "offset_hex": "0xF55000",
       "size": 797,
       "sha256": "72b6a44f7c43f54fd0252f49793139a0091e053d6188164f707148bcb4d0c14a"
-    }
-,
-    {
-      "path": "other/Title.html",
-      "category": "other",
-      "extension": "html",
-      "offset": 15941632,
-      "offset_hex": "0xF34000",
-      "size": 137453,
-      "sha256": "9e19cef41076fa800c188e5a8fa79b8ac3d114decb9cac3569f9f2dee47724ac"
     }
 ,
     {
@@ -952,5 +952,5 @@
       "video": {"files": 7, "bytes": 10378868}
     }
   },
-  "raw_sha256": "e8b5846c09bd1ae7fa6a5f6595fa2ec302514ecbdc3bdfccf8789fe0aafc3d5d"
+  "raw_sha256": "4d9527643e9fd1762a83bbe5b18b4b084c17b3410cfb38de2d6d0c8b1b6d4d03"
 }
