@@ -431,6 +431,36 @@ impl OverlapTracker {
 /// Per-type concurrency semaphore map shared across slow carve workers.
 pub type TypeSemaphores = Arc<HashMap<String, Arc<CountingSemaphore>>>;
 
+/// Stable configuration shared by a carve worker pool.
+#[derive(Clone)]
+pub struct CarveWorkerConfig {
+    pub workers: usize,
+    pub registry: Arc<CarveRegistry>,
+    pub evidence: Arc<dyn EvidenceSource>,
+    pub run_id: String,
+    pub run_output_dir: PathBuf,
+    pub deferred_buffer_bytes: usize,
+    pub metadata_only: bool,
+    pub hash_config: crate::hash::HashConfig,
+    pub dedup_tracker: Option<Arc<DedupTracker>>,
+    pub skip_duplicates: bool,
+    pub type_semaphores: Option<TypeSemaphores>,
+}
+
+/// Runtime plumbing for a carve worker pool invocation.
+#[derive(Clone)]
+pub struct CarveWorkerRuntime {
+    pub rx: Receiver<NormalizedHit>,
+    pub write_tx: Sender<WriteJob>,
+    pub carve_limiter: Arc<CarveLimiter>,
+    pub carve_errors: Arc<AtomicU64>,
+    pub carve_time_ms: Arc<AtomicU64>,
+    pub files_rejected: Arc<AtomicU64>,
+    pub files_prevalidation_rejected: Arc<AtomicU64>,
+    pub overlap_skipped: Arc<AtomicU64>,
+    pub duplicates_found: Arc<AtomicU64>,
+}
+
 /// A simple blocking counting semaphore for per-type concurrency limits.
 pub struct CountingSemaphore {
     state: std::sync::Mutex<usize>,
@@ -492,49 +522,33 @@ pub fn build_type_semaphores(limits: &HashMap<String, CarverLimits>) -> TypeSema
 }
 
 /// Spawn file carving worker threads
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_carve_workers(
-    workers: usize,
-    registry: Arc<CarveRegistry>,
-    evidence: Arc<dyn EvidenceSource>,
-    run_id: String,
-    run_output_dir: PathBuf,
-    rx: Receiver<NormalizedHit>,
-    write_tx: Sender<WriteJob>,
-    carve_limiter: Arc<CarveLimiter>,
-    carve_errors: Arc<AtomicU64>,
-    carve_time_ms: Arc<AtomicU64>,
-    files_rejected: Arc<AtomicU64>,
-    files_prevalidation_rejected: Arc<AtomicU64>,
-    deferred_buffer_bytes: usize,
-    metadata_only: bool,
-    overlap_skipped: Arc<AtomicU64>,
-    hash_config: crate::hash::HashConfig,
-    dedup_tracker: Option<Arc<DedupTracker>>,
-    duplicates_found: Arc<AtomicU64>,
-    skip_duplicates: bool,
-    type_semaphores: Option<TypeSemaphores>,
+    cfg: CarveWorkerConfig,
+    runtime: CarveWorkerRuntime,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
-    let worker_count = workers.max(1);
+    let worker_count = cfg.workers.max(1);
 
     for _ in 0..worker_count {
-        let registry = registry.clone();
-        let evidence = evidence.clone();
-        let run_id = run_id.clone();
-        let run_output_dir = run_output_dir.clone();
-        let rx = rx.clone();
-        let write_tx = write_tx.clone();
-        let carve_limiter = carve_limiter.clone();
-        let carve_errors = carve_errors.clone();
-        let carve_time_ms = carve_time_ms.clone();
-        let files_rejected = files_rejected.clone();
-        let files_prevalidation_rejected = files_prevalidation_rejected.clone();
-        let overlap_skipped = overlap_skipped.clone();
-        let hash_config = hash_config.clone();
-        let dedup_tracker = dedup_tracker.clone();
-        let duplicates_found = duplicates_found.clone();
-        let type_semaphores = type_semaphores.clone();
+        let registry = cfg.registry.clone();
+        let evidence = cfg.evidence.clone();
+        let run_id = cfg.run_id.clone();
+        let run_output_dir = cfg.run_output_dir.clone();
+        let rx = runtime.rx.clone();
+        let write_tx = runtime.write_tx.clone();
+        let carve_limiter = runtime.carve_limiter.clone();
+        let carve_errors = runtime.carve_errors.clone();
+        let carve_time_ms = runtime.carve_time_ms.clone();
+        let files_rejected = runtime.files_rejected.clone();
+        let files_prevalidation_rejected = runtime.files_prevalidation_rejected.clone();
+        let overlap_skipped = runtime.overlap_skipped.clone();
+        let hash_config = cfg.hash_config.clone();
+        let dedup_tracker = cfg.dedup_tracker.clone();
+        let duplicates_found = runtime.duplicates_found.clone();
+        let type_semaphores = cfg.type_semaphores.clone();
+        let deferred_buffer_bytes = cfg.deferred_buffer_bytes;
+        let metadata_only = cfg.metadata_only;
+        let skip_duplicates = cfg.skip_duplicates;
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");

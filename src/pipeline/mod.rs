@@ -619,55 +619,59 @@ impl<'a> PipelineRunner<'a> {
 
         // Build per-type semaphores from carver_limits config
         let type_semaphores = workers::build_type_semaphores(&self.cfg.carver_limits);
+        let carve_cfg_base = workers::CarveWorkerConfig {
+            workers: 1,
+            registry: self.carve_registry.clone(),
+            evidence: self.evidence.clone(),
+            run_id: self.cfg.run_id.clone(),
+            run_output_dir: self.run_output_dir.clone(),
+            deferred_buffer_bytes: self.cfg.deferred_buffer_kb * 1024,
+            metadata_only: self.metadata_only,
+            hash_config: crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
+            dedup_tracker: dedup_tracker.clone(),
+            skip_duplicates: self.cfg.skip_duplicate_files,
+            type_semaphores: None,
+        };
 
         let fast_carve_handles = if fast_count > 0 {
             workers::spawn_carve_workers(
-                fast_count,
-                self.carve_registry.clone(),
-                self.evidence.clone(),
-                self.cfg.run_id.clone(),
-                self.run_output_dir.clone(),
-                channels.fast_hit_rx.clone(),
-                channels.write_tx.clone(),
-                counters.carve_limiter.clone(),
-                counters.carve_errors.clone(),
-                counters.carve_time_ms.clone(),
-                counters.files_rejected.clone(),
-                counters.files_prevalidation_rejected.clone(),
-                self.cfg.deferred_buffer_kb * 1024,
-                self.metadata_only,
-                counters.overlap_skipped.clone(),
-                crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
-                dedup_tracker.clone(),
-                counters.duplicates_found.clone(),
-                self.cfg.skip_duplicate_files,
-                None, // fast workers: no per-type semaphores
+                workers::CarveWorkerConfig {
+                    workers: fast_count,
+                    ..carve_cfg_base.clone()
+                },
+                workers::CarveWorkerRuntime {
+                    rx: channels.fast_hit_rx.clone(),
+                    write_tx: channels.write_tx.clone(),
+                    carve_limiter: counters.carve_limiter.clone(),
+                    carve_errors: counters.carve_errors.clone(),
+                    carve_time_ms: counters.carve_time_ms.clone(),
+                    files_rejected: counters.files_rejected.clone(),
+                    files_prevalidation_rejected: counters.files_prevalidation_rejected.clone(),
+                    overlap_skipped: counters.overlap_skipped.clone(),
+                    duplicates_found: counters.duplicates_found.clone(),
+                },
             )
         } else {
             Vec::new()
         };
 
         let slow_carve_handles = workers::spawn_carve_workers(
-            slow_count,
-            self.carve_registry.clone(),
-            self.evidence.clone(),
-            self.cfg.run_id.clone(),
-            self.run_output_dir.clone(),
-            channels.slow_hit_rx.clone(),
-            channels.write_tx.clone(),
-            counters.carve_limiter.clone(),
-            counters.carve_errors.clone(),
-            counters.carve_time_ms.clone(),
-            counters.files_rejected.clone(),
-            counters.files_prevalidation_rejected.clone(),
-            self.cfg.deferred_buffer_kb * 1024,
-            self.metadata_only,
-            counters.overlap_skipped.clone(),
-            crate::hash::HashConfig::from_names(&self.cfg.hash_algorithms),
-            dedup_tracker,
-            counters.duplicates_found.clone(),
-            self.cfg.skip_duplicate_files,
-            Some(type_semaphores),
+            workers::CarveWorkerConfig {
+                workers: slow_count,
+                type_semaphores: Some(type_semaphores),
+                ..carve_cfg_base
+            },
+            workers::CarveWorkerRuntime {
+                rx: channels.slow_hit_rx.clone(),
+                write_tx: channels.write_tx.clone(),
+                carve_limiter: counters.carve_limiter.clone(),
+                carve_errors: counters.carve_errors.clone(),
+                carve_time_ms: counters.carve_time_ms.clone(),
+                files_rejected: counters.files_rejected.clone(),
+                files_prevalidation_rejected: counters.files_prevalidation_rejected.clone(),
+                overlap_skipped: counters.overlap_skipped.clone(),
+                duplicates_found: counters.duplicates_found.clone(),
+            },
         );
 
         let string_handles = if let Some(rx) = &channels.string_rx {
