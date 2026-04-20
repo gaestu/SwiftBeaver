@@ -44,6 +44,7 @@ The default config is `config/default.yml`.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.
 Note: `sqlite_page` and `sqlite_wal` are carve-only outputs; enable/disable them via `file_types` and CLI type filters (`--types` / `--enable-types`).
+Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, and `overlap_skipped` for same-type hits skipped because they fall inside a range already carved by that worker.
 
 ## File type configuration
 

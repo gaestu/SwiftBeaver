@@ -956,6 +956,7 @@ impl<'a> PipelineRunner<'a> {
             files_prevalidation_rejected: counters
                 .files_prevalidation_rejected
                 .load(Ordering::Relaxed),
+            overlap_skipped: counters.overlap_skipped.load(Ordering::Relaxed),
             string_spans: counters.string_spans.load(Ordering::Relaxed),
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
             duplicates_found: counters.duplicates_found.load(Ordering::Relaxed),

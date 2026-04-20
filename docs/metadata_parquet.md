@@ -178,10 +178,13 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `files_carved` (int64)
 - `files_rejected` (int64)
 - `files_prevalidation_rejected` (int64)
+- `overlap_skipped` (int64)
 - `string_spans` (int64)
 - `artefacts_extracted` (int64)
 - `duplicates_found` (int64)
 - `duplicates_skipped` (int64)
+
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts same-type hits skipped because they landed inside a range already carved by that worker.
 
 ## Entropy regions
 

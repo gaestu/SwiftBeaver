@@ -2,8 +2,9 @@ use sha2::Digest;
 
 use crate::carve::{
     CarveError, CarveHandler, CarvedFile, DeferredWriter, ExtractionContext, PendingCarve,
-    create_hashers, finalize_hashers, output_path,
+    PreValidation, create_hashers, finalize_hashers, output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 pub struct FooterCarveHandler {
@@ -54,6 +55,33 @@ impl CarveHandler for FooterCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let Some(max_header_len) = self.header_patterns.iter().map(Vec::len).max() else {
+            return Ok(PreValidation::Proceed);
+        };
+        if max_header_len == 0 {
+            return Ok(PreValidation::Proceed);
+        }
+
+        let mut buf = vec![0u8; max_header_len];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < max_header_len {
+            return Ok(PreValidation::Reject("truncated header".to_string()));
+        }
+
+        if self.header_matches(&buf) {
+            Ok(PreValidation::Proceed)
+        } else {
+            Ok(PreValidation::Reject("footer header mismatch".to_string()))
+        }
     }
 
     fn process_hit(
@@ -231,7 +259,7 @@ fn find_pattern(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::FooterCarveHandler;
-    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::carve::{CarveHandler, ExtractionContext, PreValidation};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
     use tempfile::tempdir;
@@ -307,6 +335,29 @@ mod tests {
         assert_eq!(
             carved.size,
             (header.len() + "payload".len() + footer.len()) as u64
+        );
+    }
+
+    #[test]
+    fn pre_validate_rejects_mismatched_header() {
+        let evidence = SliceEvidence {
+            data: b"BADSpayloadFOOT".to_vec(),
+        };
+        let handler = FooterCarveHandler::new(
+            "custom".to_string(),
+            "bin".to_string(),
+            1,
+            0,
+            vec![b"HEAD".to_vec()],
+            vec![b"FOOT".to_vec()],
+        );
+
+        assert!(
+            matches!(
+                handler.pre_validate(&evidence, 0).expect("pre_validate"),
+                PreValidation::Reject(reason) if reason.contains("mismatch")
+            ),
+            "footer carver should reject non-matching headers during pre-validation"
         );
     }
 }

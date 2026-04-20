@@ -5,9 +5,10 @@
 //! transition detection to avoid oversized output from forensic disk images.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, create_hashers,
-    finalize_hashers, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 /// RFC 822 header markers used for email validation.
@@ -56,6 +57,37 @@ fn contains_email_pattern(data: &[u8]) -> bool {
 /// Check if data has CRLF or LF line endings typical of email.
 fn has_email_line_endings(data: &[u8]) -> bool {
     data.windows(2).any(|w| w == b"\r\n") || data.contains(&b'\n')
+}
+
+fn validate_email_prefix(data: &[u8]) -> Result<(), String> {
+    if data.is_empty() {
+        return Err("truncated header".to_string());
+    }
+
+    let header_count = HEADER_MARKERS
+        .iter()
+        .filter(|m| find_pattern(data, m).is_some())
+        .count();
+    if header_count < MIN_HEADERS_REQUIRED {
+        return Err(format!(
+            "insufficient RFC 822 headers: found {}, need {}",
+            header_count, MIN_HEADERS_REQUIRED
+        ));
+    }
+
+    if looks_like_template(data) {
+        return Err("template-like header content".to_string());
+    }
+
+    if !contains_email_pattern(data) {
+        return Err("missing email address indicator".to_string());
+    }
+
+    if !has_email_line_endings(data) {
+        return Err("missing email-style line endings".to_string());
+    }
+
+    Ok(())
 }
 
 /// Check if this looks like a template string or debug output (not real email).
@@ -160,37 +192,30 @@ impl CarveHandler for EmlCarveHandler {
         &self.extension
     }
 
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let mut buf = vec![0u8; 2048];
+        let n = evidence
+            .read_at(offset, &mut buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        buf.truncate(n);
+
+        match validate_email_prefix(&buf) {
+            Ok(()) => Ok(PreValidation::Proceed),
+            Err(reason) => Ok(PreValidation::Reject(reason)),
+        }
+    }
+
     fn process_hit(
         &self,
         hit: &NormalizedHit,
         ctx: &ExtractionContext,
     ) -> Result<Option<PendingCarve>, CarveError> {
         let head = read_prefix(ctx, hit.global_offset, 2048);
-        if head.is_empty() {
-            return Ok(None);
-        }
-
-        // Count distinct RFC 822 headers present
-        let header_count = HEADER_MARKERS
-            .iter()
-            .filter(|m| find_pattern(&head, m).is_some())
-            .count();
-        if header_count < MIN_HEADERS_REQUIRED {
-            return Ok(None);
-        }
-
-        // Reject template strings (common false positive in binaries)
-        if looks_like_template(&head) {
-            return Ok(None);
-        }
-
-        // Require @ symbol (email address indicator)
-        if !contains_email_pattern(&head) {
-            return Ok(None);
-        }
-
-        // Require proper line endings
-        if !has_email_line_endings(&head) {
+        if validate_email_prefix(&head).is_err() {
             return Ok(None);
         }
 
@@ -382,7 +407,7 @@ fn read_prefix(ctx: &ExtractionContext, offset: u64, len: usize) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::carve::{CarveHandler, ExtractionContext, PreValidation};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
     use tempfile::tempdir;
@@ -442,6 +467,33 @@ mod tests {
         let carved = handler.process_hit(&make_hit(), &ctx).expect("process");
         let carved = carved.expect("carved").flush().expect("flush");
         assert_eq!(carved.size, data.len() as u64);
+    }
+
+    #[test]
+    fn pre_validate_accepts_valid_eml() {
+        let data = b"From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test Email\r\nDate: Mon, 1 Jan 2024 12:00:00 +0000\r\n\r\nBody content here".to_vec();
+        let evidence = SliceEvidence { data };
+        let handler = make_handler(0);
+
+        assert_eq!(
+            handler.pre_validate(&evidence, 0).expect("pre_validate"),
+            PreValidation::Proceed
+        );
+    }
+
+    #[test]
+    fn pre_validate_rejects_template_string() {
+        let data = b"From: %s via WMI auto-mailer\nSubject: %s\nDate: Mon, 1 Jan 2024 12:00:00 +0000\n\nBody".to_vec();
+        let evidence = SliceEvidence { data };
+        let handler = make_handler(0);
+
+        assert!(
+            matches!(
+                handler.pre_validate(&evidence, 0).expect("pre_validate"),
+                PreValidation::Reject(reason) if reason.contains("template")
+            ),
+            "template-like headers should be rejected during pre-validation"
+        );
     }
 
     #[test]

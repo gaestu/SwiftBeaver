@@ -3,9 +3,10 @@
 //! Uses PDB record offsets to estimate file size; best-effort heuristic.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, create_hashers,
-    finalize_hashers, output_path, write_range,
+    CarveError, CarveHandler, CarvedFile, ExtractionContext, PendingCarve, PreValidation,
+    create_hashers, finalize_hashers, output_path, write_range,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const PDB_HEADER_LEN: usize = 78;
@@ -39,6 +40,65 @@ impl CarveHandler for MobiCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        // The MOBI scanner is configured to hit on the BOOKMOBI magic at byte 60
+        // within the PDB header, so pre-validation normalizes back to the true file
+        // start before checking the container fields.
+        let Some(start_offset) = offset.checked_sub(MOBI_OFFSET) else {
+            return Ok(PreValidation::Reject(
+                "mobi hit before PDB header start".to_string(),
+            ));
+        };
+
+        let mut header = [0u8; PDB_HEADER_LEN];
+        let n = evidence
+            .read_at(start_offset, &mut header)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < header.len() {
+            return Ok(PreValidation::Reject("pdb header too short".to_string()));
+        }
+        if &header[60..68] != MOBI_MAGIC {
+            return Ok(PreValidation::Reject("mobi magic mismatch".to_string()));
+        }
+
+        let record_count = u16::from_be_bytes([header[76], header[77]]) as usize;
+        if record_count == 0 || record_count > 4096 {
+            return Ok(PreValidation::Reject(format!(
+                "implausible PDB record count {}",
+                record_count
+            )));
+        }
+
+        let record_list_len = record_count * 8;
+        let mut record_list = vec![0u8; record_list_len];
+        let n = evidence
+            .read_at(start_offset + PDB_HEADER_LEN as u64, &mut record_list)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < record_list_len {
+            return Ok(PreValidation::Reject(
+                "pdb record list truncated".to_string(),
+            ));
+        }
+
+        let first_offset = u32::from_be_bytes([
+            record_list[0],
+            record_list[1],
+            record_list[2],
+            record_list[3],
+        ]) as u64;
+        if first_offset < PDB_HEADER_LEN as u64 + record_list_len as u64 {
+            return Ok(PreValidation::Reject(
+                "first PDB record overlaps header".to_string(),
+            ));
+        }
+
+        Ok(PreValidation::Proceed)
     }
 
     fn process_hit(
@@ -171,7 +231,7 @@ fn read_exact_at(ctx: &ExtractionContext, offset: u64, len: usize) -> Option<Vec
 #[cfg(test)]
 mod tests {
     use super::MobiCarveHandler;
-    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::carve::{CarveHandler, ExtractionContext, PreValidation};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
     use tempfile::tempdir;
@@ -234,5 +294,33 @@ mod tests {
         let carved = handler.process_hit(&hit, &ctx).expect("process");
         let carved = carved.expect("carved").flush().expect("flush");
         assert_eq!(carved.size, data.len() as u64);
+    }
+
+    #[test]
+    fn pre_validate_accepts_valid_mobi() {
+        let data = minimal_mobi();
+        let evidence = SliceEvidence { data };
+        let handler = MobiCarveHandler::new("mobi".to_string(), 0, 0);
+
+        assert_eq!(
+            handler.pre_validate(&evidence, 60).expect("pre_validate"),
+            PreValidation::Proceed
+        );
+    }
+
+    #[test]
+    fn pre_validate_rejects_bad_record_count() {
+        let mut data = minimal_mobi();
+        data[76..78].copy_from_slice(&(0u16).to_be_bytes());
+        let evidence = SliceEvidence { data };
+        let handler = MobiCarveHandler::new("mobi".to_string(), 0, 0);
+
+        assert!(
+            matches!(
+                handler.pre_validate(&evidence, 60).expect("pre_validate"),
+                PreValidation::Reject(reason) if reason.contains("record count")
+            ),
+            "invalid record counts should be rejected during pre-validation"
+        );
     }
 }

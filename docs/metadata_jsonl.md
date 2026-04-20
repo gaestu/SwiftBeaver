@@ -136,6 +136,7 @@ Each line in `metadata/run_summary.jsonl` is a JSON object with:
 - `files_carved`
 - `files_rejected`
 - `files_prevalidation_rejected`
+- `overlap_skipped`
 - `string_spans`
 - `artefacts_extracted`
 - `duplicates_found`
@@ -144,6 +145,8 @@ Each line in `metadata/run_summary.jsonl` is a JSON object with:
 - `config_hash`
 - `evidence_path`
 - `evidence_sha256`
+
+`files_prevalidation_rejected` counts hits rejected by the carver's lightweight `pre_validate()` checks before any carved file is created. `overlap_skipped` counts same-type hits skipped because their offsets fall inside a byte range that was already carved by that worker.
 
 ## Entropy regions (`entropy_regions.jsonl`)
 

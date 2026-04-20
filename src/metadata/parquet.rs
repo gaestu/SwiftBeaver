@@ -200,6 +200,7 @@ struct RunSummaryRow {
     files_carved: i64,
     files_rejected: i64,
     files_prevalidation_rejected: i64,
+    overlap_skipped: i64,
     string_spans: i64,
     artefacts_extracted: i64,
     duplicates_found: i64,
@@ -818,6 +819,7 @@ impl MetadataSink for ParquetSink {
             files_carved: to_i64(summary.files_carved)?,
             files_rejected: to_i64(summary.files_rejected)?,
             files_prevalidation_rejected: to_i64(summary.files_prevalidation_rejected)?,
+            overlap_skipped: to_i64(summary.overlap_skipped)?,
             string_spans: to_i64(summary.string_spans)?,
             artefacts_extracted: to_i64(summary.artefacts_extracted)?,
             duplicates_found: to_i64(summary.duplicates_found)?,
@@ -1074,6 +1076,7 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("files_carved", DataType::Int64, false),
             Field::new("files_rejected", DataType::Int64, false),
             Field::new("files_prevalidation_rejected", DataType::Int64, false),
+            Field::new("overlap_skipped", DataType::Int64, false),
             Field::new("string_spans", DataType::Int64, false),
             Field::new("artefacts_extracted", DataType::Int64, false),
             Field::new("duplicates_found", DataType::Int64, false),
@@ -1578,6 +1581,7 @@ fn build_summary_batch(
     let mut files_carved = Int64Builder::new();
     let mut files_rejected = Int64Builder::new();
     let mut files_prevalidation_rejected = Int64Builder::new();
+    let mut overlap_skipped = Int64Builder::new();
     let mut string_spans = Int64Builder::new();
     let mut artefacts_extracted = Int64Builder::new();
     let mut duplicates_found = Int64Builder::new();
@@ -1595,6 +1599,7 @@ fn build_summary_batch(
         files_carved.append_value(row.files_carved);
         files_rejected.append_value(row.files_rejected);
         files_prevalidation_rejected.append_value(row.files_prevalidation_rejected);
+        overlap_skipped.append_value(row.overlap_skipped);
         string_spans.append_value(row.string_spans);
         artefacts_extracted.append_value(row.artefacts_extracted);
         duplicates_found.append_value(row.duplicates_found);
@@ -1613,6 +1618,7 @@ fn build_summary_batch(
         Arc::new(files_carved.finish()),
         Arc::new(files_rejected.finish()),
         Arc::new(files_prevalidation_rejected.finish()),
+        Arc::new(overlap_skipped.finish()),
         Arc::new(string_spans.finish()),
         Arc::new(artefacts_extracted.finish()),
         Arc::new(duplicates_found.finish()),

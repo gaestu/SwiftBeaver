@@ -67,6 +67,18 @@ fn sample_pdf() -> Vec<u8> {
     data
 }
 
+fn sample_pdf_with_nested_header() -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.4\n");
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
+    data.extend_from_slice(b"stream\n%PDF-1.4 nested marker\nendstream\n");
+    while data.len() < 96 {
+        data.push(b' ');
+    }
+    data.extend_from_slice(b"%%EOF");
+    data
+}
+
 fn sample_docx_zip() -> Vec<u8> {
     let name = b"word/document.xml";
     let name_len = name.len() as u16;
@@ -541,6 +553,83 @@ fn metadata_only_mode_records_metadata_without_writing_files() {
             "metadata record should have evidence_path"
         );
     }
+}
+
+#[test]
+fn overlap_skipped_is_reported_when_nested_hits_share_a_carved_range() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let input_path = temp_dir.path().join("image.bin");
+
+    let mut image = vec![0u8; 8192];
+    insert_bytes(&mut image, 1024, &sample_pdf_with_nested_header());
+    fs::write(&input_path, &image).expect("write input");
+
+    let loaded = config::load_config(None).expect("config");
+    let mut cfg = loaded.config;
+    cfg.run_id = "overlap_skipped_test".to_string();
+
+    let evidence = RawFileSource::open(&input_path).expect("evidence");
+    let evidence: Arc<dyn swiftbeaver::evidence::EvidenceSource> = Arc::new(evidence);
+
+    let run_output_dir = temp_dir.path().join("run");
+    fs::create_dir_all(&run_output_dir).expect("output dir");
+
+    let meta_sink = metadata::build_sink(
+        MetadataBackendKind::Jsonl,
+        &cfg,
+        &cfg.run_id,
+        "test",
+        &loaded.config_hash,
+        &input_path,
+        "",
+        &run_output_dir,
+    )
+    .expect("metadata sink");
+
+    let sig_scanner = scanner::build_signature_scanner(&cfg, false).expect("scanner");
+    let sig_scanner: Arc<dyn swiftbeaver::scanner::SignatureScanner> = Arc::from(sig_scanner);
+
+    let carve_registry = Arc::new(util::build_carve_registry(&cfg, false).expect("registry"));
+
+    let stats = pipeline::run_pipeline(
+        &cfg,
+        evidence,
+        sig_scanner,
+        None,
+        vec![meta_sink],
+        &run_output_dir,
+        1,
+        1,
+        64 * 1024,
+        64,
+        None,
+        None,
+        carve_registry,
+    )
+    .expect("pipeline");
+
+    assert!(
+        stats.files_carved > 0,
+        "expected at least one carved file, got {}",
+        stats.files_carved
+    );
+    assert!(
+        stats.overlap_skipped > 0,
+        "expected overlap_skipped > 0, got {}",
+        stats.overlap_skipped
+    );
+
+    let run_summary = fs::read_to_string(run_output_dir.join("metadata").join("run_summary.jsonl"))
+        .expect("run summary");
+    let summary: serde_json::Value =
+        serde_json::from_str(run_summary.lines().last().expect("summary line")).expect("json");
+    assert_eq!(
+        summary
+            .get("overlap_skipped")
+            .and_then(|value| value.as_u64())
+            .expect("overlap_skipped"),
+        stats.overlap_skipped
+    );
 }
 
 /// Verify that the pipeline produces correct output when carve_workers != scan_workers

@@ -4,8 +4,10 @@
 //! The archive ends with two consecutive zero blocks.
 
 use crate::carve::{
-    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve, output_path,
+    CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
+    PreValidation, output_path,
 };
+use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
 const TAR_BLOCK_SIZE: usize = 512;
@@ -35,6 +37,36 @@ impl CarveHandler for TarCarveHandler {
 
     fn extension(&self) -> &str {
         &self.extension
+    }
+
+    fn pre_validate(
+        &self,
+        evidence: &dyn EvidenceSource,
+        offset: u64,
+    ) -> Result<PreValidation, CarveError> {
+        let Some(start_offset) = offset.checked_sub(TAR_USTAR_OFFSET as u64) else {
+            return Ok(PreValidation::Reject(
+                "tar ustar hit before header start".to_string(),
+            ));
+        };
+
+        let mut header = [0u8; TAR_BLOCK_SIZE];
+        let n = evidence
+            .read_at(start_offset, &mut header)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if n < header.len() {
+            return Ok(PreValidation::Reject("tar header truncated".to_string()));
+        }
+        if header[TAR_USTAR_OFFSET..TAR_USTAR_OFFSET + TAR_USTAR_MAGIC.len()] != *TAR_USTAR_MAGIC {
+            return Ok(PreValidation::Reject(
+                "tar ustar magic mismatch".to_string(),
+            ));
+        }
+        match validate_checksum(&header) {
+            Ok(true) => Ok(PreValidation::Proceed),
+            Ok(false) => Ok(PreValidation::Reject("tar checksum invalid".to_string())),
+            Err(err) => Ok(PreValidation::Reject(err.to_string())),
+        }
     }
 
     fn process_hit(
@@ -198,7 +230,7 @@ fn validate_checksum(header: &[u8]) -> Result<bool, CarveError> {
 #[cfg(test)]
 mod tests {
     use super::TarCarveHandler;
-    use crate::carve::{CarveHandler, ExtractionContext};
+    use crate::carve::{CarveHandler, ExtractionContext, PreValidation};
     use crate::evidence::{EvidenceError, EvidenceSource};
     use crate::scanner::NormalizedHit;
     use tempfile::tempdir;
@@ -284,5 +316,33 @@ mod tests {
         assert!(carved.validated);
         assert_eq!(carved.size, tar_data.len() as u64);
         assert_eq!(carved.global_start, 0);
+    }
+
+    #[test]
+    fn pre_validate_accepts_valid_tar_ustar_hit() {
+        let tar_data = build_minimal_tar();
+        let evidence = SliceEvidence { data: tar_data };
+        let handler = TarCarveHandler::new("tar".to_string(), 0, 0);
+
+        assert_eq!(
+            handler.pre_validate(&evidence, 257).expect("pre_validate"),
+            PreValidation::Proceed
+        );
+    }
+
+    #[test]
+    fn pre_validate_rejects_invalid_tar_checksum() {
+        let mut tar_data = build_minimal_tar();
+        tar_data[148] = b'9';
+        let evidence = SliceEvidence { data: tar_data };
+        let handler = TarCarveHandler::new("tar".to_string(), 0, 0);
+
+        assert!(
+            matches!(
+                handler.pre_validate(&evidence, 257).expect("pre_validate"),
+                PreValidation::Reject(_)
+            ),
+            "invalid tar headers should be rejected during pre-validation"
+        );
     }
 }

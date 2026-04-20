@@ -116,6 +116,7 @@ Columns:
 - `files_carved`
 - `files_rejected`
 - `files_prevalidation_rejected`
+- `overlap_skipped`
 - `string_spans`
 - `artefacts_extracted`
 - `duplicates_found`
@@ -124,6 +125,8 @@ Columns:
 - `config_hash`
 - `evidence_path`
 - `evidence_sha256`
+
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts same-type hits skipped because they landed inside a range already carved by that worker.
 
 ## entropy_regions.csv
 
