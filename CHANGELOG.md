@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.4.0 (2026-04-20)
 
 ### Changed
 - Added a `pre_validate()` pipeline for hot carvers to reject bad hits before file creation, with `files_prevalidation_rejected` surfaced in run summary metadata.
