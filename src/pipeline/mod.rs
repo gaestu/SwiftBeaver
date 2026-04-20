@@ -422,11 +422,7 @@ impl<'a> PipelineRunner<'a> {
         }
 
         let resume_offset = resume_state.as_ref().map(|s| s.next_offset).unwrap_or(0);
-        let resume_chunks = if self.chunk_size > 0 {
-            resume_offset / self.chunk_size
-        } else {
-            0
-        };
+        let resume_chunks = resume_offset.checked_div(self.chunk_size).unwrap_or(0);
         Ok((checkpoint_path, resume_offset, resume_chunks))
     }
 

@@ -52,7 +52,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libewf-dev
+          sudo apt-get install -y libewf-dev ocl-icd-opencl-dev opencl-headers
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -63,8 +63,14 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run clippy (without default features)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
+      - name: Run clippy (OpenCL feature)
+        run: cargo clippy --all-targets --features gpu-opencl -- -D warnings
 
   build:
     name: Build Release
