@@ -154,6 +154,21 @@ This document tracks sample files for the golden test image.
 
 ---
 
+## Windows Artefacts
+
+| Format | Status | File | Size | Notes |
+|--------|--------|------|------|-------|
+| lnk | ✅ Have | windows/lnk/*.lnk | various | Shell link files |
+| prefetch (v17 XP) | ✅ Have | windows/prefetch/NOTEPAD.EXE-ABCD1234.pf | 136 B | Uncompressed SCCA |
+| prefetch (v23 Vista/7) | ✅ Have | windows/prefetch/NOTEPAD.EXE-B1234567.pf | 216 B | Uncompressed SCCA |
+| prefetch (v26 Win8) | ✅ Have | windows/prefetch/NOTEPAD.EXE-C2345678.pf | 216 B | Uncompressed SCCA |
+| prefetch (v30 Win10 plain) | ✅ Have | windows/prefetch/NOTEPAD.EXE-D3456789.pf | 272 B | Uncompressed SCCA |
+| prefetch (v30 Win10 MAM) | ✅ Have | windows/prefetch/CMD.EXE-E4567890.pf | 536 B | MAM/LZXPRESS Huffman |
+| registry hive | ❌ Missing | - | - | Low priority |
+| evtx | ❌ Missing | - | - | Future carver |
+
+---
+
 ## Browser Artefacts
 
 | Format | Status | File | Size | Notes |
@@ -187,6 +202,11 @@ This document tracks sample files for the golden test image.
 
 ### Recently Generated ✅
 
+- `windows/prefetch/NOTEPAD.EXE-ABCD1234.pf` — v17 (XP), uncompressed SCCA, 136 bytes
+- `windows/prefetch/NOTEPAD.EXE-B1234567.pf` — v23 (Vista/7), uncompressed SCCA, 216 bytes
+- `windows/prefetch/NOTEPAD.EXE-C2345678.pf` — v26 (Win8), uncompressed SCCA, 216 bytes
+- `windows/prefetch/NOTEPAD.EXE-D3456789.pf` — v30 (Win10), uncompressed SCCA, 272 bytes
+- `windows/prefetch/CMD.EXE-E4567890.pf` — v30 (Win10), MAM/LZXPRESS Huffman compressed, 536 bytes
 - `nested.zip` - ZIP containing other files for nested carving
 - `utf16_le.txt` / `utf16_be.txt` - UTF-16 string scan coverage
 - `utf8_multilingual.txt` - Multi-language UTF-8 text

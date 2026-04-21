@@ -507,6 +507,161 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# Windows Prefetch files (.pf) — synthetic, all versions + MAM-compressed
+#------------------------------------------------------------------------------
+echo "[10/10] Generating Windows Prefetch files..."
+mkdir -p windows/prefetch
+
+if command -v python3 &> /dev/null; then
+python3 - <<'PYEOF'
+import struct, os, sys
+
+def utf16le_padded(s, length=60):
+    """Encode s as UTF-16LE, zero-padded (null-terminated) to exactly length bytes."""
+    encoded = s.encode('utf-16-le')
+    # include null terminator then pad the rest with zeros
+    return (encoded + b'\x00\x00')[:length].ljust(length, b'\x00')
+
+def filetime_from_unix(unix_ts):
+    """Convert Unix timestamp to Windows FILETIME (100-ns intervals since 1601-01-01 UTC)."""
+    return (unix_ts + 11_644_473_600) * 10_000_000
+
+def make_scca_header(version, exe_name, pf_hash, unknown1=0):
+    """Build the 84-byte SCCA Prefetch header (file_size field left as 0 for caller to fill)."""
+    h = bytearray(84)
+    struct.pack_into('<I', h, 0, version)
+    h[4:8] = b'SCCA'
+    struct.pack_into('<I', h, 8, unknown1)
+    # [12-15]: file_size — filled by each make_vXX function
+    h[16:76] = utf16le_padded(exe_name)
+    struct.pack_into('<I', h, 76, pf_hash)
+    # [80-83]: flags = 0
+    return h
+
+def make_v17(exe_name, pf_hash, run_count, last_run_unix):
+    """v17 = Windows XP.  File-info block: 36 B section ptrs + 8 B timestamp + 4 B run_count + 4 B pad."""
+    header = make_scca_header(17, exe_name, pf_hash, unknown1=0x0F000000)
+    info = bytearray(52)
+    struct.pack_into('<Q', info, 36, filetime_from_unix(last_run_unix))  # offset 120
+    struct.pack_into('<I', info, 44, run_count)                          # offset 128
+    file_size = len(header) + len(info)
+    struct.pack_into('<I', header, 12, file_size)
+    return bytes(header) + bytes(info)
+
+def make_v23(exe_name, pf_hash, run_count, last_run_unix):
+    """v23 = Windows Vista/7.  Same section block as v17 + 80 B extra unknown fields."""
+    header = make_scca_header(23, exe_name, pf_hash)
+    info = bytearray(132)  # 36 + 8 + 4 + 4 + 80
+    struct.pack_into('<Q', info, 36, filetime_from_unix(last_run_unix))  # offset 120
+    struct.pack_into('<I', info, 44, run_count)                          # offset 128
+    file_size = len(header) + len(info)
+    struct.pack_into('<I', header, 12, file_size)
+    return bytes(header) + bytes(info)
+
+def make_v26(exe_name, pf_hash, run_count, last_run_unix):
+    """v26 = Windows 8/8.1.  Same layout as v23."""
+    header = make_scca_header(26, exe_name, pf_hash)
+    info = bytearray(132)
+    struct.pack_into('<Q', info, 36, filetime_from_unix(last_run_unix))  # offset 120
+    struct.pack_into('<I', info, 44, run_count)                          # offset 128
+    file_size = len(header) + len(info)
+    struct.pack_into('<I', header, 12, file_size)
+    return bytes(header) + bytes(info)
+
+def make_v30(exe_name, pf_hash, run_count, last_run_times_unix):
+    """v30 = Windows 10/11.  Section block + 8×uint64 last-run timestamps + run_count + extra."""
+    header = make_scca_header(30, exe_name, pf_hash)
+    # 36 B section ptrs | 64 B (8 × uint64 timestamps) | 4 B run_count | 4 B unknown | 80 B extra
+    info = bytearray(188)
+    for i, ts in enumerate(last_run_times_unix[:8]):
+        if ts:
+            struct.pack_into('<Q', info, 36 + i * 8, filetime_from_unix(ts))  # offsets 120–183
+    struct.pack_into('<I', info, 100, run_count)                               # offset 184
+    file_size = len(header) + len(info)
+    struct.pack_into('<I', header, 12, file_size)
+    return bytes(header) + bytes(info)
+
+def lzxpress_huffman_compress(data):
+    """
+    LZXPRESS Huffman compression (MS-XCA), all-literal encoding.
+
+    Assigns code length 8 to every literal symbol (0-255) and length 0 to all
+    match symbols (256-511).  Canonical codes are therefore symbol == code.
+    The bitstream is LSB-first, so each input byte V maps to bit_reverse(V)
+    in the output byte stream.  The 256-byte Huffman symbol table precedes
+    each 65536-byte uncompressed chunk.
+    """
+    result = bytearray()
+    offset = 0
+    while offset < len(data):
+        chunk = data[offset:offset + 65536]
+        offset += 65536
+
+        # Symbol table: 512 symbols × 4-bit code-length entries = 256 bytes
+        #   bytes  0-127: symbols   0-255 — code length 8 (nibble 0x8)
+        #   bytes 128-255: symbols 256-511 — code length 0 (nibble 0x0)
+        table = bytearray(256)
+        for i in range(128):
+            table[i] = 0x88  # low nibble = 8, high nibble = 8
+        result.extend(table)
+
+        # Compressed stream: canonical code for symbol V is V (8 bits),
+        # written MSB-first into the LSB-first bitstream → bit_reverse(V).
+        for b in chunk:
+            result.append(int('{:08b}'.format(b)[::-1], 2))
+
+    return bytes(result)
+
+def make_mam(scca_data):
+    """Wrap SCCA data in the MAM header and LZXPRESS Huffman-compress it."""
+    compressed = lzxpress_huffman_compress(scca_data)
+    hdr = bytearray(8)
+    hdr[0:4] = b'MAM\x04'
+    struct.pack_into('<I', hdr, 4, len(scca_data))  # uncompressed size
+    return bytes(hdr) + compressed
+
+os.makedirs('windows/prefetch', exist_ok=True)
+
+# v17 — Windows XP
+data = make_v17('NOTEPAD.EXE', 0xABCD1234, 3, 1609459200)
+with open('windows/prefetch/NOTEPAD.EXE-ABCD1234.pf', 'wb') as f:
+    f.write(data)
+print('  \u2713 windows/prefetch/NOTEPAD.EXE-ABCD1234.pf  (v17 XP, uncompressed SCCA)')
+
+# v23 — Windows Vista/7
+data = make_v23('NOTEPAD.EXE', 0xB1234567, 5, 1609459200)
+with open('windows/prefetch/NOTEPAD.EXE-B1234567.pf', 'wb') as f:
+    f.write(data)
+print('  \u2713 windows/prefetch/NOTEPAD.EXE-B1234567.pf  (v23 Vista/7, uncompressed SCCA)')
+
+# v26 — Windows 8/8.1
+data = make_v26('NOTEPAD.EXE', 0xC2345678, 2, 1609459200)
+with open('windows/prefetch/NOTEPAD.EXE-C2345678.pf', 'wb') as f:
+    f.write(data)
+print('  \u2713 windows/prefetch/NOTEPAD.EXE-C2345678.pf  (v26 Win8, uncompressed SCCA)')
+
+# v30 — Windows 10/11 uncompressed (plain SCCA, no MAM wrapper)
+data = make_v30('NOTEPAD.EXE', 0xD3456789, 7,
+                [1609459200, 1609372800, 1609286400, 0, 0, 0, 0, 0])
+with open('windows/prefetch/NOTEPAD.EXE-D3456789.pf', 'wb') as f:
+    f.write(data)
+print('  \u2713 windows/prefetch/NOTEPAD.EXE-D3456789.pf  (v30 Win10 uncompressed SCCA)')
+
+# v30 — Windows 10/11 MAM-compressed (LZXPRESS Huffman, realistic format)
+inner = make_v30('CMD.EXE', 0xE4567890, 12,
+                 [1609459200, 1609372800, 0, 0, 0, 0, 0, 0])
+mam_data = make_mam(inner)
+with open('windows/prefetch/CMD.EXE-E4567890.pf', 'wb') as f:
+    f.write(mam_data)
+print('  \u2713 windows/prefetch/CMD.EXE-E4567890.pf      (v30 Win10 MAM/LZXPRESS Huffman)')
+
+print('  Total Prefetch files: 5')
+PYEOF
+else
+    echo "  ✗ python3 not found, skipping Prefetch file generation"
+fi
+
+#------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
 echo ""
