@@ -103,16 +103,31 @@ pub struct CarvedFile {
     pub duplicate_of_offset: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+pub enum PostCarveMetadata {
+    WindowsArtefact(crate::carve::windows::WindowsArtefactRecord),
+}
+
 /// A carved file whose data has been hashed but not yet materialized on disk.
 /// The carve worker decides whether to flush (non-duplicate) or discard (duplicate).
 pub struct PendingCarve {
     pub file: CarvedFile,
+    pub post_metadata: Vec<PostCarveMetadata>,
     writer: DeferredWriter,
 }
 
 impl PendingCarve {
     pub(crate) fn new(file: CarvedFile, writer: DeferredWriter) -> Self {
-        Self { file, writer }
+        Self {
+            file,
+            post_metadata: Vec::new(),
+            writer,
+        }
+    }
+
+    pub(crate) fn with_post_metadata(mut self, post_metadata: Vec<PostCarveMetadata>) -> Self {
+        self.post_metadata = post_metadata;
+        self
     }
 
     /// Materialize the file on disk. Call for non-duplicate files.

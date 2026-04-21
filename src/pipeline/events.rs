@@ -3,6 +3,7 @@
 //! Events that flow through the pipeline for metadata recording.
 
 use crate::carve::CarvedFile;
+use crate::carve::PostCarveMetadata;
 use crate::metadata::{EntropyRegion, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::StringArtefact;
@@ -12,6 +13,8 @@ use crate::strings::artifacts::StringArtefact;
 pub enum MetadataEvent {
     /// A carved file was successfully extracted
     File(CarvedFile),
+    /// A parsed Windows artefact record was found
+    PostCarveMetadata(PostCarveMetadata),
     /// A string artefact (URL, email, phone) was found
     String(StringArtefact),
     /// A browser history record was parsed
@@ -32,6 +35,7 @@ pub enum MetadataEvent {
 #[derive(Debug)]
 pub enum FileShardEvent {
     File(CarvedFile),
+    PostCarveMetadata(PostCarveMetadata),
     History(BrowserHistoryRecord),
     Cookie(BrowserCookieRecord),
     Download(BrowserDownloadRecord),

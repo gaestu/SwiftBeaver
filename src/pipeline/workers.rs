@@ -12,7 +12,7 @@ use std::time::Instant;
 use crossbeam_channel::{Receiver, Sender};
 use tracing::{debug, warn};
 
-use crate::carve::{CarveRegistry, ExtractionContext};
+use crate::carve::{CarveRegistry, ExtractionContext, PostCarveMetadata};
 use crate::chunk::ScanChunk;
 use crate::config::CarverLimits;
 use crate::dedup::DedupTracker;
@@ -63,6 +63,9 @@ pub fn spawn_metadata_thread(
                         error_count.fetch_add(1, Ordering::Relaxed);
                         warn!("metadata record error: {err}");
                     }
+                }
+                MetadataEvent::PostCarveMetadata(record) => {
+                    record_post_carve_metadata(&*sink, record, &error_count, "metadata")
                 }
                 MetadataEvent::String(artefact) => {
                     if let Err(err) = sink.record_string(&artefact) {
@@ -132,6 +135,9 @@ pub fn spawn_metadata_router(
         for event in rx {
             let ok = match event {
                 MetadataEvent::File(f) => file_tx.send(FileShardEvent::File(f)).is_ok(),
+                MetadataEvent::PostCarveMetadata(r) => {
+                    file_tx.send(FileShardEvent::PostCarveMetadata(r)).is_ok()
+                }
                 MetadataEvent::String(s) => string_tx.send(StringShardEvent::String(s)).is_ok(),
                 MetadataEvent::History(h) => file_tx.send(FileShardEvent::History(h)).is_ok(),
                 MetadataEvent::Cookie(c) => file_tx.send(FileShardEvent::Cookie(c)).is_ok(),
@@ -176,11 +182,14 @@ pub fn spawn_file_shard_thread(
     thread::spawn(move || {
         for event in rx {
             let result = match event {
-                FileShardEvent::File(ref file) => sink.record_file(file),
-                FileShardEvent::History(ref record) => sink.record_history(record),
-                FileShardEvent::Cookie(ref record) => sink.record_cookie(record),
-                FileShardEvent::Download(ref record) => sink.record_download(record),
-                FileShardEvent::RunSummary(ref summary) => sink.record_run_summary(summary),
+                FileShardEvent::File(file) => sink.record_file(&file),
+                FileShardEvent::PostCarveMetadata(record) => {
+                    write_post_carve_metadata(&*sink, record)
+                }
+                FileShardEvent::History(record) => sink.record_history(&record),
+                FileShardEvent::Cookie(record) => sink.record_cookie(&record),
+                FileShardEvent::Download(record) => sink.record_download(&record),
+                FileShardEvent::RunSummary(summary) => sink.record_run_summary(&summary),
                 FileShardEvent::Flush => sink.flush(),
             };
             if let Err(err) = result {
@@ -193,6 +202,27 @@ pub fn spawn_file_shard_thread(
             warn!("file shard final flush error: {err}");
         }
     })
+}
+
+fn record_post_carve_metadata(
+    sink: &dyn MetadataSink,
+    record: PostCarveMetadata,
+    error_count: &AtomicU64,
+    context: &str,
+) {
+    if let Err(err) = write_post_carve_metadata(sink, record) {
+        error_count.fetch_add(1, Ordering::Relaxed);
+        warn!("{context} record error: {err}");
+    }
+}
+
+fn write_post_carve_metadata(
+    sink: &dyn MetadataSink,
+    record: PostCarveMetadata,
+) -> Result<(), crate::metadata::MetadataError> {
+    match record {
+        PostCarveMetadata::WindowsArtefact(record) => sink.record_windows_artefact(&record),
+    }
 }
 
 /// Spawn a string-shard metadata writer thread.
@@ -708,12 +738,18 @@ pub fn spawn_write_workers(
 
         handles.push(thread::spawn(move || {
             for job in rx {
+                let mut pending = job.pending;
+                let sidecars = if job.should_discard {
+                    Vec::new()
+                } else {
+                    std::mem::take(&mut pending.post_metadata)
+                };
                 let file = if job.should_discard {
                     duplicates_skipped.fetch_add(1, Ordering::Relaxed);
                     job.carve_limiter.commit();
-                    job.pending.discard()
+                    pending.discard()
                 } else {
-                    match job.pending.flush() {
+                    match pending.flush() {
                         Ok(f) => {
                             job.carve_limiter.commit();
                             f
@@ -728,6 +764,12 @@ pub fn spawn_write_workers(
                 };
                 if let Err(err) = meta_tx.send(MetadataEvent::File(file)) {
                     warn!("metadata channel closed while sending carved file: {err}");
+                }
+                for record in sidecars {
+                    if let Err(err) = meta_tx.send(MetadataEvent::PostCarveMetadata(record)) {
+                        warn!("metadata channel closed while sending post-carve metadata: {err}");
+                        break;
+                    }
                 }
             }
         }));

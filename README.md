@@ -48,8 +48,8 @@ cargo run -- --input /path/to/image.dd --output ./output --scan-strings --scan-u
 
 This creates a run directory under `./output/<run_id>/` with:
 
-- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/sqlite_wal/sqlite_page/bmp/tiff/heic/mp4/mov/rar/7z/wav/avi/mp3/ogg/tar/gz/bz2/xz/doc/xls/ppt/rtf/ico/elf/eml/mobi/fb2/lrf/webm/wmv). ZIPs are classified into docx/xlsx/pptx/odt/ods/odp/epub when entries match. OLE compound documents are classified as doc/xls/ppt.
-- `metadata/` - JSONL records for carved files, string artefacts, and browser history
+- `carved/` - carved files per type (jpeg/png/gif/pdf/zip/webp/sqlite/sqlite_wal/sqlite_page/bmp/tiff/heic/mp4/mov/rar/7z/wav/avi/mp3/ogg/tar/gz/bz2/xz/doc/xls/ppt/rtf/ico/lnk/elf/eml/mobi/fb2/lrf/webm/wmv). ZIPs are classified into docx/xlsx/pptx/odt/ods/odp/epub when entries match. OLE compound documents are classified as doc/xls/ppt.
+- `metadata/` - JSONL records for carved files, Windows artefacts, string artefacts, and browser history
 
 ## Configuration
 
@@ -122,6 +122,7 @@ String artefacts (URLs/emails/phones) are recorded to `metadata/string_artefacts
 Browser history records (from carved SQLite) are recorded to `metadata/browser_history.jsonl`.
 Browser cookie records are recorded to `metadata/browser_cookies.jsonl`.
 Browser download records are recorded to `metadata/browser_downloads.jsonl`.
+Windows shortcut artefacts are recorded to `metadata/windows_artefacts.jsonl`.
 Chromium-based browsers (Chrome/Edge/Brave) share a schema and may be labeled `chrome` in browser outputs.
 Run summaries are recorded to `metadata/run_summary.jsonl`.
 Entropy regions are recorded to `metadata/entropy_regions.jsonl`.
@@ -139,9 +140,9 @@ The Phase 2 pipeline:
 2. Chunk scheduler + reader
 3. CPU signature scanner
 4. Optional CPU string scanner + artefact extraction
-5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite/BMP/TIFF/HEIC/MP4/RAR/7z)
+5. Carve workers (JPEG/PNG/GIF/PDF/ZIP/WEBP/SQLite/BMP/TIFF/HEIC/MP4/RAR/7z/LNK)
 6. SQLite parser for browser history
-7. JSONL/CSV metadata sink
+7. JSONL/CSV metadata sink for carved files, Windows artefacts, strings, browser records, and run summaries
 
 See `docs/architecture.md` for details.
 

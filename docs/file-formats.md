@@ -2,14 +2,10 @@
 
 Complete reference of all file formats supported by SwiftBeaver, organized by category.
 
-## Summary Statistics
+## Summary
 
-- **Total Formats**: 36
-- **Image Formats**: 7
-- **Document Formats**: 9  
-- **Archive Formats**: 7
-- **Multimedia Formats**: 8
-- **Database & Special**: 5
+- Categories covered: image, document, archive, multimedia, database, and special formats
+- The tables below are the source of truth for currently supported formats and defaults
 
 ---
 
@@ -169,6 +165,7 @@ Complete reference of all file formats supported by SwiftBeaver, organized by ca
 | **SQLite** | sqlite, db, sqlite3 | `53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00` | 1 GB | Yes | Carves full SQLite DB byte ranges |
 | **SQLite WAL** | sqlite-wal | `37 7F 06 82` or `37 7F 06 83` | 512 MB | Yes | Walks WAL frames using page size from header |
 | **SQLite Page Fragment** | sqlite-page | `0D` / `0A` + page-structure checks | 64 KB | Yes | Carves one validated raw SQLite page per hit |
+| **Windows Shell Link** | lnk | `4C 00 00 00 01 14 02 00 ... 00 46` | 64 KB | Yes | Walks LNK sections and emits Windows artefact metadata |
 | **ELF** | (none), bin | `7F 45 4C 46` | 100 MB | Yes | Linux executables, section-based structure |
 | **EML** | eml | `46 72 6F 6D 3A` or RFC 2822 headers | 50 MB | Yes | Email message format, preserves headers and body |
 
@@ -195,6 +192,13 @@ Complete reference of all file formats supported by SwiftBeaver, organized by ca
 - Validation: Header sanity, pointer table bounds, cell pointer bounds, freeblock-chain loop/out-of-bounds checks
 - Metadata: Recorded as carved file only (`sqlite_page`), no row-level interpretation
 - Edge Cases: Single-byte candidate markers are high-volume on large inputs; strict validation is applied and additional hit-capping/performance hardening is planned
+
+**Windows Shell Link (LNK)**:
+- Detection: fixed 20-byte Shell Link header signature
+- Size Calculation: walks `LinkTargetIDList`, `LinkInfo`, `StringData`, and `ExtraData` until the terminal block
+- Validation: requires a valid Shell Link header, bounded section layout, and consistent LinkInfo flags/offsets
+- Metadata: recorded as both a carved file and a `windows_artefacts` row with parsed path/timestamp fields
+- Edge Cases: unknown ExtraData blocks are skipped conservatively, ANSI path strings decode as Windows-1252 when Unicode strings are absent, and truncated links are rejected to avoid over-carving unrelated trailing bytes
 
 **ELF**:
 - Detection: ELF magic number + class/endianness

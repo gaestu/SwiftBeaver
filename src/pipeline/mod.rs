@@ -633,6 +633,7 @@ impl<'a> PipelineRunner<'a> {
             workers::spawn_carve_workers(
                 workers::CarveWorkerConfig {
                     workers: fast_count,
+                    type_semaphores: Some(type_semaphores.clone()),
                     ..carve_cfg_base.clone()
                 },
                 workers::CarveWorkerRuntime {
