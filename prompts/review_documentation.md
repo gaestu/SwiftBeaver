@@ -6,6 +6,7 @@ You are reviewing SwiftBeaver changes for **documentation only**.
 First read `AGENTS.md` and follow it strictly.
 
 Run this review only when:
+
 - `README.md` changed
 - files under `docs/` changed
 - CLI behavior changed
@@ -14,6 +15,7 @@ Run this review only when:
 ## Focus
 
 Check for:
+
 - README and docs aligned with implemented behavior
 - CLI examples matching the current interface
 - schema documentation updated when schema fields changed

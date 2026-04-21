@@ -12,32 +12,27 @@ First read `AGENTS.md` and follow it strictly.
    - acceptance criteria
    - constraints
 
-2. Check whether a related planning document exists under:
-   - `planning/features/`
-   - `planning/wip/`
-   - `planning/done/`
-
-3. Inspect the relevant code paths and identify:
+2. Inspect the relevant code paths and identify:
    - files to change
    - existing patterns to follow
    - tests that need updates
 
-4. If the issue is non-trivial, create a short implementation plan before editing code.
+3. If the issue is non-trivial, create a short implementation plan before editing code.
 
-5. Implement conservatively:
+4. Implement conservatively:
    - preserve backward compatibility unless the issue explicitly requires otherwise
    - follow existing abstractions and module boundaries
    - avoid unnecessary dependencies
    - keep changes focused
 
-6. Add or update deterministic tests:
+5. Add or update deterministic tests:
    - regression tests for bug fixes
    - integration tests for CLI or workflow changes
    - schema tests for metadata changes
 
-7. Update docs only if user-facing behavior, CLI usage, or schema documentation changed.
+6. Update docs only if user-facing behavior, CLI usage, or schema documentation changed.
 
-8. Run specialist review passes after implementation:
+7. Run specialist review passes after implementation:
    - always run:
      - `prompts/review_correctness.md`
      - `prompts/review_security.md`
@@ -48,7 +43,7 @@ First read `AGENTS.md` and follow it strictly.
    - if review subagents are available, run independent review passes in parallel
    - if any review finds real issues, fix them and re-run only the failed review passes
 
-9. Before finishing, run:
+8. Before finishing, run:
 
    ```bash
    cargo fmt
@@ -56,7 +51,7 @@ First read `AGENTS.md` and follow it strictly.
    cargo test
    ```
 
-10. Return:
+9. Return:
    - summary of changes
    - files modified
    - tests added or updated
