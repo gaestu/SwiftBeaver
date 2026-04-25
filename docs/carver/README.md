@@ -30,7 +30,7 @@ Each carver document includes:
 | [TIFF](tiff.md) | ✅ Complete | Production | Tagged Image File Format (IFD-based) |
 | [WEBP](webp.md) | ✅ Complete | Production | WebP images (RIFF container) |
 | [HEIC](heic.md) | ✅ Complete | Production | HEIC/HEIF images (ISOBMFF container) |
-| ICO | ⏳ TBD | Production | Windows Icon Format |
+| [ICO](ico.md) | ✅ Complete | Production | Windows Icon / Cursor (ICONDIR + ICONDIRENTRY) |
 
 ## Archive Format Carvers
 
@@ -214,7 +214,6 @@ The following carvers are production-ready but documentation is pending:
 
 - **GZIP, BZIP2, XZ**: Compression formats (metadata-driven)
 - **TAR**: Archive format (block-based)
-- **ICO**: Icon format (directory structure)
 - **RTF**: Rich text (marker-based)
 - **OGG**: Audio format (page-based)
 
