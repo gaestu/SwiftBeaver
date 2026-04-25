@@ -41,7 +41,7 @@ Each carver document includes:
 | [7Z](7z.md) | ✅ Complete | Production | 7-Zip archives (LZMA/LZMA2) |
 | [TAR](tar.md) | ✅ Complete | Production | TAR archives (ustar format) |
 | GZIP | ⏳ TBD | Production | GZIP compressed files |
-| BZIP2 | ⏳ TBD | Production | BZip2 compressed files |
+| [BZIP2](bzip2.md) | ✅ Complete | Production | BZip2 compressed files |
 | [XZ](xz.md) | ✅ Complete | Production | XZ/LZMA2 compressed files |
 
 ## Document Format Carvers
@@ -212,8 +212,7 @@ All carvers follow these principles:
 
 The following carvers are production-ready but documentation is pending:
 
-- **GZIP, BZIP2**: Compression formats (metadata-driven)
-- **RTF**: Rich text (marker-based)
+- **GZIP**: Compression format (marker-based)
 - **OGG**: Audio format (page-based)
 
 For implementation details, consult source code in [src/carve/](../../src/carve/).
