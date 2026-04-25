@@ -49,7 +49,7 @@ Each carver document includes:
 | Carver | Documentation | Status | Description |
 |--------|--------------|--------|-------------|
 | [PDF](pdf.md) | ✅ Complete | Production | Portable Document Format |
-| OLE | ⏳ TBD | Production | OLE/CFB (DOC, XLS, PPT, MSG) |
+| [OLE](ole.md) | ✅ Complete | Production | OLE/CFB (DOC, XLS, PPT, MSG) |
 | [RTF](rtf.md) | ✅ Complete | Production | Rich Text Format |
 | [EML](eml.md) | ✅ Complete | Production | Email message format (RFC 822 / MIME / mbox) |
 
@@ -215,7 +215,6 @@ The following carvers are production-ready but documentation is pending:
 - **GZIP, BZIP2, XZ**: Compression formats (metadata-driven)
 - **TAR**: Archive format (block-based)
 - **ICO**: Icon format (directory structure)
-- **OLE**: Office documents (FAT-based sectors)
 - **RTF**: Rich text (marker-based)
 - **OGG**: Audio format (page-based)
 
