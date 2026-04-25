@@ -262,8 +262,8 @@ carve.
 - [XZ](xz.md) — newer LZMA2-based compression container with
   CRC-validated header and footer; the structural counterpart to
   BZIP2.
-- **GZIP** — older DEFLATE-based compression with a trailing
-  CRC32 + ISIZE epilogue; marker-based. Documentation pending.
+- [GZIP](gzip.md) — older DEFLATE-based compression with a trailing
+  CRC32 + ISIZE epilogue; header-anchored with decoder validation.
 - [7Z](7z.md) — multi-file archive that can use BZIP2 internally as a
   codec; metadata-driven (size known from header).
 - [TAR](tar.md) — frequently combined with BZIP2 as `.tar.bz2` for

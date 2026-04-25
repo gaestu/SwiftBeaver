@@ -246,7 +246,7 @@ Multi-entry archive:
 
 - [ZIP](zip.md) — archive format that walks local file headers and EOCD.
 - [7Z](7z.md) — header-driven archive carver (LZMA-based).
-- **GZIP** — frequently wraps `.tar` payloads (`.tar.gz`); see [src/carve/gzip.rs](../../src/carve/gzip.rs).
+- [GZIP](gzip.md) — frequently wraps `.tar` payloads (`.tar.gz`); see [src/carve/gzip.rs](../../src/carve/gzip.rs).
 - **BZIP2** — frequently wraps `.tar` payloads (`.tar.bz2`); see [src/carve/bzip2.rs](../../src/carve/bzip2.rs).
 
 ## References

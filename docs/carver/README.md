@@ -40,7 +40,7 @@ Each carver document includes:
 | [RAR](rar.md) | ✅ Complete | Production | RAR 4.x and RAR 5.x archives |
 | [7Z](7z.md) | ✅ Complete | Production | 7-Zip archives (LZMA/LZMA2) |
 | [TAR](tar.md) | ✅ Complete | Production | TAR archives (ustar format) |
-| GZIP | ⏳ TBD | Production | GZIP compressed files |
+| [GZIP](gzip.md) | ✅ Complete | Production | GZIP compressed files |
 | [BZIP2](bzip2.md) | ✅ Complete | Production | BZip2 compressed files |
 | [XZ](xz.md) | ✅ Complete | Production | XZ/LZMA2 compressed files |
 
@@ -212,7 +212,6 @@ All carvers follow these principles:
 
 The following carvers are production-ready but documentation is pending:
 
-- **GZIP**: Compression format (marker-based)
 - **OGG**: Audio format (page-based)
 
 For implementation details, consult source code in [src/carve/](../../src/carve/).

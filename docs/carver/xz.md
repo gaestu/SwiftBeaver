@@ -241,7 +241,7 @@ footer magic).
 
 - [BZIP2](bzip2.md) — older compression format; also marker-based,
   uses a 6-byte end-of-stream marker without CRC validation.
-- **GZIP** — older compression format (DEFLATE); marker-based with a
+- [GZIP](gzip.md) — older compression format (DEFLATE); marker-based with a
   trailing CRC32 + ISIZE. Documentation pending.
 - [7Z](7z.md) — multi-file archive that can use LZMA2 internally;
   metadata-driven (size known from header).
