@@ -64,7 +64,7 @@ Each carver document includes:
 | [AVI](avi.md) | ✅ Complete | Production | Audio Video Interleave (RIFF) |
 | [WMV](wmv.md) | ✅ Complete | Production | Windows Media Video / WMA / ASF (ASF container) |
 | [WEBM](webm.md) | ✅ Complete | Production | WebM video (Matroska) |
-| OGG | ⏳ TBD | Production | Ogg Vorbis/Opus audio |
+| [OGG](ogg.md) | ✅ Complete | Production | Ogg Vorbis/Opus/FLAC/Theora/Speex (page-based) |
 
 ## Database & Special Carvers
 
@@ -208,10 +208,4 @@ All carvers follow these principles:
 5. **Metadata Preservation**: Retain all embedded metadata (EXIF, ID3, etc.)
 6. **Size Limits**: Respect min_size and max_size to prevent resource exhaustion
 
-## Future Documentation
 
-The following carvers are production-ready but documentation is pending:
-
-- **OGG**: Audio format (page-based)
-
-For implementation details, consult source code in [src/carve/](../../src/carve/).
