@@ -127,6 +127,7 @@ Columns:
 - `run_count`
 - `last_run_times_json`
 - `volume_paths_json`
+- `volume_paths_truncated`
 - `referenced_files_json`
 - `version`
 - `first_chunk`
@@ -143,6 +144,8 @@ Columns:
 - `evidence_sha256`
 
 Variant-specific fields are nullable. Array-like Prefetch fields are serialized as JSON strings.
+For `volume_paths_truncated`, `true` means the on-disk Prefetch header claimed more volume entries than SwiftBeaver decoded under the defensive cap; `false` means the emitted `volume_paths_json` reflects all decoded entries.
+For `referenced_files_json`, `null` means extraction is not implemented for that record yet; `"[]"` means extraction ran and found no references.
 
 ## run_summary.csv
 

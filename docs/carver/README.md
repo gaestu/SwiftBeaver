@@ -60,10 +60,10 @@ Each carver document includes:
 | [MP4](mp4.md) | ✅ Complete | Production | MPEG-4 video (box-based) |
 | [MP3](mp3.md) | ✅ Complete | Production | MPEG Audio Layer III |
 | [WAV](wav.md) | ✅ Complete | Production | Waveform Audio (RIFF) |
-| MOV | ⏳ TBD | Production | QuickTime video (box-based) |
-| AVI | ⏳ TBD | Production | Audio Video Interleave (RIFF) |
-| WMV | ⏳ TBD | Production | Windows Media Video (ASF) |
-| WEBM | ⏳ TBD | Production | WebM video (Matroska) |
+| [MOV](mov.md) | ✅ Complete | Production | QuickTime video (box-based) |
+| [AVI](avi.md) | ✅ Complete | Production | Audio Video Interleave (RIFF) |
+| [WMV](wmv.md) | ✅ Complete | Production | Windows Media Video / WMA / ASF (ASF container) |
+| [WEBM](webm.md) | ✅ Complete | Production | WebM video (Matroska) |
 | OGG | ⏳ TBD | Production | Ogg Vorbis/Opus audio |
 
 ## Database & Special Carvers
@@ -74,9 +74,10 @@ Each carver document includes:
 | [SQLite WAL](sqlite_wal.md) | ✅ Complete | Production | SQLite Write-Ahead Log files |
 | [SQLite Page](sqlite_page.md) | ✅ Complete | Production | SQLite leaf page fragments |
 | [LNK](lnk.md) | ✅ Complete | Production | Windows Shell Link shortcut files |
-| ELF | ⏳ TBD | Production | Executable and Linkable Format |
-| MOBI | ⏳ TBD | Production | Mobipocket ebook format |
-| FB2 | ⏳ TBD | Production | FictionBook 2.0 ebook format |
+| [Prefetch](prefetch.md) | ✅ Complete | Production | Windows Prefetch execution trace files |
+| [ELF](elf.md) | ✅ Complete | Production | Executable and Linkable Format |
+| [MOBI](mobi.md) | ✅ Complete | Production | Mobipocket ebook format |
+| [FB2](fb2.md) | ✅ Complete | Production | FictionBook 2.0 ebook format |
 | [LRF](lrf.md) | ✅ Complete | Production | Sony Portable Reader format |
 
 ## Quick Reference by Signature
@@ -217,10 +218,6 @@ The following carvers are production-ready but documentation is pending:
 - **OLE**: Office documents (FAT-based sectors)
 - **RTF**: Rich text (marker-based)
 - **EML**: Email format (marker-based)
-- **MOV**: QuickTime video (box-based, similar to MP4)
-- **AVI, WMV, WEBM**: Video formats (RIFF/ASF/Matroska)
 - **OGG**: Audio format (page-based)
-- **ELF**: Executable format (section-based)
-- **MOBI, FB2**: Ebook formats (various structures)
 
 For implementation details, consult source code in [src/carve/](../../src/carve/).

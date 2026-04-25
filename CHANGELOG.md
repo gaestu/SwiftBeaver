@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+- Prefetch metadata now records `volume_paths_truncated` when a crafted header claims more volume entries than SwiftBeaver decodes under its defensive cap, so shortened `volume_paths_json` arrays are not ambiguous.
+- Prefetch `referenced_files_json` remains nullable with `null` meaning "extraction not implemented"; downstream consumers should not assume an empty array for all versions or runs.
+
 ## 0.4.0 (2026-04-20)
 
 ### Changed

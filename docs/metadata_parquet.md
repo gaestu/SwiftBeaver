@@ -189,6 +189,7 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `run_count` (int64, nullable)
 - `last_run_times_json` (string, nullable)
 - `volume_paths_json` (string, nullable)
+- `volume_paths_truncated` (boolean, nullable)
 - `referenced_files_json` (string, nullable)
 - `version` (int32, nullable)
 - `first_chunk` (int64, nullable)
@@ -201,6 +202,8 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `root_key_name` (string, nullable)
 
 Variant-specific fields are nullable. Array-like Prefetch fields are stored as JSON strings.
+For `volume_paths_truncated`, `true` means the on-disk Prefetch header claimed more volume entries than SwiftBeaver decoded under the defensive cap; `false` means the emitted `volume_paths_json` reflects all decoded entries.
+For `referenced_files_json`, `null` means extraction is not implemented for that record yet; `"[]"` means extraction ran and found no references.
 
 ## Run summary
 

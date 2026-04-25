@@ -207,6 +207,7 @@ struct WindowsArtefactRow {
     run_count: Option<i64>,
     last_run_times_json: Option<String>,
     volume_paths_json: Option<String>,
+    volume_paths_truncated: Option<bool>,
     referenced_files_json: Option<String>,
     version: Option<i32>,
     first_chunk: Option<i64>,
@@ -898,6 +899,7 @@ impl MetadataSink for ParquetSink {
             run_count: flat.run_count.map(to_i64).transpose()?,
             last_run_times_json: flat.last_run_times_json,
             volume_paths_json: flat.volume_paths_json,
+            volume_paths_truncated: flat.volume_paths_truncated,
             referenced_files_json: flat.referenced_files_json,
             version: flat.version.map(to_i32).transpose()?,
             first_chunk: flat.first_chunk.map(to_i64).transpose()?,
@@ -1192,6 +1194,7 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("run_count", DataType::Int64, true),
             Field::new("last_run_times_json", DataType::Utf8, true),
             Field::new("volume_paths_json", DataType::Utf8, true),
+            Field::new("volume_paths_truncated", DataType::Boolean, true),
             Field::new("referenced_files_json", DataType::Utf8, true),
             Field::new("version", DataType::Int32, true),
             Field::new("first_chunk", DataType::Int64, true),
@@ -1703,6 +1706,7 @@ fn build_windows_batch(
     let mut run_count = Int64Builder::new();
     let mut last_run_times_json = StringBuilder::new();
     let mut volume_paths_json = StringBuilder::new();
+    let mut volume_paths_truncated = BooleanBuilder::new();
     let mut referenced_files_json = StringBuilder::new();
     let mut version = Int32Builder::new();
     let mut first_chunk = Int64Builder::new();
@@ -1737,6 +1741,7 @@ fn build_windows_batch(
         run_count.append_option(row.run_count);
         last_run_times_json.append_option(row.last_run_times_json.as_deref());
         volume_paths_json.append_option(row.volume_paths_json.as_deref());
+        volume_paths_truncated.append_option(row.volume_paths_truncated);
         referenced_files_json.append_option(row.referenced_files_json.as_deref());
         version.append_option(row.version);
         first_chunk.append_option(row.first_chunk);
@@ -1772,6 +1777,7 @@ fn build_windows_batch(
         Arc::new(run_count.finish()),
         Arc::new(last_run_times_json.finish()),
         Arc::new(volume_paths_json.finish()),
+        Arc::new(volume_paths_truncated.finish()),
         Arc::new(referenced_files_json.finish()),
         Arc::new(version.finish()),
         Arc::new(first_chunk.finish()),

@@ -1,6 +1,6 @@
 {
   "description": "Golden test image - ALL sample files for SwiftBeaver testing",
-  "generated": "2026-04-21T14:04:21Z",
+  "generated": "2026-04-25T16:59:02Z",
   "alignment": 4096,
   "sample_dir": "samples",
   "files": [
@@ -85,81 +85,11 @@
     }
 ,
     {
-      "path": "archives/test.tar",
-      "category": "archives",
-      "extension": "tar",
-      "offset": 45056,
-      "offset_hex": "0xB000",
-      "size": 10240,
-      "sha256": "03a9cc760814a51c3640ffdfce1d5373bb3e9de78ad01fe341b79c453d1912ba"
-    }
-,
-    {
-      "path": "archives/test.tar.bz2",
-      "category": "archives",
-      "extension": "bz2",
-      "offset": 57344,
-      "offset_hex": "0xE000",
-      "size": 199,
-      "sha256": "cb359e6b9d18b8a1c4519792a51f0a08c823000afa4bf35208e5e7eaee8ca192"
-    }
-,
-    {
-      "path": "archives/test.tar.gz",
-      "category": "archives",
-      "extension": "gz",
-      "offset": 61440,
-      "offset_hex": "0xF000",
-      "size": 187,
-      "sha256": "c6be582c3b79dee0aedd68e63a44b18027c0c357a1dc547d19a5d12b852c8b09"
-    }
-,
-    {
-      "path": "archives/test.tar.xz",
-      "category": "archives",
-      "extension": "xz",
-      "offset": 65536,
-      "offset_hex": "0x10000",
-      "size": 236,
-      "sha256": "d5ccdbb66a7afc627e45d32193ea6ddd7babc4cc2675fd627d99164aaed1806a"
-    }
-,
-    {
-      "path": "archives/test.txt.bz2",
-      "category": "archives",
-      "extension": "bz2",
-      "offset": 69632,
-      "offset_hex": "0x11000",
-      "size": 66,
-      "sha256": "1ffca0cd35ff222e8fef9d00719726e656ab19bc25a1a821efc889dbbc3397ee"
-    }
-,
-    {
-      "path": "archives/test.txt.gz",
-      "category": "archives",
-      "extension": "gz",
-      "offset": 73728,
-      "offset_hex": "0x12000",
-      "size": 61,
-      "sha256": "1a08002a473ad3b5cef0bfc72f988de6f5d10787662399e794507c2afd16be07"
-    }
-,
-    {
-      "path": "archives/test.txt.xz",
-      "category": "archives",
-      "extension": "xz",
-      "offset": 77824,
-      "offset_hex": "0x13000",
-      "size": 88,
-      "sha256": "f9541475f8fbc97531f7704a24920c3ad2fd6c1ba18e029b53da7fe66083630e"
-    }
-,
-    {
       "path": "archives/xz/test.txt.xz",
       "category": "archives",
       "extension": "xz",
-      "offset": 81920,
-      "offset_hex": "0x14000",
+      "offset": 45056,
+      "offset_hex": "0xB000",
       "size": 96,
       "sha256": "47becc21007fd9544d2d992000ce1295630d7ab898313fc1d68235633900b907"
     }
@@ -168,8 +98,8 @@
       "path": "archives/zip/nested.zip",
       "category": "archives",
       "extension": "zip",
-      "offset": 86016,
-      "offset_hex": "0x15000",
+      "offset": 49152,
+      "offset_hex": "0xC000",
       "size": 8778,
       "sha256": "202193378052f720844e071c05027220a14527148c9cb313cf79a9ade454a04a"
     }
@@ -178,8 +108,8 @@
       "path": "archives/zip/zip_2MB.zip",
       "category": "archives",
       "extension": "zip",
-      "offset": 98304,
-      "offset_hex": "0x18000",
+      "offset": 61440,
+      "offset_hex": "0xF000",
       "size": 2036861,
       "sha256": "b76f59616f3d7b74413c471f5860ae338be25fe0140ee4d59118c953be8c8003"
     }
@@ -188,8 +118,8 @@
       "path": "audio/mp3/file_example_MP3_1MG.mp3",
       "category": "audio",
       "extension": "mp3",
-      "offset": 2138112,
-      "offset_hex": "0x20A000",
+      "offset": 2101248,
+      "offset_hex": "0x201000",
       "size": 1059386,
       "sha256": "90ce3b7c9dfcce6aafcb2dcfc3fc496dab6ba8106b61531b05d2c57a4be1640e"
     }
@@ -198,8 +128,8 @@
       "path": "audio/ogg/file_example_OOG_1MG.ogg",
       "category": "audio",
       "extension": "ogg",
-      "offset": 3198976,
-      "offset_hex": "0x30D000",
+      "offset": 3162112,
+      "offset_hex": "0x304000",
       "size": 1032948,
       "sha256": "4b21560c7f28d665876f5a04c7723406d74ba5f3b3c866f9b902fa38bcd5d19f"
     }
@@ -208,8 +138,8 @@
       "path": "audio/source.txt",
       "category": "audio",
       "extension": "txt",
-      "offset": 4235264,
-      "offset_hex": "0x40A000",
+      "offset": 4198400,
+      "offset_hex": "0x401000",
       "size": 233,
       "sha256": "1f0914c9f307d712f2b2200a1e9863e39473d7cb469ad19f6a5cf0cc86f87158"
     }
@@ -218,8 +148,8 @@
       "path": "audio/wav/file_example_WAV_1MG.wav",
       "category": "audio",
       "extension": "wav",
-      "offset": 4239360,
-      "offset_hex": "0x40B000",
+      "offset": 4202496,
+      "offset_hex": "0x402000",
       "size": 1048558,
       "sha256": "6897112dbb4e8b6eca4e2d15384783067ad866482383f2f987d1d6cffa31024f"
     }
@@ -228,8 +158,8 @@
       "path": "binaries/libtest.so",
       "category": "binaries",
       "extension": "so",
-      "offset": 5287936,
-      "offset_hex": "0x50B000",
+      "offset": 5251072,
+      "offset_hex": "0x502000",
       "size": 11592,
       "sha256": "8ddd6bee9cb05f01948c737a23da923e07117daf5ed8753569d4a5fd48dee41a"
     }
@@ -238,8 +168,8 @@
       "path": "binaries/test_elf",
       "category": "binaries",
       "extension": "",
-      "offset": 5300224,
-      "offset_hex": "0x50E000",
+      "offset": 5263360,
+      "offset_hex": "0x505000",
       "size": 12384,
       "sha256": "c822267898e6bc08e32d6d2a631256afa012ccb65b04fb170fd7a4e5ce0dfa48"
     }
@@ -248,8 +178,8 @@
       "path": "databases/Cookies",
       "category": "databases",
       "extension": "",
-      "offset": 5316608,
-      "offset_hex": "0x512000",
+      "offset": 5279744,
+      "offset_hex": "0x509000",
       "size": 12288,
       "sha256": "fef92c64d6331b0ca96c11e9dd14b2a261f81580a5ec9981002732ca74e8ba47"
     }
@@ -258,8 +188,8 @@
       "path": "databases/History",
       "category": "databases",
       "extension": "",
-      "offset": 5328896,
-      "offset_hex": "0x515000",
+      "offset": 5292032,
+      "offset_hex": "0x50C000",
       "size": 28672,
       "sha256": "2185f2d705d546737c961717898900f3e56f8c3fe993a7dd188dd49e61b6b88f"
     }
@@ -268,8 +198,8 @@
       "path": "databases/browser_downloads.sqlite",
       "category": "databases",
       "extension": "sqlite",
-      "offset": 5357568,
-      "offset_hex": "0x51C000",
+      "offset": 5320704,
+      "offset_hex": "0x513000",
       "size": 16384,
       "sha256": "587da79f85931d10e306717ba474c90658636af78bfd752c83e73b0a13d71cc2"
     }
@@ -278,8 +208,8 @@
       "path": "databases/browser_history_deleted.sqlite",
       "category": "databases",
       "extension": "sqlite",
-      "offset": 5373952,
-      "offset_hex": "0x520000",
+      "offset": 5337088,
+      "offset_hex": "0x517000",
       "size": 16384,
       "sha256": "ef324ce73e007329cea1a41fe3dceb07ac6f8d97fd1c255c27faa7cab48d9773"
     }
@@ -288,8 +218,8 @@
       "path": "databases/browser_history_wal.sqlite",
       "category": "databases",
       "extension": "sqlite",
-      "offset": 5390336,
-      "offset_hex": "0x524000",
+      "offset": 5353472,
+      "offset_hex": "0x51B000",
       "size": 16384,
       "sha256": "2722a6498393de88c069e8c799b4d64c649a1a101187758f6968552abc60aec9"
     }
@@ -298,8 +228,8 @@
       "path": "databases/browser_history_wal.sqlite-wal",
       "category": "databases",
       "extension": "sqlite-wal",
-      "offset": 5406720,
-      "offset_hex": "0x528000",
+      "offset": 5369856,
+      "offset_hex": "0x51F000",
       "size": 49472,
       "sha256": "784e7522b43b7a400e5bd5c9137ec067503321781b195e4f5096efb8153fdeca"
     }
@@ -308,8 +238,8 @@
       "path": "databases/places.sqlite",
       "category": "databases",
       "extension": "sqlite",
-      "offset": 5459968,
-      "offset_hex": "0x535000",
+      "offset": 5423104,
+      "offset_hex": "0x52C000",
       "size": 12288,
       "sha256": "e7eddcfad4907409db71f20bf51ed321bebe3b066c3e338e02189eb552f44184"
     }
@@ -318,8 +248,8 @@
       "path": "databases/sqlite_orphan_page.bin",
       "category": "databases",
       "extension": "bin",
-      "offset": 5472256,
-      "offset_hex": "0x538000",
+      "offset": 5435392,
+      "offset_hex": "0x52F000",
       "size": 4096,
       "sha256": "a75f9efeebcd21ef828e2b3a201dcfc6d152b51c874eff94ccf47c12ba1eca09"
     }
@@ -328,8 +258,8 @@
       "path": "databases/test.sqlite",
       "category": "databases",
       "extension": "sqlite",
-      "offset": 5476352,
-      "offset_hex": "0x539000",
+      "offset": 5439488,
+      "offset_hex": "0x530000",
       "size": 8192,
       "sha256": "c3f42a00183f2c430efc303eff78599d447afdd410ef229f1e92c4a04284bd3f"
     }
@@ -338,8 +268,8 @@
       "path": "databases/test_forensic.sqlite",
       "category": "databases",
       "extension": "sqlite",
-      "offset": 5484544,
-      "offset_hex": "0x53B000",
+      "offset": 5447680,
+      "offset_hex": "0x532000",
       "size": 16384,
       "sha256": "1bfee51b527b27bc89c5e640a5ebbffe9a9b4b27994fec035c20ff846be4df9d"
     }
@@ -348,8 +278,8 @@
       "path": "documents/doc/file-sample_100kB.doc",
       "category": "documents",
       "extension": "doc",
-      "offset": 5500928,
-      "offset_hex": "0x53F000",
+      "offset": 5464064,
+      "offset_hex": "0x536000",
       "size": 100352,
       "sha256": "45e07cf623e634b96b3e82aeaf7ecc74efd03a05808bf1eb69ceef8a9df7d135"
     }
@@ -358,8 +288,8 @@
       "path": "documents/docx/file-sample_100kB.docx",
       "category": "documents",
       "extension": "docx",
-      "offset": 5603328,
-      "offset_hex": "0x558000",
+      "offset": 5566464,
+      "offset_hex": "0x54F000",
       "size": 111303,
       "sha256": "332794745f5622beb843399e988a12b2d388c97c92ff1860f847b4aeadc5e0a0"
     }
@@ -368,8 +298,8 @@
       "path": "documents/odp/file_example_ODP_200kB.odp",
       "category": "documents",
       "extension": "odp",
-      "offset": 5718016,
-      "offset_hex": "0x574000",
+      "offset": 5681152,
+      "offset_hex": "0x56B000",
       "size": 200092,
       "sha256": "f7703b4950406f4903833c57451037c435fb2b2ca9027dfe1f97151cd2a08e00"
     }
@@ -378,8 +308,8 @@
       "path": "documents/ods/file_example_ODS_10.ods",
       "category": "documents",
       "extension": "ods",
-      "offset": 5918720,
-      "offset_hex": "0x5A5000",
+      "offset": 5881856,
+      "offset_hex": "0x59C000",
       "size": 31276,
       "sha256": "be74bcfeba5fa5bb3cd400c54c6d0d9172074505b80e1a96e32ac08592f43c75"
     }
@@ -388,8 +318,8 @@
       "path": "documents/odt/file-sample_100kB.odt",
       "category": "documents",
       "extension": "odt",
-      "offset": 5951488,
-      "offset_hex": "0x5AD000",
+      "offset": 5914624,
+      "offset_hex": "0x5A4000",
       "size": 116076,
       "sha256": "ec78ee3b75df5da1556b0a3e1c3cf81c05f01dcacee057190786545e851f3835"
     }
@@ -398,8 +328,8 @@
       "path": "documents/pdf/file-sample_150kB.pdf",
       "category": "documents",
       "extension": "pdf",
-      "offset": 6070272,
-      "offset_hex": "0x5CA000",
+      "offset": 6033408,
+      "offset_hex": "0x5C1000",
       "size": 142786,
       "sha256": "38c9792d725c45dd431699e6a3b0f0f8e17c63c9ac7331387ee30dcc6e42a511"
     }
@@ -408,8 +338,8 @@
       "path": "documents/pdf/test_minimal.pdf",
       "category": "documents",
       "extension": "pdf",
-      "offset": 6213632,
-      "offset_hex": "0x5ED000",
+      "offset": 6176768,
+      "offset_hex": "0x5E4000",
       "size": 735,
       "sha256": "7f49a0620d2df70e6ae5071a96f26c2d119ab68a2ad5370ec7d5a6cc604742a4"
     }
@@ -418,8 +348,8 @@
       "path": "documents/potx/Untitled 1.potx",
       "category": "documents",
       "extension": "potx",
-      "offset": 6217728,
-      "offset_hex": "0x5EE000",
+      "offset": 6180864,
+      "offset_hex": "0x5E5000",
       "size": 266197,
       "sha256": "c8531151bc9120ee84338a87df4e1bdffa90005a60cfcefc4f297a3f51b3746b"
     }
@@ -428,8 +358,8 @@
       "path": "documents/ppt/file_example_PPT_250kB.ppt",
       "category": "documents",
       "extension": "ppt",
-      "offset": 6483968,
-      "offset_hex": "0x62F000",
+      "offset": 6447104,
+      "offset_hex": "0x626000",
       "size": 248320,
       "sha256": "1e4f6b07f0147358b4e6096d70ea7b1fb6d88bab18b2fb2a1b580185024ed158"
     }
@@ -438,8 +368,8 @@
       "path": "documents/pptx/test.pptx",
       "category": "documents",
       "extension": "pptx",
-      "offset": 6733824,
-      "offset_hex": "0x66C000",
+      "offset": 6696960,
+      "offset_hex": "0x663000",
       "size": 3042,
       "sha256": "0f2460e43256d7ae43cf8878884fa529ad5721de9e85b1086e4adba1e70f5fdf"
     }
@@ -448,8 +378,8 @@
       "path": "documents/rtf/file-sample_100kB.rtf",
       "category": "documents",
       "extension": "rtf",
-      "offset": 6737920,
-      "offset_hex": "0x66D000",
+      "offset": 6701056,
+      "offset_hex": "0x664000",
       "size": 100605,
       "sha256": "57c3f8011fa2bd3bc90c4d0d303086fffef94826f5c87da7696b3e477954e81f"
     }
@@ -458,28 +388,18 @@
       "path": "documents/source.txt",
       "category": "documents",
       "extension": "txt",
-      "offset": 6840320,
-      "offset_hex": "0x686000",
+      "offset": 6803456,
+      "offset_hex": "0x67D000",
       "size": 769,
       "sha256": "b8cf0be8812ecad76fa9b78342e296841b092b3212d69f79b5b1c7d73a3484f1"
-    }
-,
-    {
-      "path": "documents/test.pptx",
-      "category": "documents",
-      "extension": "pptx",
-      "offset": 6844416,
-      "offset_hex": "0x687000",
-      "size": 3042,
-      "sha256": "86e2882454b96688eed48a56dd3608685c8b9f009b677a3395c074eb5fd2c083"
     }
 ,
     {
       "path": "documents/xls/file_example_XLS_50.xls",
       "category": "documents",
       "extension": "xls",
-      "offset": 6848512,
-      "offset_hex": "0x688000",
+      "offset": 6807552,
+      "offset_hex": "0x67E000",
       "size": 13824,
       "sha256": "4383c16490d51729fddb32112c410c5da68d64b452ad69f383c0d4a5777564cb"
     }
@@ -488,8 +408,8 @@
       "path": "documents/xlsx/file_example_XLSX_100.xlsx",
       "category": "documents",
       "extension": "xlsx",
-      "offset": 6864896,
-      "offset_hex": "0x68C000",
+      "offset": 6823936,
+      "offset_hex": "0x682000",
       "size": 9299,
       "sha256": "716fb9d3593c2b68ed2319ad10107e6783e880a3d14a136d0c912158c23bbfe6"
     }
@@ -498,8 +418,8 @@
       "path": "email/test_simple.eml",
       "category": "email",
       "extension": "eml",
-      "offset": 6877184,
-      "offset_hex": "0x68F000",
+      "offset": 6836224,
+      "offset_hex": "0x685000",
       "size": 468,
       "sha256": "69b7916b76085004a071c7110a3530ba9636a75443c2cea614ae4441808ef0fb"
     }
@@ -508,8 +428,8 @@
       "path": "email/test_with_attachment.eml",
       "category": "email",
       "extension": "eml",
-      "offset": 6881280,
-      "offset_hex": "0x690000",
+      "offset": 6840320,
+      "offset_hex": "0x686000",
       "size": 810,
       "sha256": "f8918d23c6dc9d309dfddf005c869c4ab501ab803fe322b25fa0eabef1922ed3"
     }
@@ -518,8 +438,8 @@
       "path": "images/bmp/test.bmp",
       "category": "images",
       "extension": "bmp",
-      "offset": 6885376,
-      "offset_hex": "0x691000",
+      "offset": 6844416,
+      "offset_hex": "0x687000",
       "size": 7654,
       "sha256": "d9d560116a2d0f03a0ef04f3b29d874e6049849ac518d7dd7f656d89a099fa02"
     }
@@ -528,8 +448,8 @@
       "path": "images/bmp/test_generated.bmp",
       "category": "images",
       "extension": "bmp",
-      "offset": 6893568,
-      "offset_hex": "0x693000",
+      "offset": 6852608,
+      "offset_hex": "0x689000",
       "size": 67938,
       "sha256": "37b437d0c1891ad6715377780660ba5d8c00f52b1d06038e4b41c296d85da01c"
     }
@@ -538,8 +458,8 @@
       "path": "images/gif/20251230_1743_New Video_simple_compose_01kdr28ejwfwqsscaan27et23m_tiny.gif",
       "category": "images",
       "extension": "gif",
-      "offset": 6963200,
-      "offset_hex": "0x6A4000",
+      "offset": 6922240,
+      "offset_hex": "0x69A000",
       "size": 813879,
       "sha256": "788550dc8ccb6da5873ab915144d85bc6e6bf983c57af64f036135742bdf9d2d"
     }
@@ -548,8 +468,8 @@
       "path": "images/gif/file_example_GIF_500kB.gif",
       "category": "images",
       "extension": "gif",
-      "offset": 7778304,
-      "offset_hex": "0x76B000",
+      "offset": 7737344,
+      "offset_hex": "0x761000",
       "size": 510619,
       "sha256": "c763b9d5b7cbdf9bdcb851c8f97cfac45792cae31af35799ec6f91b900e97459"
     }
@@ -558,8 +478,8 @@
       "path": "images/gif/test_animated.gif",
       "category": "images",
       "extension": "gif",
-      "offset": 8290304,
-      "offset_hex": "0x7E8000",
+      "offset": 8249344,
+      "offset_hex": "0x7DE000",
       "size": 459,
       "sha256": "6d66da7241ec4f5ad5dbcea55b39d65eb2bb2566dc98ed2ff784149acf5e4343"
     }
@@ -568,8 +488,8 @@
       "path": "images/heic/sample1.heic",
       "category": "images",
       "extension": "heic",
-      "offset": 8294400,
-      "offset_hex": "0x7E9000",
+      "offset": 8253440,
+      "offset_hex": "0x7DF000",
       "size": 293608,
       "sha256": "00d9e0636b645036f77b3809fcd26a29df71b9ee66f2865fd8729b894aeabf59"
     }
@@ -578,8 +498,8 @@
       "path": "images/heic/sample1.heif",
       "category": "images",
       "extension": "heif",
-      "offset": 8589312,
-      "offset_hex": "0x831000",
+      "offset": 8548352,
+      "offset_hex": "0x827000",
       "size": 2503495,
       "sha256": "46ac93516093b70bfed23d11f651819a4fb946088a6a933d6a5d34f4fb967bad"
     }
@@ -588,8 +508,8 @@
       "path": "images/heic/test_generated.heic",
       "category": "images",
       "extension": "heic",
-      "offset": 11096064,
-      "offset_hex": "0xA95000",
+      "offset": 11055104,
+      "offset_hex": "0xA8B000",
       "size": 462,
       "sha256": "216d8a342efd4cf2586845f9a8fdee04698d3219c5502480380544dddbf83f2b"
     }
@@ -598,8 +518,8 @@
       "path": "images/heic/test_generated.heif",
       "category": "images",
       "extension": "heif",
-      "offset": 11100160,
-      "offset_hex": "0xA96000",
+      "offset": 11059200,
+      "offset_hex": "0xA8C000",
       "size": 462,
       "sha256": "f623f7d80c1bde5ce2f7ff3ebb1a63e2fc364a31b919bfd1974e3b42328c456c"
     }
@@ -608,8 +528,8 @@
       "path": "images/ico/file_example_favicon.ico",
       "category": "images",
       "extension": "ico",
-      "offset": 11104256,
-      "offset_hex": "0xA97000",
+      "offset": 11063296,
+      "offset_hex": "0xA8D000",
       "size": 390,
       "sha256": "0e87d20f7bd4240aec7695eb6353f4d0bb0950ebbb03ca2615a5570125a79d81"
     }
@@ -618,8 +538,8 @@
       "path": "images/jpg/file_example_JPG_100kB.jpg",
       "category": "images",
       "extension": "jpg",
-      "offset": 11108352,
-      "offset_hex": "0xA98000",
+      "offset": 11067392,
+      "offset_hex": "0xA8E000",
       "size": 102117,
       "sha256": "88aeb1f4467bd1e50cf624de972fbf3f40801632fedb64aaa7b1a8a9ef786fc6"
     }
@@ -628,8 +548,8 @@
       "path": "images/jpg/file_example_JPG_500kB.jpg",
       "category": "images",
       "extension": "jpg",
-      "offset": 11210752,
-      "offset_hex": "0xAB1000",
+      "offset": 11169792,
+      "offset_hex": "0xAA7000",
       "size": 555181,
       "sha256": "838e346997ab5f2dd6745e9e536de6f9cd68965088354597f2fba016ad40ab2c"
     }
@@ -638,8 +558,8 @@
       "path": "images/jpg/test_generated.jpg",
       "category": "images",
       "extension": "jpg",
-      "offset": 11767808,
-      "offset_hex": "0xB39000",
+      "offset": 11726848,
+      "offset_hex": "0xB2F000",
       "size": 6979,
       "sha256": "0f83c339a9b7fcb23c29678b237f7964239796475389b160b49cb66a5236b9ad"
     }
@@ -648,8 +568,8 @@
       "path": "images/png/file_example_PNG_1MB.png",
       "category": "images",
       "extension": "png",
-      "offset": 11776000,
-      "offset_hex": "0xB3B000",
+      "offset": 11735040,
+      "offset_hex": "0xB31000",
       "size": 1006708,
       "sha256": "0af3a12f5948445100da03937e9baf74c6dab503ed20afaa89b4b59a32ca5704"
     }
@@ -658,8 +578,8 @@
       "path": "images/png/file_example_PNG_500kB.png",
       "category": "images",
       "extension": "png",
-      "offset": 12783616,
-      "offset_hex": "0xC31000",
+      "offset": 12742656,
+      "offset_hex": "0xC27000",
       "size": 512596,
       "sha256": "aad96d410d92b5589d41e8462507e3af57682022db3d3711a236c0245fcf296e"
     }
@@ -668,8 +588,8 @@
       "path": "images/png/test_gradient.png",
       "category": "images",
       "extension": "png",
-      "offset": 13299712,
-      "offset_hex": "0xCAF000",
+      "offset": 13258752,
+      "offset_hex": "0xCA5000",
       "size": 1093,
       "sha256": "18c15154a49811fd1d5aa5b3a9215ca90808d30ecbf8f24b1b709d05beb31a99"
     }
@@ -678,8 +598,8 @@
       "path": "images/source.txt",
       "category": "images",
       "extension": "txt",
-      "offset": 13303808,
-      "offset_hex": "0xCB0000",
+      "offset": 13262848,
+      "offset_hex": "0xCA6000",
       "size": 729,
       "sha256": "43c2d28827bf3542ce83df311a4b5d8a974ad50023e895b6f7e09cd00eae70ae"
     }
@@ -688,8 +608,8 @@
       "path": "images/svg/file_example_SVG_30kB.svg",
       "category": "images",
       "extension": "svg",
-      "offset": 13307904,
-      "offset_hex": "0xCB1000",
+      "offset": 13266944,
+      "offset_hex": "0xCA7000",
       "size": 30868,
       "sha256": "e86dccbee3d33e4330041e1db9387f404242e083dab612f3728d06c15865e918"
     }
@@ -698,8 +618,8 @@
       "path": "images/tiff/file_example_TIFF_1MB.tiff",
       "category": "images",
       "extension": "tiff",
-      "offset": 13340672,
-      "offset_hex": "0xCB9000",
+      "offset": 13299712,
+      "offset_hex": "0xCAF000",
       "size": 1131930,
       "sha256": "bf24abf10a5dca9e800610d375b0d219966c2f422ef1930633756409518cded7"
     }
@@ -708,8 +628,8 @@
       "path": "images/tiff/test_pattern.tiff",
       "category": "images",
       "extension": "tiff",
-      "offset": 14475264,
-      "offset_hex": "0xDCE000",
+      "offset": 14434304,
+      "offset_hex": "0xDC4000",
       "size": 60258,
       "sha256": "90d5258681662061e649afd05b4bb255b35ad68cebd4ccbf3985bcae96452846"
     }
@@ -718,8 +638,8 @@
       "path": "images/webp/file_example_WEBP_250kB.webp",
       "category": "images",
       "extension": "webp",
-      "offset": 14536704,
-      "offset_hex": "0xDDD000",
+      "offset": 14495744,
+      "offset_hex": "0xDD3000",
       "size": 257750,
       "sha256": "12b6ef23175012e3bf2663338bf713e3e01ba03aef7604980635e2009f56b2aa"
     }
@@ -728,8 +648,8 @@
       "path": "images/webp/test_generated.webp",
       "category": "images",
       "extension": "webp",
-      "offset": 14794752,
-      "offset_hex": "0xE1C000",
+      "offset": 14753792,
+      "offset_hex": "0xE12000",
       "size": 396,
       "sha256": "471a60889ef989851eb17c8c17b483aa37142f3c1da2eb7b66be7e822035423c"
     }
@@ -738,8 +658,8 @@
       "path": "media_tiny/tiny.avi",
       "category": "media_tiny",
       "extension": "avi",
-      "offset": 14798848,
-      "offset_hex": "0xE1D000",
+      "offset": 14757888,
+      "offset_hex": "0xE13000",
       "size": 9012,
       "sha256": "f91b392bc05234f5e4abff84d9a599eb5435408b2406989105f9648bd5ba74e5"
     }
@@ -748,8 +668,8 @@
       "path": "media_tiny/tiny.mp3",
       "category": "media_tiny",
       "extension": "mp3",
-      "offset": 14811136,
-      "offset_hex": "0xE20000",
+      "offset": 14770176,
+      "offset_hex": "0xE16000",
       "size": 2420,
       "sha256": "b902c36ea469466470542d9c8fbc847fa7b8f5835a48f288f4421641396da752"
     }
@@ -758,8 +678,8 @@
       "path": "media_tiny/tiny.wav",
       "category": "media_tiny",
       "extension": "wav",
-      "offset": 14815232,
-      "offset_hex": "0xE21000",
+      "offset": 14774272,
+      "offset_hex": "0xE17000",
       "size": 8078,
       "sha256": "8550c452d03d52f7c1c1fbb28140dab8e4db85f528687c014c7dab7ad105c028"
     }
@@ -768,8 +688,8 @@
       "path": "media_tiny/tiny.webm",
       "category": "media_tiny",
       "extension": "webm",
-      "offset": 14823424,
-      "offset_hex": "0xE23000",
+      "offset": 14782464,
+      "offset_hex": "0xE19000",
       "size": 836,
       "sha256": "b6232dc2bb2190dd0aa9d027ef42cc4d866b9f49176d1989ddbec563c2027f4a"
     }
@@ -778,8 +698,8 @@
       "path": "other/Title.html",
       "category": "other",
       "extension": "html",
-      "offset": 14827520,
-      "offset_hex": "0xE24000",
+      "offset": 14786560,
+      "offset_hex": "0xE1A000",
       "size": 137453,
       "sha256": "9e19cef41076fa800c188e5a8fa79b8ac3d114decb9cac3569f9f2dee47724ac"
     }
@@ -788,8 +708,8 @@
       "path": "other/file_example_CSV_5000.csv",
       "category": "other",
       "extension": "csv",
-      "offset": 14966784,
-      "offset_hex": "0xE46000",
+      "offset": 14925824,
+      "offset_hex": "0xE3C000",
       "size": 284042,
       "sha256": "1b3583796b56fe56fcf36cb854e42cffcb115476b3d797d54c90a105fd160c72"
     }
@@ -798,8 +718,8 @@
       "path": "other/file_example_JSON_1kb.json",
       "category": "other",
       "extension": "json",
-      "offset": 15253504,
-      "offset_hex": "0xE8C000",
+      "offset": 15212544,
+      "offset_hex": "0xE82000",
       "size": 20471,
       "sha256": "aa20e971f6a0a7c482f3ed70cc6edc115eb577f987322ba42e5c3869e1d714d1"
     }
@@ -808,8 +728,8 @@
       "path": "other/file_example_XML_24kb.xml.xml",
       "category": "other",
       "extension": "xml",
-      "offset": 15273984,
-      "offset_hex": "0xE91000",
+      "offset": 15233024,
+      "offset_hex": "0xE87000",
       "size": 23972,
       "sha256": "1b7c71ab47d7bc73aa7173cd59f639fd0fd7c9c790ce89ed9f76700d50720a0e"
     }
@@ -818,8 +738,8 @@
       "path": "other/forensic_patterns.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 15298560,
-      "offset_hex": "0xE97000",
+      "offset": 15257600,
+      "offset_hex": "0xE8D000",
       "size": 1593,
       "sha256": "d090a94f610d57ed031e9d72325df2259d80e5c8ffd36df2fef4a1e9ae7a846b"
     }
@@ -828,8 +748,8 @@
       "path": "other/sample1.azw3",
       "category": "other",
       "extension": "azw3",
-      "offset": 15302656,
-      "offset_hex": "0xE98000",
+      "offset": 15261696,
+      "offset_hex": "0xE8E000",
       "size": 221012,
       "sha256": "e025ac6644a5b0c038812321d8388666ba79f9d6ffe44d07d81cda9683c83158"
     }
@@ -838,8 +758,8 @@
       "path": "other/sample1.epub",
       "category": "other",
       "extension": "epub",
-      "offset": 15523840,
-      "offset_hex": "0xECE000",
+      "offset": 15482880,
+      "offset_hex": "0xEC4000",
       "size": 191468,
       "sha256": "cc32ef8bed8a8ffb18c7006fca824f8f9e5f7cfc2d0348871dacb99fe8220a66"
     }
@@ -848,8 +768,8 @@
       "path": "other/sample1.fb2",
       "category": "other",
       "extension": "fb2",
-      "offset": 15716352,
-      "offset_hex": "0xEFD000",
+      "offset": 15675392,
+      "offset_hex": "0xEF3000",
       "size": 275044,
       "sha256": "a4944358f701e8e2675415e995e40e13f387a93f6e5ca2bd467731e27c34ed87"
     }
@@ -858,8 +778,8 @@
       "path": "other/sample1.lrf",
       "category": "other",
       "extension": "lrf",
-      "offset": 15994880,
-      "offset_hex": "0xF41000",
+      "offset": 15953920,
+      "offset_hex": "0xF37000",
       "size": 105900,
       "sha256": "585357c4ba9d5ed8795a81a8044a7d484cc265695d5913a2480645bad4cff1bb"
     }
@@ -868,8 +788,8 @@
       "path": "other/source.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 16101376,
-      "offset_hex": "0xF5B000",
+      "offset": 16060416,
+      "offset_hex": "0xF51000",
       "size": 606,
       "sha256": "0d7de69351a3a798107dfc752912361077970bfd594c0ade6df48aea676afde3"
     }
@@ -878,8 +798,8 @@
       "path": "other/strings.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 16105472,
-      "offset_hex": "0xF5C000",
+      "offset": 16064512,
+      "offset_hex": "0xF52000",
       "size": 2250,
       "sha256": "e1dbe0cdebdb84e51dd4dba416384c6a225d7175c3126cbde23bf7741dde5b9c"
     }
@@ -888,8 +808,8 @@
       "path": "other/test_config.yaml",
       "category": "other",
       "extension": "yaml",
-      "offset": 16109568,
-      "offset_hex": "0xF5D000",
+      "offset": 16068608,
+      "offset_hex": "0xF53000",
       "size": 558,
       "sha256": "de7fd266d4b00939b92280e9a39dd7a2453c46c45d741407b4f44a284a0d5361"
     }
@@ -898,8 +818,8 @@
       "path": "other/test_data.json",
       "category": "other",
       "extension": "json",
-      "offset": 16113664,
-      "offset_hex": "0xF5E000",
+      "offset": 16072704,
+      "offset_hex": "0xF54000",
       "size": 440,
       "sha256": "2a05546a89c6d175912825b2eb65539d72bda5c5da19cc4e75f96fd854699610"
     }
@@ -908,8 +828,8 @@
       "path": "other/test_logs.jsonl",
       "category": "other",
       "extension": "jsonl",
-      "offset": 16117760,
-      "offset_hex": "0xF5F000",
+      "offset": 16076800,
+      "offset_hex": "0xF55000",
       "size": 797,
       "sha256": "72b6a44f7c43f54fd0252f49793139a0091e053d6188164f707148bcb4d0c14a"
     }
@@ -918,8 +838,8 @@
       "path": "other/utf16_be.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 16121856,
-      "offset_hex": "0xF60000",
+      "offset": 16080896,
+      "offset_hex": "0xF56000",
       "size": 84,
       "sha256": "3ed929b1f09fcefcfab473e157276c11189fcc4763f822d535a9198ec202a2d4"
     }
@@ -928,8 +848,8 @@
       "path": "other/utf16_le.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 16125952,
-      "offset_hex": "0xF61000",
+      "offset": 16084992,
+      "offset_hex": "0xF57000",
       "size": 246,
       "sha256": "047471bfc9b956b18ab83706c755e8650630fe55c1631aa56cc243942fbf79af"
     }
@@ -938,8 +858,8 @@
       "path": "other/utf8_multilingual.txt",
       "category": "other",
       "extension": "txt",
-      "offset": 16130048,
-      "offset_hex": "0xF62000",
+      "offset": 16089088,
+      "offset_hex": "0xF58000",
       "size": 321,
       "sha256": "6c4b85d4590c3fca497d38f97417eab678fe7b55b583542a6fd1093a355f4473"
     }
@@ -948,8 +868,8 @@
       "path": "video/avi/file_example_AVI_480_750kB.avi",
       "category": "video",
       "extension": "avi",
-      "offset": 16134144,
-      "offset_hex": "0xF63000",
+      "offset": 16093184,
+      "offset_hex": "0xF59000",
       "size": 742478,
       "sha256": "7c1d478794e328ec1d2426b48c6115cb1c364fdfcaa65afcc8dd9cd4301121d2"
     }
@@ -958,8 +878,8 @@
       "path": "video/mov/file_example_MOV_640_800kB.mov",
       "category": "video",
       "extension": "mov",
-      "offset": 16879616,
-      "offset_hex": "0x1019000",
+      "offset": 16838656,
+      "offset_hex": "0x100F000",
       "size": 796625,
       "sha256": "cec67d6550aa5c2798e22b7d19411c33753e50dce04073ce95982c13f3f72c35"
     }
@@ -968,8 +888,8 @@
       "path": "video/mp4/file_example_MP4_640_3MG.mp4",
       "category": "video",
       "extension": "mp4",
-      "offset": 17678336,
-      "offset_hex": "0x10DC000",
+      "offset": 17637376,
+      "offset_hex": "0x10D2000",
       "size": 3114374,
       "sha256": "5e70b96ad27dc8581424be7069ee9de8da9388b716e6fe213d88385f19baf80a"
     }
@@ -978,8 +898,8 @@
       "path": "video/ogg/file_example_OGG_640_2_7mg.ogg",
       "category": "video",
       "extension": "ogg",
-      "offset": 20795392,
-      "offset_hex": "0x13D5000",
+      "offset": 20754432,
+      "offset_hex": "0x13CB000",
       "size": 2702630,
       "sha256": "cce6d14c89fdb500493ae8887d53b308c9b814b02a0129031b7231b54e62ee5d"
     }
@@ -988,8 +908,8 @@
       "path": "video/source.txt",
       "category": "video",
       "extension": "txt",
-      "offset": 23498752,
-      "offset_hex": "0x1669000",
+      "offset": 23457792,
+      "offset_hex": "0x165F000",
       "size": 503,
       "sha256": "624e28514a8a52606ef8e8e5a62ed7000ed0de7fa458a2fc2ebb13f82503c0c2"
     }
@@ -998,8 +918,8 @@
       "path": "video/webm/file_example_WEBM_640_1_4MB.webm",
       "category": "video",
       "extension": "webm",
-      "offset": 23502848,
-      "offset_hex": "0x166A000",
+      "offset": 23461888,
+      "offset_hex": "0x1660000",
       "size": 1417829,
       "sha256": "5e80181dc1be33bdf527b66c864ced62bedf1e86f227c59482e5f63e4f2a587e"
     }
@@ -1008,8 +928,8 @@
       "path": "video/wmv/file_example_WMV_640_1_6MB.wmv",
       "category": "video",
       "extension": "wmv",
-      "offset": 24924160,
-      "offset_hex": "0x17C5000",
+      "offset": 24883200,
+      "offset_hex": "0x17BB000",
       "size": 1604429,
       "sha256": "79f392cdb87d0ba22807717c3613456862e264f086c7d0f50b59c7cc4e83c7fc"
     }
@@ -1018,8 +938,8 @@
       "path": "windows/lnk/File Explorer.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26529792,
-      "offset_hex": "0x194D000",
+      "offset": 26488832,
+      "offset_hex": "0x1943000",
       "size": 407,
       "sha256": "cf116b33831de9f80847abdb2a0d92ab3d3f956a8e209ec95d35d986eea8c7b5"
     }
@@ -1028,8 +948,8 @@
       "path": "windows/lnk/Shows Desktop.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26533888,
-      "offset_hex": "0x194E000",
+      "offset": 26492928,
+      "offset_hex": "0x1944000",
       "size": 352,
       "sha256": "78be9c61505cd98110a9b9ead83fac552d5b89fc549988fc9050cdaffb66f281"
     }
@@ -1038,8 +958,8 @@
       "path": "windows/lnk/Synthetic Example.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26537984,
-      "offset_hex": "0x194F000",
+      "offset": 26497024,
+      "offset_hex": "0x1945000",
       "size": 626,
       "sha256": "d2ad116d8a32a4f5d3eef928921782449f447e6af8cb5d7adfce64f7cbd9eb9c"
     }
@@ -1048,8 +968,8 @@
       "path": "windows/lnk/YouTube Music.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26542080,
-      "offset_hex": "0x1950000",
+      "offset": 26501120,
+      "offset_hex": "0x1946000",
       "size": 626,
       "sha256": "2289724576b817cc49a1d02123a8b0ee37a1bef1bdd0b10b03410d0e1ad9afd8"
     }
@@ -1058,8 +978,8 @@
       "path": "windows/lnk/basic.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26546176,
-      "offset_hex": "0x1951000",
+      "offset": 26505216,
+      "offset_hex": "0x1947000",
       "size": 905,
       "sha256": "abb1297be0e16ba3bf63271f60699c24f3866652c3a745e1c51b46c84bfedba2"
     }
@@ -1068,8 +988,8 @@
       "path": "windows/lnk/folder_target.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26550272,
-      "offset_hex": "0x1952000",
+      "offset": 26509312,
+      "offset_hex": "0x1948000",
       "size": 771,
       "sha256": "2f949373fbe93476ff6c0d19666fc08f2b340f5324c2e80a5c5e95585ac12923"
     }
@@ -1078,8 +998,8 @@
       "path": "windows/lnk/ftp_target.url",
       "category": "windows",
       "extension": "url",
-      "offset": 26554368,
-      "offset_hex": "0x1953000",
+      "offset": 26513408,
+      "offset_hex": "0x1949000",
       "size": 51,
       "sha256": "e02e7ed1bcbd99e93d88200e0d69e97c5246ab3d9b37b236cbdf071df767472d"
     }
@@ -1088,8 +1008,8 @@
       "path": "windows/lnk/hidden_window.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26558464,
-      "offset_hex": "0x1954000",
+      "offset": 26517504,
+      "offset_hex": "0x194A000",
       "size": 901,
       "sha256": "23031d9949e3d7f24c0de261b82e7acb8591388fa618c4e680e163abf6fe3e76"
     }
@@ -1098,8 +1018,8 @@
       "path": "windows/lnk/http_target.url",
       "category": "windows",
       "extension": "url",
-      "offset": 26562560,
-      "offset_hex": "0x1955000",
+      "offset": 26521600,
+      "offset_hex": "0x194B000",
       "size": 52,
       "sha256": "3d23a95cf59ed04c99e9699c83372a22e2f77ce4fce53abd4886edc43755a4e1"
     }
@@ -1108,8 +1028,8 @@
       "path": "windows/lnk/mapped_drive.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26566656,
-      "offset_hex": "0x1956000",
+      "offset": 26525696,
+      "offset_hex": "0x194C000",
       "size": 317,
       "sha256": "6732236265ba0160b9ef6ec18acef9f39273d7a1921eb38f11deccae9ba4e354"
     }
@@ -1118,8 +1038,8 @@
       "path": "windows/lnk/real_unc_file.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26570752,
-      "offset_hex": "0x1957000",
+      "offset": 26529792,
+      "offset_hex": "0x194D000",
       "size": 1438,
       "sha256": "4028825907add6f4591b6e47be5bb03accd6192ec2c1cda4803e4b3e95c6342a"
     }
@@ -1128,8 +1048,8 @@
       "path": "windows/lnk/real_unc_folder.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26574848,
-      "offset_hex": "0x1958000",
+      "offset": 26533888,
+      "offset_hex": "0x194E000",
       "size": 1426,
       "sha256": "f6e07eed800234a6b6ef1d6b2b443db7eec36fc51bee26c6cf74cea270362cca"
     }
@@ -1138,8 +1058,8 @@
       "path": "windows/lnk/real_unc_with_workdir.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26578944,
-      "offset_hex": "0x1959000",
+      "offset": 26537984,
+      "offset_hex": "0x194F000",
       "size": 1520,
       "sha256": "60f433ca762c2f8c1143aca7673a853347432233730c4439f7ffd7ca96eee06a"
     }
@@ -1148,8 +1068,8 @@
       "path": "windows/lnk/truncated_real_unc_file.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26583040,
-      "offset_hex": "0x195A000",
+      "offset": 26542080,
+      "offset_hex": "0x1950000",
       "size": 160,
       "sha256": "34ecb5071df38d9ed49f9bbf3398a6dfa01a9d78853c6e30c2097edac74cd6d4"
     }
@@ -1158,8 +1078,8 @@
       "path": "windows/lnk/unc_exe.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26587136,
-      "offset_hex": "0x195B000",
+      "offset": 26546176,
+      "offset_hex": "0x1951000",
       "size": 1290,
       "sha256": "fa407476a4eeee39d360cb231b307291a671b6824b5a9006b0824efdc5a88f92"
     }
@@ -1168,8 +1088,8 @@
       "path": "windows/lnk/unc_share.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26591232,
-      "offset_hex": "0x195C000",
+      "offset": 26550272,
+      "offset_hex": "0x1952000",
       "size": 1276,
       "sha256": "b30eb5e84887f0d4cad6810e56c34f90fa3129fc87ab5fc69fd5d50f775c4f73"
     }
@@ -1178,8 +1098,8 @@
       "path": "windows/lnk/unc_target.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26595328,
-      "offset_hex": "0x195D000",
+      "offset": 26554368,
+      "offset_hex": "0x1953000",
       "size": 1244,
       "sha256": "e41f8d7620066eefcf9d37949fd75f99e37da8bd143d4a82d1dab85b51370800"
     }
@@ -1188,8 +1108,8 @@
       "path": "windows/lnk/with_args.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26599424,
-      "offset_hex": "0x195E000",
+      "offset": 26558464,
+      "offset_hex": "0x1954000",
       "size": 909,
       "sha256": "0ad9a8d3d7b307a945629e65f73e6ba3d5d53e4cd4be972600c197a32f2f1305"
     }
@@ -1198,8 +1118,8 @@
       "path": "windows/lnk/with_icon.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26603520,
-      "offset_hex": "0x195F000",
+      "offset": 26562560,
+      "offset_hex": "0x1955000",
       "size": 1518,
       "sha256": "d9c64d20b864c11369b6f74403dadf1d9b0063ca38b4d9e2bff4e9803c021a09"
     }
@@ -1208,8 +1128,8 @@
       "path": "windows/lnk/with_meta.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26607616,
-      "offset_hex": "0x1960000",
+      "offset": 26566656,
+      "offset_hex": "0x1956000",
       "size": 920,
       "sha256": "30b14c81885529d2e6760b8c5626a5f44f0d5944097e961b19d3371a8c105208"
     }
@@ -1218,8 +1138,8 @@
       "path": "windows/lnk/with_workdir.lnk",
       "category": "windows",
       "extension": "lnk",
-      "offset": 26611712,
-      "offset_hex": "0x1961000",
+      "offset": 26570752,
+      "offset_hex": "0x1957000",
       "size": 937,
       "sha256": "25c4241f956acb3680143b6e810ca73b51137dab7135ab7ccb1230c47464fb4d"
     }
@@ -1228,70 +1148,70 @@
       "path": "windows/prefetch/CMD.EXE-E4567890.pf",
       "category": "windows",
       "extension": "pf",
-      "offset": 26615808,
-      "offset_hex": "0x1962000",
+      "offset": 26574848,
+      "offset_hex": "0x1958000",
       "size": 536,
-      "sha256": "a69519e19b68bccc2ee93fea202f28b16e88b6d275f4af96094b0e9767b5a349"
+      "sha256": "5d7104bbf1f2e64d82bfd7b208e01f49a322b3390bb80a286b7759c1cba4a21a"
     }
 ,
     {
       "path": "windows/prefetch/NOTEPAD.EXE-ABCD1234.pf",
       "category": "windows",
       "extension": "pf",
-      "offset": 26619904,
-      "offset_hex": "0x1963000",
-      "size": 136,
-      "sha256": "29a078860f9d75454043a70ee1ca0da95b572d89522d3ce6fb721e2c885fec72"
+      "offset": 26578944,
+      "offset_hex": "0x1959000",
+      "size": 156,
+      "sha256": "e96580af4ae71fbdf796a8dd961acba2c8406d0dba8c5159938c49f56b726fc5"
     }
 ,
     {
       "path": "windows/prefetch/NOTEPAD.EXE-B1234567.pf",
       "category": "windows",
       "extension": "pf",
-      "offset": 26624000,
-      "offset_hex": "0x1964000",
+      "offset": 26583040,
+      "offset_hex": "0x195A000",
       "size": 216,
-      "sha256": "f2c895fa460c75a14b02ea965e7e27aa2ae64b5194d00843f85ecfaeea843ac9"
+      "sha256": "137c96836096d330d42e617d75aa177bae6c14f270055e42b12ee8f6805a67e4"
     }
 ,
     {
       "path": "windows/prefetch/NOTEPAD.EXE-C2345678.pf",
       "category": "windows",
       "extension": "pf",
-      "offset": 26628096,
-      "offset_hex": "0x1965000",
+      "offset": 26587136,
+      "offset_hex": "0x195B000",
       "size": 216,
-      "sha256": "0198d44c977fabc19cea734177eaa32c1660deaf97de87ab87b052cc1d88583a"
+      "sha256": "0fb181253032e839107b9b031883e9dd26e47d4f7b2ef522b7c9c53fb1bc3297"
     }
 ,
     {
       "path": "windows/prefetch/NOTEPAD.EXE-D3456789.pf",
       "category": "windows",
       "extension": "pf",
-      "offset": 26632192,
-      "offset_hex": "0x1966000",
+      "offset": 26591232,
+      "offset_hex": "0x195C000",
       "size": 272,
-      "sha256": "406a2a6569cf0ecab188a7ce0b06ec6d8f69a2e718b30ae76ce5002b6ec8ca21"
+      "sha256": "b8153c2cbb15ab2c34b41ff2811c5a7c9487d3e91311902ed4e66fcef7cdf7db"
     }
 
   ],
   "summary": {
-    "total_files": 127,
-    "total_data_size": 26312642,
-    "image_size": 26636288,
+    "total_files": 119,
+    "total_data_size": 26298543,
+    "image_size": 26595328,
     "categories": {
-      "archives": {"files": 18, "bytes": 2067937},
+      "archives": {"files": 11, "bytes": 2056860},
       "audio": {"files": 4, "bytes": 3141125},
       "binaries": {"files": 2, "bytes": 23976},
       "databases": {"files": 10, "bytes": 180544},
-      "documents": {"files": 15, "bytes": 1347718},
+      "documents": {"files": 14, "bytes": 1344676},
       "email": {"files": 2, "bytes": 1278},
       "images": {"files": 22, "bytes": 7865571},
       "media_tiny": {"files": 4, "bytes": 20346},
       "other": {"files": 17, "bytes": 1266257},
       "video": {"files": 7, "bytes": 10378868},
-      "windows": {"files": 26, "bytes": 19022}
+      "windows": {"files": 26, "bytes": 19042}
     }
   },
-  "raw_sha256": "62f5e9256f7119f43781c2b809cfb6b078d824af074d03257a46a4d65b932f2c"
+  "raw_sha256": "7c453078b373de115119a611940ae917329cdde798732419695ab11857fc6f9f"
 }

@@ -89,7 +89,8 @@ fn parquet_writes_expected_files() {
             run_count: 7,
             last_run_times: visit_time.iter().copied().collect(),
             volume_paths: vec![r"\Device\HarddiskVolume1".to_string()],
-            referenced_files: vec![r"C:\Windows\System32\cmd.exe".to_string()],
+            volume_paths_truncated: false,
+            referenced_files: Some(vec![r"C:\Windows\System32\cmd.exe".to_string()]),
             version: 30,
         }),
         WindowsArtefactRecord::Evtx(EvtxArtefact {
@@ -219,6 +220,7 @@ fn parquet_writes_expected_files() {
     assert_has_column(&cookies_path, "evidence_sha256");
     assert_has_column(&downloads_path, "evidence_sha256");
     assert_has_column(&windows_path, "artefact_type");
+    assert_has_column(&windows_path, "volume_paths_truncated");
     assert_has_column(&windows_path, "evidence_sha256");
     assert_has_column(&summary_path, "evidence_sha256");
     assert_has_column(&entropy_path, "evidence_sha256");

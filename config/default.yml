@@ -354,6 +354,25 @@ file_types:
     max_size: 65536
     min_size: 76
     validator: "lnk"
+  - id: "prefetch"
+    extensions: ["pf"]
+    header_patterns:
+      - id: "prefetch_mam"
+        hex: "4D414D04"
+      - id: "prefetch_scca_17"
+        hex: "1100000053434341"
+      - id: "prefetch_scca_23"
+        hex: "1700000053434341"
+      - id: "prefetch_scca_26"
+        hex: "1A00000053434341"
+      - id: "prefetch_scca_30"
+        hex: "1E00000053434341"
+      - id: "prefetch_scca_31"
+        hex: "1F00000053434341"
+    footer_patterns: []
+    max_size: 10485760
+    min_size: 84
+    validator: "prefetch"
   - id: "elf"
     extensions: ["elf", "so"]
     header_patterns:

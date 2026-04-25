@@ -37,13 +37,13 @@ fi
 # RAR - Missing from archives/
 #------------------------------------------------------------------------------
 echo "[2/9] Generating RAR..."
-mkdir -p archives
+mkdir -p archives/rar archives/7z archives/tar archives/gz archives/bz2 archives/xz documents/pptx
 echo "This is test content for RAR archive." > "$TEMP_DIR/test_content.txt"
 echo "Created: 2025-01-01T00:00:00Z" >> "$TEMP_DIR/test_content.txt"
 
 if command -v rar &> /dev/null; then
-    rar a -ep archives/test.rar "$TEMP_DIR/test_content.txt" > /dev/null
-    echo "  ✓ Created archives/test.rar"
+    rar a -ep archives/rar/test.rar "$TEMP_DIR/test_content.txt" > /dev/null
+    echo "  ✓ Created archives/rar/test.rar"
 elif command -v unrar &> /dev/null; then
     echo "  ✗ 'rar' not found (unrar cannot create). Install: sudo dnf install rar"
 else
@@ -58,8 +58,8 @@ echo "This is test content for 7z archive." > "$TEMP_DIR/test_content_7z.txt"
 echo "Created: 2025-01-01T00:00:00Z" >> "$TEMP_DIR/test_content_7z.txt"
 
 if command -v 7z &> /dev/null; then
-    7z a archives/test.7z "$TEMP_DIR/test_content_7z.txt" > /dev/null
-    echo "  ✓ Created archives/test.7z"
+    7z a archives/7z/test.7z "$TEMP_DIR/test_content_7z.txt" > /dev/null
+    echo "  ✓ Created archives/7z/test.7z"
 else
     echo "  ✗ 7z not found. Install: sudo dnf install p7zip p7zip-plugins"
 fi
@@ -70,20 +70,20 @@ fi
 echo "[4/9] Generating TAR archives..."
 echo "Test content for tar archive" > "$TEMP_DIR/tarfile.txt"
 
-tar -cf archives/test.tar -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/test.tar"
-tar -czf archives/test.tar.gz -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/test.tar.gz"
-tar -cjf archives/test.tar.bz2 -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/test.tar.bz2"
+tar -cf archives/tar/test.tar -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/tar/test.tar"
+tar -czf archives/tar/test.tar.gz -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/tar/test.tar.gz"
+tar -cjf archives/tar/test.tar.bz2 -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/tar/test.tar.bz2"
 
 if command -v xz &> /dev/null; then
-    tar -cJf archives/test.tar.xz -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/test.tar.xz"
+    tar -cJf archives/tar/test.tar.xz -C "$TEMP_DIR" tarfile.txt 2>/dev/null && echo "  ✓ Created archives/tar/test.tar.xz"
 fi
 
 # Standalone compressed files
-gzip -c "$TEMP_DIR/tarfile.txt" > archives/test.txt.gz && echo "  ✓ Created archives/test.txt.gz"
-bzip2 -c "$TEMP_DIR/tarfile.txt" > archives/test.txt.bz2 && echo "  ✓ Created archives/test.txt.bz2"
+gzip -c "$TEMP_DIR/tarfile.txt" > archives/gz/test.txt.gz && echo "  ✓ Created archives/gz/test.txt.gz"
+bzip2 -c "$TEMP_DIR/tarfile.txt" > archives/bz2/test.txt.bz2 && echo "  ✓ Created archives/bz2/test.txt.bz2"
 
 if command -v xz &> /dev/null; then
-    xz -c "$TEMP_DIR/tarfile.txt" > archives/test.txt.xz && echo "  ✓ Created archives/test.txt.xz"
+    xz -c "$TEMP_DIR/tarfile.txt" > archives/xz/test.txt.xz && echo "  ✓ Created archives/xz/test.txt.xz"
 fi
 
 #------------------------------------------------------------------------------
@@ -142,8 +142,8 @@ cat > "$PPTX_DIR/ppt/slides/slide1.xml" << 'EOF'
 </p:sld>
 EOF
 
-(cd "$PPTX_DIR" && zip -r "$SCRIPT_DIR/documents/test.pptx" . > /dev/null 2>&1)
-echo "  ✓ Created documents/test.pptx"
+(cd "$PPTX_DIR" && zip -r "$SCRIPT_DIR/documents/pptx/test.pptx" . > /dev/null 2>&1)
+echo "  ✓ Created documents/pptx/test.pptx"
 
 #------------------------------------------------------------------------------
 # SQLite - Missing from databases/
@@ -539,57 +539,77 @@ def make_scca_header(version, exe_name, pf_hash, unknown1=0):
     return h
 
 def make_v17(exe_name, pf_hash, run_count, last_run_unix):
-    """v17 = Windows XP.  File-info block: 36 B section ptrs + 8 B timestamp + 4 B run_count + 4 B pad."""
+    """v17 = Windows XP.  Header (84 B) + file-info block.
+
+    Per libscca / MS-PF spec: last_run_time @ absolute 0x78, run_count @ 0x90.
+    Info block runs from absolute 0x54..; field offsets within info are
+    therefore (0x78-0x54)=0x24=36 and (0x90-0x54)=0x3C=60.
+    """
     header = make_scca_header(17, exe_name, pf_hash, unknown1=0x0F000000)
-    info = bytearray(52)
-    struct.pack_into('<Q', info, 36, filetime_from_unix(last_run_unix))  # offset 120
-    struct.pack_into('<I', info, 44, run_count)                          # offset 128
+    # 36 B section ptrs | 8 B timestamp | 16 B unknown | 4 B run_count | tail
+    info = bytearray(72)
+    struct.pack_into('<Q', info, 36, filetime_from_unix(last_run_unix))  # absolute 0x78
+    struct.pack_into('<I', info, 60, run_count)                          # absolute 0x90
     file_size = len(header) + len(info)
     struct.pack_into('<I', header, 12, file_size)
     return bytes(header) + bytes(info)
 
 def make_v23(exe_name, pf_hash, run_count, last_run_unix):
-    """v23 = Windows Vista/7.  Same section block as v17 + 80 B extra unknown fields."""
+    """v23 = Windows Vista/7.
+
+    Per spec: last_run_time @ absolute 0x80, run_count @ 0x98.
+    Info offsets are therefore (0x80-0x54)=0x2C=44 and (0x98-0x54)=0x44=68.
+    """
     header = make_scca_header(23, exe_name, pf_hash)
-    info = bytearray(132)  # 36 + 8 + 4 + 4 + 80
-    struct.pack_into('<Q', info, 36, filetime_from_unix(last_run_unix))  # offset 120
-    struct.pack_into('<I', info, 44, run_count)                          # offset 128
+    info = bytearray(132)
+    struct.pack_into('<Q', info, 44, filetime_from_unix(last_run_unix))  # absolute 0x80
+    struct.pack_into('<I', info, 68, run_count)                          # absolute 0x98
     file_size = len(header) + len(info)
     struct.pack_into('<I', header, 12, file_size)
     return bytes(header) + bytes(info)
 
 def make_v26(exe_name, pf_hash, run_count, last_run_unix):
-    """v26 = Windows 8/8.1.  Same layout as v23."""
+    """v26 = Windows 8/8.1.
+
+    Per spec: 8 × uint64 last_run_times starting @ 0x80, run_count @ 0xD0.
+    Info offsets: 44 and (0xD0-0x54)=0x7C=124.  The first slot holds the
+    most recent run; the remaining 7 are zero in this synthetic sample.
+    """
     header = make_scca_header(26, exe_name, pf_hash)
     info = bytearray(132)
-    struct.pack_into('<Q', info, 36, filetime_from_unix(last_run_unix))  # offset 120
-    struct.pack_into('<I', info, 44, run_count)                          # offset 128
+    struct.pack_into('<Q', info, 44, filetime_from_unix(last_run_unix))  # absolute 0x80
+    struct.pack_into('<I', info, 124, run_count)                         # absolute 0xD0
     file_size = len(header) + len(info)
     struct.pack_into('<I', header, 12, file_size)
     return bytes(header) + bytes(info)
 
 def make_v30(exe_name, pf_hash, run_count, last_run_times_unix):
-    """v30 = Windows 10/11.  Section block + 8×uint64 last-run timestamps + run_count + extra."""
+    """v30 = Windows 10/11 uncompressed.
+
+    Per spec: 8 × uint64 last_run_times @ 0x80..0xC0, run_count @ 0xD0.
+    Info offsets: 44..108 for timestamps, 124 for run_count.
+    """
     header = make_scca_header(30, exe_name, pf_hash)
-    # 36 B section ptrs | 64 B (8 × uint64 timestamps) | 4 B run_count | 4 B unknown | 80 B extra
+    # 44 B prefix | 64 B timestamps | 12 B unknown | 4 B run_count | tail
     info = bytearray(188)
     for i, ts in enumerate(last_run_times_unix[:8]):
         if ts:
-            struct.pack_into('<Q', info, 36 + i * 8, filetime_from_unix(ts))  # offsets 120–183
-    struct.pack_into('<I', info, 100, run_count)                               # offset 184
+            struct.pack_into('<Q', info, 44 + i * 8, filetime_from_unix(ts))  # absolute 0x80..
+    struct.pack_into('<I', info, 124, run_count)                              # absolute 0xD0
     file_size = len(header) + len(info)
     struct.pack_into('<I', header, 12, file_size)
     return bytes(header) + bytes(info)
 
 def lzxpress_huffman_compress(data):
     """
-    LZXPRESS Huffman compression (MS-XCA), all-literal encoding.
+    LZXPRESS Huffman compression (MS-XCA §2.4), all-literal encoding.
 
     Assigns code length 8 to every literal symbol (0-255) and length 0 to all
-    match symbols (256-511).  Canonical codes are therefore symbol == code.
-    The bitstream is LSB-first, so each input byte V maps to bit_reverse(V)
-    in the output byte stream.  The 256-byte Huffman symbol table precedes
-    each 65536-byte uncompressed chunk.
+    match symbols (256-511).  Canonical codes are then symbol == code (8 bits).
+    Per MS-XCA the bitstream is read MSB-first within little-endian 16-bit
+    words, so emitting the canonical 8-bit code for value V means writing the
+    byte V directly into the output stream (no bit reversal).  The 256-byte
+    Huffman length table precedes each ≤65536-byte uncompressed chunk.
     """
     result = bytearray()
     offset = 0
@@ -605,10 +625,9 @@ def lzxpress_huffman_compress(data):
             table[i] = 0x88  # low nibble = 8, high nibble = 8
         result.extend(table)
 
-        # Compressed stream: canonical code for symbol V is V (8 bits),
-        # written MSB-first into the LSB-first bitstream → bit_reverse(V).
-        for b in chunk:
-            result.append(int('{:08b}'.format(b)[::-1], 2))
+        # Compressed stream: canonical 8-bit code for symbol V is V itself,
+        # written MSB-first → output byte == V.
+        result.extend(chunk)
 
     return bytes(result)
 

@@ -21,6 +21,7 @@ pub struct WindowsArtefactFlatRow {
     pub run_count: Option<u64>,
     pub last_run_times_json: Option<String>,
     pub volume_paths_json: Option<String>,
+    pub volume_paths_truncated: Option<bool>,
     pub referenced_files_json: Option<String>,
     pub version: Option<u32>,
     pub first_chunk: Option<u64>,
@@ -31,6 +32,15 @@ pub struct WindowsArtefactFlatRow {
     pub hive_name: Option<String>,
     pub hive_type: Option<String>,
     pub root_key_name: Option<String>,
+}
+
+fn serialize_prefetch_references(
+    referenced_files: Option<&Vec<String>>,
+) -> Result<Option<String>, MetadataError> {
+    referenced_files
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(Into::into)
 }
 
 pub fn flatten_windows_artefact(
@@ -56,6 +66,7 @@ pub fn flatten_windows_artefact(
             run_count: None,
             last_run_times_json: None,
             volume_paths_json: None,
+            volume_paths_truncated: None,
             referenced_files_json: None,
             version: None,
             first_chunk: None,
@@ -86,7 +97,10 @@ pub fn flatten_windows_artefact(
             run_count: Some(u64::from(artefact.run_count)),
             last_run_times_json: Some(serde_json::to_string(&artefact.last_run_times)?),
             volume_paths_json: Some(serde_json::to_string(&artefact.volume_paths)?),
-            referenced_files_json: Some(serde_json::to_string(&artefact.referenced_files)?),
+            volume_paths_truncated: Some(artefact.volume_paths_truncated),
+            referenced_files_json: serialize_prefetch_references(
+                artefact.referenced_files.as_ref(),
+            )?,
             version: Some(u32::from(artefact.version)),
             first_chunk: None,
             last_chunk: None,
@@ -116,6 +130,7 @@ pub fn flatten_windows_artefact(
             run_count: None,
             last_run_times_json: None,
             volume_paths_json: None,
+            volume_paths_truncated: None,
             referenced_files_json: None,
             version: None,
             first_chunk: Some(artefact.first_chunk),
@@ -146,6 +161,7 @@ pub fn flatten_windows_artefact(
             run_count: None,
             last_run_times_json: None,
             volume_paths_json: None,
+            volume_paths_truncated: None,
             referenced_files_json: None,
             version: None,
             first_chunk: None,
@@ -157,5 +173,57 @@ pub fn flatten_windows_artefact(
             hive_type: artefact.hive_type.clone(),
             root_key_name: artefact.root_key_name.clone(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::flatten_windows_artefact;
+    use crate::carve::windows::{PrefetchArtefact, WindowsArtefactRecord};
+
+    #[test]
+    fn prefetch_referenced_files_none_serializes_as_null() {
+        let record = WindowsArtefactRecord::Prefetch(PrefetchArtefact {
+            run_id: "run_windows".to_string(),
+            offset: 2,
+            size: 512,
+            executable_name: "CMD.EXE".to_string(),
+            prefetch_hash: "00112233".to_string(),
+            run_count: 3,
+            last_run_times: Vec::new(),
+            volume_paths: Vec::new(),
+            volume_paths_truncated: false,
+            referenced_files: None,
+            version: 30,
+        });
+
+        let flat = flatten_windows_artefact(&record).expect("flatten prefetch");
+
+        assert_eq!(flat.referenced_files_json, None);
+    }
+
+    #[test]
+    fn prefetch_referenced_files_preserves_serialized_values() {
+        let record = WindowsArtefactRecord::Prefetch(PrefetchArtefact {
+            run_id: "run_windows".to_string(),
+            offset: 2,
+            size: 512,
+            executable_name: "CMD.EXE".to_string(),
+            prefetch_hash: "00112233".to_string(),
+            run_count: 3,
+            last_run_times: Vec::new(),
+            volume_paths: Vec::new(),
+            volume_paths_truncated: true,
+            referenced_files: Some(vec![r"C:\Windows\System32\cmd.exe".to_string()]),
+            version: 30,
+        });
+
+        let flat = flatten_windows_artefact(&record).expect("flatten prefetch");
+
+        assert_eq!(
+            flat.referenced_files_json.as_deref(),
+            Some(r#"["C:\\Windows\\System32\\cmd.exe"]"#)
+        );
+        assert_eq!(flat.volume_paths_truncated, Some(true));
     }
 }

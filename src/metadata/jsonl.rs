@@ -388,7 +388,8 @@ mod tests {
                 run_count: 3,
                 last_run_times: vec![ts],
                 volume_paths: vec![r"\Device\HarddiskVolume1".to_string()],
-                referenced_files: vec![r"C:\Windows\System32\cmd.exe".to_string()],
+                volume_paths_truncated: false,
+                referenced_files: Some(vec![r"C:\Windows\System32\cmd.exe".to_string()]),
                 version: 30,
             }),
             WindowsArtefactRecord::Evtx(EvtxArtefact {
@@ -422,6 +423,7 @@ mod tests {
                 .expect("read jsonl");
         assert!(content.contains("\"artefact_type\":\"lnk\""));
         assert!(content.contains("\"artefact_type\":\"prefetch\""));
+        assert!(content.contains("\"volume_paths_truncated\":false"));
         assert!(content.contains("\"artefact_type\":\"evtx\""));
         assert!(content.contains("\"artefact_type\":\"registry\""));
         assert!(content.contains("\"evidence_sha256\":\"\""));
