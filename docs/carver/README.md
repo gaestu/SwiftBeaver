@@ -51,7 +51,7 @@ Each carver document includes:
 | [PDF](pdf.md) | ✅ Complete | Production | Portable Document Format |
 | OLE | ⏳ TBD | Production | OLE/CFB (DOC, XLS, PPT, MSG) |
 | RTF | ⏳ TBD | Production | Rich Text Format |
-| EML | [eml.md](eml.md) | Production | Email message format |
+| [EML](eml.md) | ✅ Complete | Production | Email message format (RFC 822 / MIME / mbox) |
 
 ## Multimedia Carvers
 
@@ -217,7 +217,6 @@ The following carvers are production-ready but documentation is pending:
 - **ICO**: Icon format (directory structure)
 - **OLE**: Office documents (FAT-based sectors)
 - **RTF**: Rich text (marker-based)
-- **EML**: Email format (marker-based)
 - **OGG**: Audio format (page-based)
 
 For implementation details, consult source code in [src/carve/](../../src/carve/).
