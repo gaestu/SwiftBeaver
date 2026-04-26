@@ -382,6 +382,17 @@ file_types:
     max_size: 536870912
     min_size: 4096
     validator: "registry"
+  - id: "evtx"
+    extensions: ["evtx"]
+    header_patterns:
+      - id: "evtx_header"
+        hex: "456C6646696C6500"
+    footer_patterns: []
+    max_size: 1073741824
+    # 4096 (file header) + 65536 (one chunk) — pre_validate requires the
+    # first ElfChnk\0 magic at +0x1000, so header-only carves are rejected.
+    min_size: 69632
+    validator: "evtx"
   - id: "elf"
     extensions: ["elf", "so"]
     header_patterns:

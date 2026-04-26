@@ -76,6 +76,7 @@ Each carver document includes:
 | [LNK](lnk.md) | ✅ Complete | Production | Windows Shell Link shortcut files |
 | [Prefetch](prefetch.md) | ✅ Complete | Production | Windows Prefetch execution trace files |
 | [Registry](registry.md) | ✅ Complete | Production | Windows Registry hive files (`regf`) |
+| [EVTX](evtx.md) | ✅ Complete | Production | Windows Event Log files (`ElfFile\0`, Vista+) |
 | [ELF](elf.md) | ✅ Complete | Production | Executable and Linkable Format |
 | [MOBI](mobi.md) | ✅ Complete | Production | Mobipocket ebook format |
 | [FB2](fb2.md) | ✅ Complete | Production | FictionBook 2.0 ebook format |
@@ -119,6 +120,7 @@ FF FB / FF FA          → MP3 (MPEG frames)
 4C 00 00 00 01 14 02 00 ... 00 46  → LNK
 7F 45 4C 46           → ELF
 72 65 67 66           → Windows Registry hive (regf)
+45 6C 66 46 69 6C 65 00  → EVTX (Windows Event Log, ElfFile\0)
 ```
 
 ## Testing Coverage

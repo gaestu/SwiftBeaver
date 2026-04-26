@@ -284,6 +284,70 @@ fn golden_carves_from_raw() {
         "expected carved outputs to match manifest samples"
     );
 
+    // EVTX coverage: every EVTX fixture in the manifest must be recovered
+    // from golden.raw. We compare against the declared logical SHA-256 (file
+    // header + declared in-use chunks only) because raw signature carving
+    // cannot prove that trailing bytes past `chunk_count` belong to the EVTX
+    // file instead of adjacent evidence.
+    let mut carved_hashes: HashSet<String> = HashSet::new();
+    let deserializer = serde_json::Deserializer::from_str(&carved_content);
+    for record in deserializer.into_iter::<serde_json::Value>() {
+        let record = record.expect("carved_files.jsonl must be valid JSON");
+        if let Some(hash) = record.get("sha256").and_then(|v| v.as_str()) {
+            carved_hashes.insert(hash.to_string());
+        }
+    }
+    let evtx_dir = std::path::Path::new("tests/golden_image/samples/windows/evtx");
+    let mut missing_evtx: Vec<String> = Vec::new();
+    let mut evtx_total = 0usize;
+    for file in &manifest.files {
+        if file.extension != "evtx" {
+            continue;
+        }
+        evtx_total += 1;
+        let fixture_path = evtx_dir.join(
+            std::path::Path::new(&file.path)
+                .file_name()
+                .expect("evtx fixture filename"),
+        );
+        let bytes = fs::read(&fixture_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read EVTX fixture {} (manifest entry {}): {err}",
+                fixture_path.display(),
+                file.path,
+            )
+        });
+        // Compute declared logical extent: 4096 + chunk_count * 65536.
+        assert!(
+            bytes.len() >= 0x2C,
+            "EVTX fixture {} is undersized ({} bytes) — cannot read chunk_count",
+            fixture_path.display(),
+            bytes.len(),
+        );
+        let chunk_count = u16::from_le_bytes([bytes[0x2A], bytes[0x2B]]) as usize;
+        let logical_size = 4096 + chunk_count * 65536;
+        assert!(
+            logical_size <= bytes.len(),
+            "EVTX fixture {} is shorter ({} bytes) than its declared logical extent ({} bytes)",
+            fixture_path.display(),
+            bytes.len(),
+            logical_size,
+        );
+        let logical = &bytes[..logical_size];
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(logical);
+        let logical_sha = format!("{:x}", hasher.finalize());
+        if !carved_hashes.contains(&logical_sha) {
+            missing_evtx.push(file.path.clone());
+        }
+    }
+    assert!(evtx_total > 0, "manifest should contain EVTX fixtures");
+    assert!(
+        missing_evtx.is_empty(),
+        "EVTX fixtures missing from carved output (logical sha256 mismatch): {missing_evtx:?}"
+    );
+
     let metadata_dir = run_output_dir.join("metadata");
     let history_path = metadata_dir.join("browser_history.jsonl");
     let cookies_path = metadata_dir.join("browser_cookies.jsonl");

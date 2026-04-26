@@ -466,6 +466,16 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                     )),
                 );
             }
+            "evtx" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::windows::evtx::EvtxCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
             _ => {
                 debug!(
                     "no carve handler for file_type={} validator={}",
