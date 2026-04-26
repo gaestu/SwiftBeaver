@@ -179,7 +179,19 @@ This document tracks sample files for the golden test image.
 | registry hive (real SECURITY) | ✅ Have | windows/registry/SECURITY | 32 KB | Real Win10 hive, scrubbed VM |
 | registry hive (real SYSTEM) | ✅ Have | windows/registry/SYSTEM | 12 MB | Real Win10 hive, exercises large-hive paths |
 | registry hive (real userdiff) | ✅ Have | windows/registry/userdiff | 8 KB | Real Win10 hive, scrubbed VM |
-| evtx | ❌ Missing | - | - | Future carver |
+| evtx (synthetic, clean, 1 chunk) | ✅ Have | windows/evtx/Application.synthetic.evtx | 68 KB | Valid `ElfFile\0` header + 1 empty `ElfChnk\0`, CRC32s verified by python-evtx |
+| evtx (synthetic, clean, 2 chunks) | ✅ Have | windows/evtx/System.synthetic.evtx | 132 KB | Multi-chunk size-calculation fixture |
+| evtx (synthetic, dirty flag) | ✅ Have | windows/evtx/Security.synthetic.dirty.evtx | 68 KB | `file_flags=1` (dirty) for graceful-shutdown handling |
+| evtx (real Win11 System) | ✅ Have | windows/evtx/System.evtx | 1.07 MB | Real Win11 v3.2 hive, 7 chunks, 1047 records |
+| evtx (real Win11 Setup) | ✅ Have | windows/evtx/Setup.evtx | 68 KB | Minimal real fixture, 1 chunk, 3 records |
+| evtx (real Win11 HardwareEvents) | ✅ Have | windows/evtx/HardwareEvents.evtx | 68 KB | Empty/header-only edge case, 0 records |
+| evtx (real Win11 PowerShell Operational) | ✅ Have | windows/evtx/Microsoft-Windows-PowerShell%4Operational.evtx | 68 KB | IR-relevant, 6 records |
+| evtx (real Win11 TaskScheduler Maintenance) | ✅ Have | windows/evtx/Microsoft-Windows-TaskScheduler%4Maintenance.evtx | 68 KB | IR-relevant, 9 records |
+| evtx (real Win11 BITS Client) | ✅ Have | windows/evtx/Microsoft-Windows-Bits-Client%4Operational.evtx | 68 KB | Dense single chunk, 75 records |
+| evtx (real Win11 WindowsUpdateClient) | ✅ Have | windows/evtx/Microsoft-Windows-WindowsUpdateClient%4Operational.evtx | 68 KB | Common forensic, 14 records |
+| evtx (real Win11 WMI-Activity) | ✅ Have | windows/evtx/Microsoft-Windows-WMI-Activity%4Operational.evtx | 1.0 MB | Multi-chunk dense, 6 chunks, 408 records |
+| evtx (real Win11 Security) | ❌ Missing | - | - | Skipped: contains logon usernames/SIDs/IPs — add only after PII scrub |
+| evtx (real Win11 Application) | ❌ Missing | - | - | Skipped: 2 MB, redundant with System.evtx |
 
 ---
 
