@@ -373,6 +373,15 @@ file_types:
     max_size: 10485760
     min_size: 84
     validator: "prefetch"
+  - id: "registry"
+    extensions: ["hve"]
+    header_patterns:
+      - id: "regf_header"
+        hex: "72656766"
+    footer_patterns: []
+    max_size: 536870912
+    min_size: 4096
+    validator: "registry"
   - id: "elf"
     extensions: ["elf", "so"]
     header_patterns:

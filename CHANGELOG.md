@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+- Windows Registry hive carver (`regf`): carves primary hives, transaction logs, and BCD-Template files, emitting `windows_artefacts` rows with `timestamp`, `hive_name`, `hive_type`, and best-effort `root_key_name`. Recognises canonical hive names (`SAM`, `SYSTEM`, `SOFTWARE`, `SECURITY`, `DEFAULT`, `NTUSER.DAT`, `UsrClass.dat`, `BCD`, etc.) and applies a 1 GiB defensive plausibility cap on `hive_bins_data_size`. See [`docs/carver/registry.md`](docs/carver/registry.md). Closes #43.
+
 ### Changed
 - Prefetch metadata now records `volume_paths_truncated` when a crafted header claims more volume entries than SwiftBeaver decodes under its defensive cap, so shortened `volume_paths_json` arrays are not ambiguous.
 - Prefetch `referenced_files_json` remains nullable with `null` meaning "extraction not implemented"; downstream consumers should not assume an empty array for all versions or runs.

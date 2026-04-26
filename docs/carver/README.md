@@ -75,6 +75,7 @@ Each carver document includes:
 | [SQLite Page](sqlite_page.md) | ✅ Complete | Production | SQLite leaf page fragments |
 | [LNK](lnk.md) | ✅ Complete | Production | Windows Shell Link shortcut files |
 | [Prefetch](prefetch.md) | ✅ Complete | Production | Windows Prefetch execution trace files |
+| [Registry](registry.md) | ✅ Complete | Production | Windows Registry hive files (`regf`) |
 | [ELF](elf.md) | ✅ Complete | Production | Executable and Linkable Format |
 | [MOBI](mobi.md) | ✅ Complete | Production | Mobipocket ebook format |
 | [FB2](fb2.md) | ✅ Complete | Production | FictionBook 2.0 ebook format |
@@ -117,6 +118,7 @@ FF FB / FF FA          → MP3 (MPEG frames)
 0D / 0A               → SQLite page fragment candidates
 4C 00 00 00 01 14 02 00 ... 00 46  → LNK
 7F 45 4C 46           → ELF
+72 65 67 66           → Windows Registry hive (regf)
 ```
 
 ## Testing Coverage
