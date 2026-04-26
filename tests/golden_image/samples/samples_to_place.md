@@ -164,7 +164,21 @@ This document tracks sample files for the golden test image.
 | prefetch (v26 Win8) | ✅ Have | windows/prefetch/NOTEPAD.EXE-C2345678.pf | 216 B | Uncompressed SCCA |
 | prefetch (v30 Win10 plain) | ✅ Have | windows/prefetch/NOTEPAD.EXE-D3456789.pf | 272 B | Uncompressed SCCA |
 | prefetch (v30 Win10 MAM) | ✅ Have | windows/prefetch/CMD.EXE-E4567890.pf | 536 B | MAM/LZXPRESS Huffman |
-| registry hive | ❌ Missing | - | - | Low priority |
+| registry hive (NTUSER.DAT) | ✅ Have | windows/registry/NTUSER.DAT.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (SYSTEM) | ✅ Have | windows/registry/SYSTEM.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (SOFTWARE) | ✅ Have | windows/registry/SOFTWARE.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (SAM) | ✅ Have | windows/registry/SAM.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (dirty) | ✅ Have | windows/registry/DIRTY.synthetic | 8 KB | Mismatched primary/secondary sequence |
+| registry hive (real BBI) | ✅ Have | windows/registry/BBI | 256 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real BCD-Template) | ✅ Have | windows/registry/BCD-Template | 28 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real BCD-Template.LOG) | ✅ Have | windows/registry/BCD-Template.LOG | 28 KB | Real .LOG file (regf magic) |
+| registry hive (real DEFAULT) | ✅ Have | windows/registry/DEFAULT | 768 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real ELAM) | ✅ Have | windows/registry/ELAM | 8 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real NTUSER.DAT) | ✅ Have | windows/registry/NTUSER.DAT | 1 MB | Real user hive, account=`sample_account` |
+| registry hive (real SAM) | ✅ Have | windows/registry/SAM | 64 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real SECURITY) | ✅ Have | windows/registry/SECURITY | 32 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real SYSTEM) | ✅ Have | windows/registry/SYSTEM | 12 MB | Real Win10 hive, exercises large-hive paths |
+| registry hive (real userdiff) | ✅ Have | windows/registry/userdiff | 8 KB | Real Win10 hive, scrubbed VM |
 | evtx | ❌ Missing | - | - | Future carver |
 
 ---
