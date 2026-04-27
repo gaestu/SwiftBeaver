@@ -246,7 +246,7 @@ impl SignatureScanner for OpenClScanner {
         let _ = unsafe { kernel.set_arg(8, &count_mem) };
         let _ = unsafe { kernel.set_arg(9, &self.max_hits_per_chunk) };
 
-        let global_work_size = [data.len() as usize];
+        let global_work_size = [data.len()];
         if let Err(err) = unsafe {
             self.queue.enqueue_nd_range_kernel(
                 kernel.get(),

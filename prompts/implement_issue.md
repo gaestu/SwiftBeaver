@@ -30,7 +30,7 @@ First read `AGENTS.md` and follow it strictly.
    - integration tests for CLI or workflow changes
    - schema tests for metadata changes
 
-6. Update docs only if user-facing behavior, CLI usage, or schema documentation changed.
+6. Update docs only if user-facing behavior, CLI usage, or schema documentation changed. Check if the CHANGELOG.md needs a Entry in Unreleased as well and add one if needed.
 
 7. Run specialist review passes after implementation:
    - always run:

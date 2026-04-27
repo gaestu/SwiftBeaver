@@ -4,12 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.0 (2026-04-27)
+
 ### Added
+- Windows Shell Link (`.lnk`) carver: validates Shell Link headers and optional sections, carves exact shortcut extents, and emits `windows_artefacts` rows with target paths, working directories, timestamps, file sizes, volume serials, local base paths, and network paths. See [`docs/carver/lnk.md`](docs/carver/lnk.md). Closes #40.
+- Windows Prefetch (`.pf`) carver: supports SCCA versions 17, 23, 26, 30, and 31, plus MAM-compressed Windows 10+ Prefetch files via bounded LZXPRESS Huffman decompression. Emits `windows_artefacts` rows with executable names, Prefetch hashes, run counts, run timestamps, volume paths, truncation state, and version metadata. See [`docs/carver/prefetch.md`](docs/carver/prefetch.md). Closes #41.
 - Windows Registry hive carver (`regf`): carves primary hives, transaction logs, and BCD-Template files, emitting `windows_artefacts` rows with `timestamp`, `hive_name`, `hive_type`, and best-effort `root_key_name`. Recognises canonical hive names (`SAM`, `SYSTEM`, `SOFTWARE`, `SECURITY`, `DEFAULT`, `NTUSER.DAT`, `UsrClass.dat`, `BCD`, etc.) and applies a 1 GiB defensive plausibility cap on `hive_bins_data_size`. See [`docs/carver/registry.md`](docs/carver/registry.md). Closes #43.
+- Windows Event Log (`.evtx`) carver: validates `ElfFile\0` headers and first-chunk `ElfChnk\0` magic before carving, walks declared chunks defensively, preserves truncated logs when evidence ends early, and emits `windows_artefacts` rows with chunk and record-count metadata. See [`docs/carver/evtx.md`](docs/carver/evtx.md). Closes #42.
+- Golden-image and fixture coverage for Windows Prefetch, Registry hive, and EVTX carving scenarios.
 
 ### Changed
 - Prefetch metadata now records `volume_paths_truncated` when a crafted header claims more volume entries than SwiftBeaver decodes under its defensive cap, so shortened `volume_paths_json` arrays are not ambiguous.
 - Prefetch `referenced_files_json` remains nullable with `null` meaning "extraction not implemented"; downstream consumers should not assume an empty array for all versions or runs.
+- Updated benchmark coverage for the current carver set.
+
+### Fixed
+- JPEG carving now uses a two-phase marker walker that skips length-prefixed metadata segments before `SOS`, preventing embedded Exif/MPF thumbnail `EOI` markers from prematurely ending the outer JPEG carve.
+- WebP carving now treats the outer RIFF size as authoritative, validates chunk layout against the declared container extent, rejects implausible RIFF declarations, and marks evidence-boundary short reads as truncated without falling back to `max_size`.
+
+### Documentation
+- Added or expanded carver documentation for AVI, BZIP2, ELF, EML, FB2, GZIP, ICO, MOBI, MOV, OGG, OLE/CFB, RTF, TAR, WEBM, WMV/ASF, and XZ.
 
 ## 0.4.0 (2026-04-20)
 

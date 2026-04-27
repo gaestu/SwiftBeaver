@@ -261,7 +261,7 @@ impl StringScanner for OpenClStringScanner {
         let _ = unsafe { kernel.set_arg(7, &count_mem) };
         let _ = unsafe { kernel.set_arg(8, &self.max_spans_per_chunk) };
 
-        let global_work_size = [data.len() as usize];
+        let global_work_size = [data.len()];
         if let Err(err) = unsafe {
             self.queue.enqueue_nd_range_kernel(
                 kernel.get(),
@@ -289,7 +289,7 @@ impl StringScanner for OpenClStringScanner {
             warn!("opencl read span count failed: {err}; using cpu fallback");
             return self.cpu_fallback.scan_chunk(chunk, data);
         }
-        let mut count = count[0] as usize;
+        let count = count[0] as usize;
         if count > span_capacity {
             warn!(
                 "opencl span overflow: count={} max={}; falling back to cpu for accurate results",

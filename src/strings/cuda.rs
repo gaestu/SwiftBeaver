@@ -205,7 +205,7 @@ impl StringScanner for CudaStringScanner {
 
         // Calculate grid dimensions
         let num_threads = data.len() as u32;
-        let num_blocks = (num_threads + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        let num_blocks = num_threads.div_ceil(BLOCK_SIZE);
         let launch_cfg = LaunchConfig {
             grid_dim: (num_blocks, 1, 1),
             block_dim: (BLOCK_SIZE, 1, 1),
@@ -257,7 +257,7 @@ impl StringScanner for CudaStringScanner {
                 return self.cpu_fallback.scan_chunk(chunk, data);
             }
         };
-        let mut count = count_host[0] as usize;
+        let count = count_host[0] as usize;
         if count > span_capacity {
             warn!(
                 "CUDA span overflow: count={} max={}; falling back to cpu for accurate results",
