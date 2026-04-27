@@ -12,7 +12,7 @@ use crate::scanner::NormalizedHit;
 // ------------------------------------------------------------------
 
 /// SCCA header is always 84 bytes minimum (version, signature, unknown, file_size,
-/// exe_name[60], prefetch_hash, unknown)
+/// exe_name\[60\], prefetch_hash, unknown)
 const SCCA_MIN_SIZE: usize = 84;
 const SCCA_VERSION_OFFSET: usize = 0;
 const SCCA_SIGNATURE_OFFSET: usize = 4;

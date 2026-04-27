@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+#[cfg(feature = "ewf")]
 use swiftbeaver::cli::{CliOptions, MetadataBackend};
 use swiftbeaver::config;
 use swiftbeaver::evidence::RawFileSource;
