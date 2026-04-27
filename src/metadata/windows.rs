@@ -135,7 +135,7 @@ pub fn flatten_windows_artefact(
             version: None,
             first_chunk: Some(artefact.first_chunk),
             last_chunk: Some(artefact.last_chunk),
-            record_count_estimate: Some(artefact.record_count_estimate),
+            record_count_estimate: artefact.record_count_estimate,
             log_name: artefact.log_name.clone(),
             timestamp: None,
             hive_name: None,

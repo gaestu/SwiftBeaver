@@ -58,7 +58,13 @@ pub struct EvtxArtefact {
     /// carved file by `last_chunk * 65536 + 4096` must check `size`
     /// (and `truncated`) first.
     pub last_chunk: u64,
-    pub record_count_estimate: u64,
+    /// Sum of `(last_record - first_record + 1)` across verified chunks.
+    /// `None` when one or more chunks declare implausible record-number
+    /// ranges (e.g. `last_record > i64::MAX`) or when the running total
+    /// would not fit in `i64`. The downstream Parquet column is `int64`
+    /// nullable, so unrepresentable counts must be reported as missing
+    /// rather than truncated to a misleading value.
+    pub record_count_estimate: Option<u64>,
     pub log_name: Option<String>,
 }
 
@@ -385,8 +391,10 @@ struct WalkedChunks {
     /// `chunk_count` extent.
     verified_chunks: u32,
     /// Sum of `(last_record - first_record + 1)` across every chunk that
-    /// could be read and had a valid `ElfChnk\0` magic.
-    record_count_estimate: u64,
+    /// could be read and had a valid `ElfChnk\0` magic. `None` if any
+    /// chunk declared an implausible range (`last_record > i64::MAX`) or
+    /// if the running sum would exceed `i64::MAX`.
+    record_count_estimate: Option<u64>,
     /// Number of remaining declared chunks after the first bad chunk magic.
     /// These chunks are not counted toward `verified_chunks`.
     corrupt_declared_chunks: u32,
@@ -403,7 +411,15 @@ fn walk_chunks(
     base_offset: u64,
     declared_chunk_count: u32,
 ) -> Result<WalkedChunks, CarveError> {
+    // The downstream Parquet schema stores `record_count_estimate` as
+    // `int64`, so any sum we report must fit in `i64`. Track an
+    // "unrepresentable" flag separately so a single corrupt chunk header
+    // (e.g. `last_record == u64::MAX`) downgrades the per-file estimate
+    // to `None` instead of either silently truncating or, worse, causing
+    // the metadata sink to drop the entire Windows artefact row.
+    const RECORD_COUNT_CAP: u64 = i64::MAX as u64;
     let mut total_records: u64 = 0;
+    let mut estimate_unrepresentable = false;
     let mut verified_chunks: u32 = 0;
     let mut corrupt_declared_chunks: u32 = 0;
     let mut missing_declared_chunks: u32 = 0;
@@ -427,17 +443,53 @@ fn walk_chunks(
             && let Some(last_record) = read_u64(&buf, CH_LAST_RECORD_NUMBER_OFFSET)
             && last_record >= first_record
         {
-            let count = last_record
-                .checked_sub(first_record)
-                .and_then(|d| d.checked_add(1))
-                .unwrap_or(0);
-            total_records = total_records.saturating_add(count);
+            // Treat any range that cannot be represented downstream as
+            // implausible chunk metadata and skip its contribution.
+            if last_record > RECORD_COUNT_CAP || first_record > RECORD_COUNT_CAP {
+                if !estimate_unrepresentable {
+                    tracing::warn!(
+                        chunk_index = i,
+                        first_record,
+                        last_record,
+                        base_offset,
+                        "evtx chunk declares record range exceeding i64::MAX; \
+                         record_count_estimate downgraded to NULL"
+                    );
+                }
+                estimate_unrepresentable = true;
+            } else {
+                let count = last_record
+                    .checked_sub(first_record)
+                    .and_then(|d| d.checked_add(1))
+                    .unwrap_or(0);
+                match total_records.checked_add(count) {
+                    Some(sum) if sum <= RECORD_COUNT_CAP => total_records = sum,
+                    _ => {
+                        if !estimate_unrepresentable {
+                            tracing::warn!(
+                                chunk_index = i,
+                                first_record,
+                                last_record,
+                                base_offset,
+                                "evtx running record-count estimate would exceed i64::MAX; \
+                                 downgraded to NULL"
+                            );
+                        }
+                        estimate_unrepresentable = true;
+                    }
+                }
+            }
         }
         i += 1;
     }
+    let record_count_estimate = if estimate_unrepresentable {
+        None
+    } else {
+        Some(total_records)
+    };
     Ok(WalkedChunks {
         verified_chunks,
-        record_count_estimate: total_records,
+        record_count_estimate,
         corrupt_declared_chunks,
         missing_declared_chunks,
     })
@@ -637,7 +689,7 @@ mod tests {
         let walked = walk_chunks(&mem, 0, 2).expect("walk");
 
         assert_eq!(walked.verified_chunks, 2);
-        assert_eq!(walked.record_count_estimate, 5);
+        assert_eq!(walked.record_count_estimate, Some(5));
         assert_eq!(walked.corrupt_declared_chunks, 0);
         assert_eq!(walked.missing_declared_chunks, 0);
     }
@@ -651,7 +703,7 @@ mod tests {
         data.extend(build_chunk(6, 12)); // 7 records
         let mem = Memory(data);
         let walked = walk_chunks(&mem, 0, 3).expect("walk");
-        assert_eq!(walked.record_count_estimate, 12);
+        assert_eq!(walked.record_count_estimate, Some(12));
         assert_eq!(walked.verified_chunks, 3);
     }
 
@@ -663,7 +715,7 @@ mod tests {
         data.extend(build_chunk(5, 7)); // 3 records
         let mem = Memory(data);
         let walked = walk_chunks(&mem, 0, 3).expect("walk");
-        assert_eq!(walked.record_count_estimate, 7);
+        assert_eq!(walked.record_count_estimate, Some(7));
         assert_eq!(walked.verified_chunks, 2);
         assert_eq!(walked.missing_declared_chunks, 1);
     }
@@ -677,7 +729,7 @@ mod tests {
         data.extend(build_chunk(6, 10)); // 5 records
         let mem = Memory(data);
         let walked = walk_chunks(&mem, 0, 2).expect("walk");
-        assert_eq!(walked.record_count_estimate, 0);
+        assert_eq!(walked.record_count_estimate, Some(0));
         assert_eq!(walked.verified_chunks, 0);
         assert_eq!(walked.corrupt_declared_chunks, 2);
     }
@@ -695,7 +747,38 @@ mod tests {
         let mem = Memory(data);
         let walked = walk_chunks(&mem, 0, 2).expect("walk");
         assert_eq!(walked.verified_chunks, 2);
-        assert_eq!(walked.record_count_estimate, 7);
+        assert_eq!(walked.record_count_estimate, Some(7));
+        assert_eq!(walked.corrupt_declared_chunks, 0);
+        assert_eq!(walked.missing_declared_chunks, 0);
+    }
+
+    #[test]
+    fn record_count_estimate_is_none_when_chunk_range_exceeds_i64() {
+        // Regression: a chunk header with `last_record == u64::MAX` must
+        // not abort the walk and must downgrade the estimate to `None`
+        // so the downstream `int64` Parquet column stays representable.
+        let mut data = build_header(2, 0, 1);
+        data.extend(build_chunk(1, 5)); // 5 well-formed records
+        data.extend(build_chunk(1, u64::MAX)); // implausible range
+        let mem = Memory(data);
+        let walked = walk_chunks(&mem, 0, 2).expect("walk");
+        assert_eq!(walked.verified_chunks, 2);
+        assert!(walked.record_count_estimate.is_none());
+        assert_eq!(walked.corrupt_declared_chunks, 0);
+        assert_eq!(walked.missing_declared_chunks, 0);
+    }
+
+    #[test]
+    fn record_count_estimate_is_none_when_running_total_exceeds_i64() {
+        // Two chunks each just under i64::MAX trip the running-sum guard.
+        let big = (i64::MAX as u64) - 10;
+        let mut data = build_header(2, 0, 1);
+        data.extend(build_chunk(0, big));
+        data.extend(build_chunk(0, big));
+        let mem = Memory(data);
+        let walked = walk_chunks(&mem, 0, 2).expect("walk");
+        assert_eq!(walked.verified_chunks, 2);
+        assert!(walked.record_count_estimate.is_none());
         assert_eq!(walked.corrupt_declared_chunks, 0);
         assert_eq!(walked.missing_declared_chunks, 0);
     }

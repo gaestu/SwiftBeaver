@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+- EVTX `windows_artefacts` rows are no longer dropped when a chunk header declares an implausible record-number range. The carver now reports `record_count_estimate` as `null` when any chunk's `(last_record - first_record + 1)` exceeds `i64::MAX` or when the running sum would overflow `i64`, and the Parquet sink falls back to `NULL` instead of returning a metadata error for the whole row. Closes #80.
+
 ## 0.5.1 (2026-04-27)
 
 ### Fixed

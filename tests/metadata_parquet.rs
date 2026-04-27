@@ -99,8 +99,20 @@ fn parquet_writes_expected_files() {
             size: 4096,
             first_chunk: 0,
             last_chunk: 3,
-            record_count_estimate: 128,
+            record_count_estimate: Some(128),
             log_name: Some("Security".to_string()),
+        }),
+        // Regression for issue #80: a u64 record_count_estimate that is
+        // larger than i64::MAX must NOT cause the row to be dropped.
+        // The Parquet sink should preserve the row with the column NULL.
+        WindowsArtefactRecord::Evtx(EvtxArtefact {
+            run_id: "run_001".to_string(),
+            offset: 16384,
+            size: 4096,
+            first_chunk: 0,
+            last_chunk: 0,
+            record_count_estimate: Some(u64::MAX),
+            log_name: Some("Application".to_string()),
         }),
         WindowsArtefactRecord::RegistryHive(RegistryHiveArtefact {
             run_id: "run_001".to_string(),
@@ -210,7 +222,7 @@ fn parquet_writes_expected_files() {
     assert_eq!(count_rows(&history_path), 1);
     assert_eq!(count_rows(&cookies_path), 1);
     assert_eq!(count_rows(&downloads_path), 1);
-    assert_eq!(count_rows(&windows_path), 4);
+    assert_eq!(count_rows(&windows_path), 5);
     assert_eq!(count_rows(&summary_path), 1);
     assert_eq!(count_rows(&entropy_path), 1);
 
@@ -225,6 +237,55 @@ fn parquet_writes_expected_files() {
     assert_has_column(&summary_path, "evidence_sha256");
     assert_has_column(&entropy_path, "evidence_sha256");
     assert_has_column(&entropy_path, "entropy");
+
+    // Regression for issue #80: the EVTX row with `record_count_estimate =
+    // u64::MAX` must be present in the Parquet file, and the column must be
+    // serialized as NULL rather than silently truncated to a misleading i64.
+    assert_evtx_overflow_row_has_null_record_count(&windows_path);
+}
+
+fn assert_evtx_overflow_row_has_null_record_count(path: &PathBuf) {
+    use parquet::record::Field;
+
+    let file = File::open(path).expect("open parquet");
+    let reader = SerializedFileReader::new(file).expect("parquet reader");
+    let mut found_overflow_row = false;
+    for row in reader.get_row_iter(None).expect("row iter") {
+        let row = row.expect("row");
+        let mut artefact_type: Option<String> = None;
+        let mut log_name: Option<String> = None;
+        let mut record_count_field: Option<Field> = None;
+        for (name, field) in row.get_column_iter() {
+            match name.as_str() {
+                "artefact_type" => {
+                    if let Field::Str(value) = field {
+                        artefact_type = Some(value.clone());
+                    }
+                }
+                "log_name" => {
+                    if let Field::Str(value) = field {
+                        log_name = Some(value.clone());
+                    }
+                }
+                "record_count_estimate" => {
+                    record_count_field = Some(field.clone());
+                }
+                _ => {}
+            }
+        }
+        if artefact_type.as_deref() == Some("evtx") && log_name.as_deref() == Some("Application") {
+            found_overflow_row = true;
+            assert!(
+                matches!(record_count_field, Some(Field::Null)),
+                "expected record_count_estimate to be NULL on overflow row, got {:?}",
+                record_count_field
+            );
+        }
+    }
+    assert!(
+        found_overflow_row,
+        "overflow EVTX row (log_name=Application) not found in windows_artefacts.parquet"
+    );
 }
 
 fn count_rows(path: &PathBuf) -> usize {

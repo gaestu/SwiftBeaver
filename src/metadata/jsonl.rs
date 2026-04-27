@@ -398,7 +398,7 @@ mod tests {
                 size: 4096,
                 first_chunk: 0,
                 last_chunk: 10,
-                record_count_estimate: 128,
+                record_count_estimate: Some(128),
                 log_name: Some("Security".to_string()),
             }),
             WindowsArtefactRecord::RegistryHive(RegistryHiveArtefact {

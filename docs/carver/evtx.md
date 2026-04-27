@@ -75,7 +75,7 @@ parsing is out of scope (separate feature).
 |-------|-------------|
 | `first_chunk` | `FirstChunkNumber` from the file header (normally `0`). Reflects the source header verbatim — when `truncated=true`, this value may reference a chunk index past the actually-carved extent. |
 | `last_chunk` | `LastChunkNumber` from the file header — index of the last in-use chunk. Same truncation caveat as `first_chunk`: callers indexing into the carved file by `last_chunk * 65536 + 4096` must check `size` (and `truncated`) first. |
-| `record_count_estimate` | Sum of per-chunk record counts derived by walking each verified declared `ElfChnk\0` header. Lower bound when chunks are corrupt or past the evidence boundary. |
+| `record_count_estimate` | Sum of per-chunk record counts derived by walking each verified declared `ElfChnk\0` header. Lower bound when chunks are corrupt or past the evidence boundary. `null` when one or more chunk headers declare implausible record-number ranges (e.g. `last_record_number == u64::MAX`) or when the running sum would exceed `i64::MAX`, since the downstream Parquet column is `int64`. |
 | `log_name` | Always `null` for raw-image carving — the channel name (e.g. `Microsoft-Windows-PowerShell/Operational`) is encoded only in the on-disk filename, not in the EVTX file body |
 
 ## Limits

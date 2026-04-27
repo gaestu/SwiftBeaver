@@ -194,7 +194,7 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `version` (int32, nullable)
 - `first_chunk` (int64, nullable)
 - `last_chunk` (int64, nullable)
-- `record_count_estimate` (int64, nullable)
+- `record_count_estimate` (int64, nullable) — for EVTX rows, also `null` when chunk headers declare a record-number range that cannot be represented as `int64` (e.g. `last_record_number == u64::MAX`); `null` for non-EVTX artefact types
 - `log_name` (string, nullable)
 - `timestamp_utc` (timestamp micros, nullable)
 - `hive_name` (string, nullable)

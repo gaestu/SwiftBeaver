@@ -904,7 +904,14 @@ impl MetadataSink for ParquetSink {
             version: flat.version.map(to_i32).transpose()?,
             first_chunk: flat.first_chunk.map(to_i64).transpose()?,
             last_chunk: flat.last_chunk.map(to_i64).transpose()?,
-            record_count_estimate: flat.record_count_estimate.map(to_i64).transpose()?,
+            // Overflow on `record_count_estimate` (e.g. an EVTX chunk
+            // header with `last_record_number == u64::MAX`) must NOT drop
+            // the entire Windows artefact row. Fall back to NULL so the
+            // rest of the artefact metadata still reaches Parquet. See
+            // GitHub issue #80.
+            record_count_estimate: flat
+                .record_count_estimate
+                .and_then(|value| i64::try_from(value).ok()),
             log_name: flat.log_name,
             timestamp_utc: flat.timestamp.map(to_micros),
             hive_name: flat.hive_name,
