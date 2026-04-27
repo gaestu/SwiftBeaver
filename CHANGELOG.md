@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.1 (2026-04-27)
+
+### Fixed
+- Rebuilt release artifacts from the corrected 0.5.x release commit so packaged binaries report the expected version.
+- Fixed no-default-features Clippy and rustdoc warning failures in CI.
+
 ## 0.5.0 (2026-04-27)
 
 ### Added
