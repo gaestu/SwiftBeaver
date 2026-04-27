@@ -17,10 +17,13 @@ fn insert_bytes(target: &mut Vec<u8>, offset: usize, data: &[u8]) {
 }
 
 fn sample_jpeg() -> Vec<u8> {
-    let mut data = vec![0u8; 32];
-    data[0..4].copy_from_slice(&[0xFF, 0xD8, 0xFF, 0xE0]);
-    data[4..9].copy_from_slice(b"JFIF\0");
-    data[30..32].copy_from_slice(&[0xFF, 0xD9]);
+    // Structurally valid 32-byte JPEG: SOI, APP0(len=4), SOS(len=2), entropy, EOI.
+    let mut data = Vec::with_capacity(32);
+    data.extend_from_slice(&[0xFF, 0xD8]);
+    data.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00]);
+    data.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02]);
+    data.resize(30, 0u8);
+    data.extend_from_slice(&[0xFF, 0xD9]);
     data
 }
 

@@ -39,7 +39,7 @@ The default config is `config/default.yml`.
 - `write_workers` (usize): number of dedicated I/O writer threads for flushing carved files to disk. Carve workers perform CPU-bound validation, parsing and hashing, then hand off the validated result to writer threads for disk I/O. Fewer writer threads are typically needed compared to carve workers, since SSDs can saturate with limited parallelism. Default: `4`.
 - `scan_workers` (usize, optional): override the number of scan worker threads. Defaults to the `--workers` CLI value (CPU core count). Scan workers are CPU-bound and should typically match the core count.
 - `carve_workers` (usize, optional): override the number of carve worker threads. Defaults to the `--workers` CLI value (CPU core count). Carve workers are I/O-bound, so scaling them beyond the CPU core count can improve throughput on fast storage.
-- `carver_limits` (map): per-carver concurrency limits. Each key is a carver type ID (e.g. `sqlite`, `mp3`), value is an object with `max_concurrent` (optional usize) specifying the maximum number of slow carve workers that may process this type simultaneously. Default: `{}` (unlimited for all types).
+- `carver_limits` (map): per-carver concurrency limits. Each key is a carver type ID (e.g. `sqlite`, `mp3`), value is an object with `max_concurrent` (optional usize) specifying the maximum number of carve workers that may process this type simultaneously. The current default config sets `lnk.max_concurrent: 2`; unspecified types remain unlimited.
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.
@@ -56,7 +56,7 @@ Each entry in `file_types` contains:
 - `footer_patterns`: footer signatures used by the `footer` validator
 - `max_size`: maximum carve size in bytes
 - `min_size`: minimum carve size in bytes
-- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `sqlite_wal`, `sqlite_page`, `pdf`, `zip`, `webp`, `bmp`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `footer`)
+- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `sqlite_wal`, `sqlite_page`, `pdf`, `zip`, `webp`, `bmp`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `lnk`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `footer`)
 - `require_eocd`: optional; for ZIP, require an EOCD before carving (prevents large false positives)
 
 The `footer` validator performs a simple header-to-footer carve for formats without a dedicated handler.

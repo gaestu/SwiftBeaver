@@ -11,7 +11,7 @@ Complete documentation for SwiftBeaver forensic file carving tool.
 
 ### Reference Documentation
 - **[Configuration Reference](config.md)** - Complete configuration schema
-- **[File Format Support](file-formats.md)** - All 34 supported formats
+- **[File Format Support](file-formats.md)** - Supported formats and validation notes
 - **[Architecture](architecture.md)** - Pipeline and design overview
 
 ### Metadata & Output
@@ -62,7 +62,7 @@ Complete documentation for SwiftBeaver forensic file carving tool.
   - Example configurations
 
 - [File Format Support](file-formats.md)
-  - 34 supported formats with details
+  - Supported formats with details
   - Signature patterns
   - Validation methods
   - Performance characteristics
@@ -84,7 +84,7 @@ Complete documentation for SwiftBeaver forensic file carving tool.
   - Module descriptions
 
 - [Carver Algorithms](carver/README.md)
-  - Detailed carver documentation (14 formats)
+  - Detailed carver documentation
   - Algorithm explanations
   - Testing strategies
   - Edge case handling
@@ -206,6 +206,7 @@ output/
     │   ├── browser_history.jsonl    # Browser browsing history
     │   ├── browser_cookies.jsonl    # Browser cookies
     │   ├── browser_downloads.jsonl  # Browser download records
+    │   ├── windows_artefacts.jsonl  # Parsed Windows artefact rows
     │   ├── entropy_regions.jsonl    # High-entropy regions
     │   └── run_summary.jsonl        # Scan statistics
     └── checkpoint.json              # Resume point (if created)
@@ -228,7 +229,7 @@ JPEG, PNG, GIF, BMP, TIFF, WEBP, ICO
 
 **Documentation**: [File Formats - Image](file-formats.md#image-formats)
 
-### Document Formats (9)
+### Document Formats (11)
 PDF, DOCX, XLSX, PPTX, DOC, XLS, PPT, RTF, ODT, ODS, ODP
 
 **Documentation**: [File Formats - Document](file-formats.md#document-formats)
@@ -243,8 +244,8 @@ MP4, MOV, MP3, WAV, AVI, OGG, WEBM, WMV
 
 **Documentation**: [File Formats - Multimedia](file-formats.md#multimedia-formats)
 
-### Database & Special (3)
-SQLite, ELF, EML, MOBI, FB2, LRF
+### Database & Special (7)
+SQLite, LNK, ELF, EML, MOBI, FB2, LRF
 
 **Documentation**: [File Formats - Database & Special](file-formats.md#database--special-formats)
 

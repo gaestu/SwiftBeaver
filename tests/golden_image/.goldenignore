@@ -1,3 +1,8 @@
 # Files not intended as sample data.
 generate_missing.sh
 samples_to_place.md
+# Raw upload of registry hive candidates; only the curated subset
+# in tests/golden_image/samples/windows/registry/ is part of the image.
+windows/registry/candidates/
+windows/registry/generate.py
+windows/evtx/generate.py

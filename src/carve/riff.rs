@@ -14,6 +14,9 @@ pub const WAVE_FORM: &[u8; 4] = b"WAVE";
 /// AVI form type  
 pub const AVI_FORM: &[u8; 4] = b"AVI ";
 
+/// WebP form type
+pub const WEBP_FORM: &[u8; 4] = b"WEBP";
+
 /// Parse RIFF header and return (form_type, declared_size).
 ///
 /// The header is 12 bytes:

@@ -192,9 +192,29 @@ collect_process_metrics() {
         now=$(date +%s)
         local elapsed=$((now - start_time))
 
-        # Per-process CPU from pidstat (1-second sample)
+        # Per-process CPU from pidstat (1-second sample).
+        # Resolve the %CPU column from the header instead of assuming a fixed
+        # field index because pidstat layouts vary across locales/builds.
         local cpu_pct
-        cpu_pct=$(pidstat -p "$sb_pid" 1 1 2>/dev/null | awk 'NR==4 {print $8}' || echo "0")
+        cpu_pct=$(LC_ALL=C pidstat -p "$sb_pid" 1 1 2>/dev/null | awk -v target_pid="$sb_pid" '
+            /%CPU/ {
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "%CPU") {
+                        cpu_col = i
+                        break
+                    }
+                }
+                next
+            }
+            cpu_col {
+                for (i = 1; i <= NF; i++) {
+                    if ($i == target_pid) {
+                        print $cpu_col
+                        exit
+                    }
+                }
+            }
+        ' || echo "0")
         [[ -z "$cpu_pct" ]] && cpu_pct="0"
 
         # Process memory and threads from /proc

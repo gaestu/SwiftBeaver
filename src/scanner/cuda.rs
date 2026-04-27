@@ -173,7 +173,7 @@ impl SignatureScanner for CudaScanner {
 
         // Calculate grid dimensions
         let num_threads = data.len() as u32;
-        let num_blocks = (num_threads + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        let num_blocks = num_threads.div_ceil(BLOCK_SIZE);
         let launch_cfg = LaunchConfig {
             grid_dim: (num_blocks, 1, 1),
             block_dim: (BLOCK_SIZE, 1, 1),

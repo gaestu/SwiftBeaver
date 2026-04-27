@@ -91,14 +91,25 @@ fn run_pipeline_with_bytes(
     (stats, records)
 }
 
+/// Build a structurally-valid synthetic JPEG of `size` bytes.
+///
+/// Layout: SOI, APP0 (length=4, 2-byte payload), SOS (length=2, no payload),
+/// `size - 14` entropy bytes, EOI. `size` must be at least 14.
+fn make_synthetic_jpeg(size: usize) -> Vec<u8> {
+    assert!(size >= 14, "synthetic jpeg requires at least 14 bytes");
+    let mut jpeg = Vec::with_capacity(size);
+    jpeg.extend_from_slice(&[0xFF, 0xD8]); // SOI
+    jpeg.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00]); // APP0
+    jpeg.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02]); // SOS, no payload
+    jpeg.resize(size - 2, 0u8); // entropy
+    jpeg.extend_from_slice(&[0xFF, 0xD9]); // EOI
+    jpeg
+}
+
 #[test]
 fn file_spans_chunk_boundary() {
     let mut data = vec![0u8; 80];
-    let mut jpeg = vec![0u8; 20];
-    jpeg[0..4].copy_from_slice(&[0xFF, 0xD8, 0xFF, 0xE0]);
-    jpeg[4..9].copy_from_slice(b"JFIF\0");
-    let end = jpeg.len();
-    jpeg[end - 2..end].copy_from_slice(&[0xFF, 0xD9]);
+    let jpeg = make_synthetic_jpeg(20);
     insert_bytes(&mut data, 28, &jpeg);
 
     let (_stats, records) = run_pipeline_with_bytes(data, 32, 8, None);
@@ -115,10 +126,7 @@ fn file_spans_chunk_boundary() {
 #[test]
 fn file_at_exact_chunk_size() {
     let mut data = vec![0u8; 32];
-    let mut jpeg = vec![0u8; 32];
-    jpeg[0..4].copy_from_slice(&[0xFF, 0xD8, 0xFF, 0xE0]);
-    jpeg[4..9].copy_from_slice(b"JFIF\0");
-    jpeg[30..32].copy_from_slice(&[0xFF, 0xD9]);
+    let jpeg = make_synthetic_jpeg(32);
     insert_bytes(&mut data, 0, &jpeg);
 
     let (_stats, records) = run_pipeline_with_bytes(data, 32, 0, None);
@@ -140,10 +148,7 @@ fn empty_evidence_produces_no_hits() {
 #[test]
 fn max_files_stops_after_limit() {
     let mut data = vec![0u8; 128];
-    let mut jpeg = vec![0u8; 32];
-    jpeg[0..4].copy_from_slice(&[0xFF, 0xD8, 0xFF, 0xE0]);
-    jpeg[4..9].copy_from_slice(b"JFIF\0");
-    jpeg[30..32].copy_from_slice(&[0xFF, 0xD9]);
+    let jpeg = make_synthetic_jpeg(32);
     insert_bytes(&mut data, 0, &jpeg);
     insert_bytes(&mut data, 64, &jpeg);
 

@@ -105,6 +105,48 @@ Columns:
 
 Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be labeled `chrome`.
 
+## windows_artefacts.csv
+
+Columns:
+
+- `run_id`
+- `artefact_type`
+- `offset`
+- `size`
+- `target_path`
+- `working_dir`
+- `creation_time`
+- `access_time`
+- `write_time`
+- `file_size`
+- `volume_serial`
+- `local_base_path`
+- `network_path`
+- `executable_name`
+- `prefetch_hash`
+- `run_count`
+- `last_run_times_json`
+- `volume_paths_json`
+- `volume_paths_truncated`
+- `referenced_files_json`
+- `version`
+- `first_chunk`
+- `last_chunk`
+- `record_count_estimate`
+- `log_name`
+- `timestamp`
+- `hive_name`
+- `hive_type`
+- `root_key_name`
+- `tool_version`
+- `config_hash`
+- `evidence_path`
+- `evidence_sha256`
+
+Variant-specific fields are nullable. Array-like Prefetch fields are serialized as JSON strings.
+For `volume_paths_truncated`, `true` means the on-disk Prefetch header claimed more volume entries than SwiftBeaver decoded under the defensive cap; `false` means the emitted `volume_paths_json` reflects all decoded entries.
+For `referenced_files_json`, `null` means extraction is not implemented for that record yet; `"[]"` means extraction ran and found no references.
+
 ## run_summary.csv
 
 Columns:

@@ -35,7 +35,9 @@ enable_deduplication: false
 skip_duplicate_files: false
 fast_carve_worker_ratio: 0.25
 write_workers: 4
-carver_limits: {}
+carver_limits:
+  lnk:
+    max_concurrent: 2
 file_types:
   - id: "jpeg"
     extensions: ["jpg", "jpeg"]
@@ -343,6 +345,54 @@ file_types:
     max_size: 10485760
     min_size: 22
     validator: "ico"
+  - id: "lnk"
+    extensions: ["lnk"]
+    header_patterns:
+      - id: "lnk_header"
+        hex: "4C0000000114020000000000C000000000000046"
+    footer_patterns: []
+    max_size: 65536
+    min_size: 76
+    validator: "lnk"
+  - id: "prefetch"
+    extensions: ["pf"]
+    header_patterns:
+      - id: "prefetch_mam"
+        hex: "4D414D04"
+      - id: "prefetch_scca_17"
+        hex: "1100000053434341"
+      - id: "prefetch_scca_23"
+        hex: "1700000053434341"
+      - id: "prefetch_scca_26"
+        hex: "1A00000053434341"
+      - id: "prefetch_scca_30"
+        hex: "1E00000053434341"
+      - id: "prefetch_scca_31"
+        hex: "1F00000053434341"
+    footer_patterns: []
+    max_size: 10485760
+    min_size: 84
+    validator: "prefetch"
+  - id: "registry"
+    extensions: ["hve"]
+    header_patterns:
+      - id: "regf_header"
+        hex: "72656766"
+    footer_patterns: []
+    max_size: 536870912
+    min_size: 4096
+    validator: "registry"
+  - id: "evtx"
+    extensions: ["evtx"]
+    header_patterns:
+      - id: "evtx_header"
+        hex: "456C6646696C6500"
+    footer_patterns: []
+    max_size: 1073741824
+    # 4096 (file header) + 65536 (one chunk) — pre_validate requires the
+    # first ElfChnk\0 magic at +0x1000, so header-only carves are rejected.
+    min_size: 69632
+    validator: "evtx"
   - id: "elf"
     extensions: ["elf", "so"]
     header_patterns:

@@ -436,6 +436,46 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                     )),
                 );
             }
+            "lnk" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::windows::lnk::LnkCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "prefetch" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::windows::prefetch::PrefetchCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "registry" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::windows::registry::RegistryCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
+            "evtx" => {
+                handlers.insert(
+                    file_type.id.clone(),
+                    Box::new(carve::windows::evtx::EvtxCarveHandler::new(
+                        ext,
+                        file_type.min_size,
+                        file_type.max_size,
+                    )),
+                );
+            }
             _ => {
                 debug!(
                     "no carve handler for file_type={} validator={}",

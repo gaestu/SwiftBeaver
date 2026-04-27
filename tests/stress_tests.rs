@@ -18,10 +18,12 @@ fn env_u64(name: &str, default: u64) -> u64 {
 }
 
 fn minimal_jpeg() -> Vec<u8> {
-    let mut jpeg = vec![0u8; 32];
-    jpeg[0..4].copy_from_slice(&[0xFF, 0xD8, 0xFF, 0xE0]);
-    jpeg[4..9].copy_from_slice(b"JFIF\0");
-    jpeg[30..32].copy_from_slice(&[0xFF, 0xD9]);
+    let mut jpeg = Vec::with_capacity(32);
+    jpeg.extend_from_slice(&[0xFF, 0xD8]);
+    jpeg.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00]);
+    jpeg.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02]);
+    jpeg.resize(30, 0u8);
+    jpeg.extend_from_slice(&[0xFF, 0xD9]);
     jpeg
 }
 

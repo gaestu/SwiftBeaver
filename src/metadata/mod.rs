@@ -1,12 +1,14 @@
 pub mod csv;
 pub mod jsonl;
 pub mod parquet;
+pub mod windows;
 
 use std::path::Path;
 
 use thiserror::Error;
 
 use crate::carve::CarvedFile;
+use crate::carve::windows::WindowsArtefactRecord;
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::StringArtefact;
 
@@ -110,6 +112,7 @@ pub enum MetadataError {
 pub trait MetadataSink: Send + Sync {
     fn record_file(&self, file: &CarvedFile) -> Result<(), MetadataError>;
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError>;
+    fn record_windows_artefact(&self, record: &WindowsArtefactRecord) -> Result<(), MetadataError>;
     fn record_history(&self, record: &BrowserHistoryRecord) -> Result<(), MetadataError>;
     fn record_cookie(&self, record: &BrowserCookieRecord) -> Result<(), MetadataError>;
     fn record_download(&self, record: &BrowserDownloadRecord) -> Result<(), MetadataError>;
@@ -126,6 +129,12 @@ impl MetadataSink for DryRunSink {
         Ok(())
     }
     fn record_string(&self, _artefact: &StringArtefact) -> Result<(), MetadataError> {
+        Ok(())
+    }
+    fn record_windows_artefact(
+        &self,
+        _record: &WindowsArtefactRecord,
+    ) -> Result<(), MetadataError> {
         Ok(())
     }
     fn record_history(&self, _record: &BrowserHistoryRecord) -> Result<(), MetadataError> {

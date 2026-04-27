@@ -154,6 +154,47 @@ This document tracks sample files for the golden test image.
 
 ---
 
+## Windows Artefacts
+
+| Format | Status | File | Size | Notes |
+|--------|--------|------|------|-------|
+| lnk | ✅ Have | windows/lnk/*.lnk | various | Shell link files |
+| prefetch (v17 XP) | ✅ Have | windows/prefetch/NOTEPAD.EXE-ABCD1234.pf | 136 B | Uncompressed SCCA |
+| prefetch (v23 Vista/7) | ✅ Have | windows/prefetch/NOTEPAD.EXE-B1234567.pf | 216 B | Uncompressed SCCA |
+| prefetch (v26 Win8) | ✅ Have | windows/prefetch/NOTEPAD.EXE-C2345678.pf | 216 B | Uncompressed SCCA |
+| prefetch (v30 Win10 plain) | ✅ Have | windows/prefetch/NOTEPAD.EXE-D3456789.pf | 272 B | Uncompressed SCCA |
+| prefetch (v30 Win10 MAM) | ✅ Have | windows/prefetch/CMD.EXE-E4567890.pf | 536 B | MAM/LZXPRESS Huffman |
+| registry hive (NTUSER.DAT) | ✅ Have | windows/registry/NTUSER.DAT.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (SYSTEM) | ✅ Have | windows/registry/SYSTEM.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (SOFTWARE) | ✅ Have | windows/registry/SOFTWARE.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (SAM) | ✅ Have | windows/registry/SAM.synthetic | 8 KB | Synthetic regf+hbin, valid checksum |
+| registry hive (dirty) | ✅ Have | windows/registry/DIRTY.synthetic | 8 KB | Mismatched primary/secondary sequence |
+| registry hive (real BBI) | ✅ Have | windows/registry/BBI | 256 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real BCD-Template) | ✅ Have | windows/registry/BCD-Template | 28 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real BCD-Template.LOG) | ✅ Have | windows/registry/BCD-Template.LOG | 28 KB | Real .LOG file (regf magic) |
+| registry hive (real DEFAULT) | ✅ Have | windows/registry/DEFAULT | 768 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real ELAM) | ✅ Have | windows/registry/ELAM | 8 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real NTUSER.DAT) | ✅ Have | windows/registry/NTUSER.DAT | 1 MB | Real user hive, account=`sample_account` |
+| registry hive (real SAM) | ✅ Have | windows/registry/SAM | 64 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real SECURITY) | ✅ Have | windows/registry/SECURITY | 32 KB | Real Win10 hive, scrubbed VM |
+| registry hive (real SYSTEM) | ✅ Have | windows/registry/SYSTEM | 12 MB | Real Win10 hive, exercises large-hive paths |
+| registry hive (real userdiff) | ✅ Have | windows/registry/userdiff | 8 KB | Real Win10 hive, scrubbed VM |
+| evtx (synthetic, clean, 1 chunk) | ✅ Have | windows/evtx/Application.synthetic.evtx | 68 KB | Valid `ElfFile\0` header + 1 empty `ElfChnk\0`, CRC32s verified by python-evtx |
+| evtx (synthetic, clean, 2 chunks) | ✅ Have | windows/evtx/System.synthetic.evtx | 132 KB | Multi-chunk size-calculation fixture |
+| evtx (synthetic, dirty flag) | ✅ Have | windows/evtx/Security.synthetic.dirty.evtx | 68 KB | `file_flags=1` (dirty) for graceful-shutdown handling |
+| evtx (real Win11 System) | ✅ Have | windows/evtx/System.evtx | 1.07 MB | Real Win11 v3.2 hive, 7 chunks, 1047 records |
+| evtx (real Win11 Setup) | ✅ Have | windows/evtx/Setup.evtx | 68 KB | Minimal real fixture, 1 chunk, 3 records |
+| evtx (real Win11 HardwareEvents) | ✅ Have | windows/evtx/HardwareEvents.evtx | 68 KB | Empty/header-only edge case, 0 records |
+| evtx (real Win11 PowerShell Operational) | ✅ Have | windows/evtx/Microsoft-Windows-PowerShell%4Operational.evtx | 68 KB | IR-relevant, 6 records |
+| evtx (real Win11 TaskScheduler Maintenance) | ✅ Have | windows/evtx/Microsoft-Windows-TaskScheduler%4Maintenance.evtx | 68 KB | IR-relevant, 9 records |
+| evtx (real Win11 BITS Client) | ✅ Have | windows/evtx/Microsoft-Windows-Bits-Client%4Operational.evtx | 68 KB | Dense single chunk, 75 records |
+| evtx (real Win11 WindowsUpdateClient) | ✅ Have | windows/evtx/Microsoft-Windows-WindowsUpdateClient%4Operational.evtx | 68 KB | Common forensic, 14 records |
+| evtx (real Win11 WMI-Activity) | ✅ Have | windows/evtx/Microsoft-Windows-WMI-Activity%4Operational.evtx | 1.0 MB | Multi-chunk dense, 6 chunks, 408 records |
+| evtx (real Win11 Security) | ❌ Missing | - | - | Skipped: contains logon usernames/SIDs/IPs — add only after PII scrub |
+| evtx (real Win11 Application) | ❌ Missing | - | - | Skipped: 2 MB, redundant with System.evtx |
+
+---
+
 ## Browser Artefacts
 
 | Format | Status | File | Size | Notes |
@@ -187,6 +228,11 @@ This document tracks sample files for the golden test image.
 
 ### Recently Generated ✅
 
+- `windows/prefetch/NOTEPAD.EXE-ABCD1234.pf` — v17 (XP), uncompressed SCCA, 136 bytes
+- `windows/prefetch/NOTEPAD.EXE-B1234567.pf` — v23 (Vista/7), uncompressed SCCA, 216 bytes
+- `windows/prefetch/NOTEPAD.EXE-C2345678.pf` — v26 (Win8), uncompressed SCCA, 216 bytes
+- `windows/prefetch/NOTEPAD.EXE-D3456789.pf` — v30 (Win10), uncompressed SCCA, 272 bytes
+- `windows/prefetch/CMD.EXE-E4567890.pf` — v30 (Win10), MAM/LZXPRESS Huffman compressed, 536 bytes
 - `nested.zip` - ZIP containing other files for nested carving
 - `utf16_le.txt` / `utf16_be.txt` - UTF-16 string scan coverage
 - `utf8_multilingual.txt` - Multi-language UTF-8 text

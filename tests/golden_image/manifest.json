@@ -1,6 +1,6 @@
 {
   "description": "Golden test image - ALL sample files for SwiftBeaver testing",
-  "generated": "2026-04-20T07:15:58Z",
+  "generated": "2026-04-26T19:06:36Z",
   "alignment": 4096,
   "sample_dir": "samples",
   "files": [
@@ -933,12 +933,532 @@
       "size": 1604429,
       "sha256": "79f392cdb87d0ba22807717c3613456862e264f086c7d0f50b59c7cc4e83c7fc"
     }
+,
+    {
+      "path": "windows/evtx/Application.synthetic.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 26488832,
+      "offset_hex": "0x1943000",
+      "size": 69632,
+      "sha256": "84b819196ff5d2b89ceec8a8489a5b840fee704d7c2cd77ea39c4e982e0403cd"
+    }
+,
+    {
+      "path": "windows/evtx/HardwareEvents.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 26558464,
+      "offset_hex": "0x1954000",
+      "size": 69632,
+      "sha256": "f5f9e97a6b1ec8d46a9bd5b9d4ccae96521b85517b0337b248814d2e974a968b"
+    }
+,
+    {
+      "path": "windows/evtx/Microsoft-Windows-Bits-Client%4Operational.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 26628096,
+      "offset_hex": "0x1965000",
+      "size": 69632,
+      "sha256": "39e83c6cb26dd9ff099ec648b037e167656f7c6716e189af242f2632b9884658"
+    }
+,
+    {
+      "path": "windows/evtx/Microsoft-Windows-PowerShell%4Operational.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 26697728,
+      "offset_hex": "0x1976000",
+      "size": 69632,
+      "sha256": "76bef8196bbe0609e6ce83bd7d0db3e665ed950a9c6a7bf077f6c0e2d7410ecd"
+    }
+,
+    {
+      "path": "windows/evtx/Microsoft-Windows-TaskScheduler%4Maintenance.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 26767360,
+      "offset_hex": "0x1987000",
+      "size": 69632,
+      "sha256": "cecd0645a5d109752ae2cceadeafb6276c19922203b0d54869377819f19d2d1f"
+    }
+,
+    {
+      "path": "windows/evtx/Microsoft-Windows-WMI-Activity%4Operational.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 26836992,
+      "offset_hex": "0x1998000",
+      "size": 1052672,
+      "sha256": "538ad9a831e7bb5421ef8a592952f343c93bd4c56383e54e74b18dcf8720f082"
+    }
+,
+    {
+      "path": "windows/evtx/Microsoft-Windows-WindowsUpdateClient%4Operational.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 27889664,
+      "offset_hex": "0x1A99000",
+      "size": 69632,
+      "sha256": "039462fb4a1a5589972fa847a6b3020953a37687c3f2f0abb9181f8695a374f0"
+    }
+,
+    {
+      "path": "windows/evtx/Security.synthetic.dirty.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 27959296,
+      "offset_hex": "0x1AAA000",
+      "size": 69632,
+      "sha256": "6679b0b7b83ff0097604226389fbf0eb45362a817597071613e4d2b4d4b2999d"
+    }
+,
+    {
+      "path": "windows/evtx/Setup.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 28028928,
+      "offset_hex": "0x1ABB000",
+      "size": 69632,
+      "sha256": "d038bb39bab85c4b6ce4c2179b32f574832dc4d4756acac1c9509a23eefb1320"
+    }
+,
+    {
+      "path": "windows/evtx/System.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 28098560,
+      "offset_hex": "0x1ACC000",
+      "size": 1118208,
+      "sha256": "5f257b301c232a890d52e589cd0e747484ffc78c4b31f5ff8af6db2ea7f17683"
+    }
+,
+    {
+      "path": "windows/evtx/System.synthetic.evtx",
+      "category": "windows",
+      "extension": "evtx",
+      "offset": 29216768,
+      "offset_hex": "0x1BDD000",
+      "size": 135168,
+      "sha256": "008381d1049587f64cbe534ff7fce6631170e6280fcb6545374ad5df3009adc8"
+    }
+,
+    {
+      "path": "windows/lnk/File Explorer.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29351936,
+      "offset_hex": "0x1BFE000",
+      "size": 407,
+      "sha256": "cf116b33831de9f80847abdb2a0d92ab3d3f956a8e209ec95d35d986eea8c7b5"
+    }
+,
+    {
+      "path": "windows/lnk/Shows Desktop.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29356032,
+      "offset_hex": "0x1BFF000",
+      "size": 352,
+      "sha256": "78be9c61505cd98110a9b9ead83fac552d5b89fc549988fc9050cdaffb66f281"
+    }
+,
+    {
+      "path": "windows/lnk/Synthetic Example.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29360128,
+      "offset_hex": "0x1C00000",
+      "size": 626,
+      "sha256": "d2ad116d8a32a4f5d3eef928921782449f447e6af8cb5d7adfce64f7cbd9eb9c"
+    }
+,
+    {
+      "path": "windows/lnk/YouTube Music.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29364224,
+      "offset_hex": "0x1C01000",
+      "size": 626,
+      "sha256": "2289724576b817cc49a1d02123a8b0ee37a1bef1bdd0b10b03410d0e1ad9afd8"
+    }
+,
+    {
+      "path": "windows/lnk/basic.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29368320,
+      "offset_hex": "0x1C02000",
+      "size": 905,
+      "sha256": "abb1297be0e16ba3bf63271f60699c24f3866652c3a745e1c51b46c84bfedba2"
+    }
+,
+    {
+      "path": "windows/lnk/folder_target.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29372416,
+      "offset_hex": "0x1C03000",
+      "size": 771,
+      "sha256": "2f949373fbe93476ff6c0d19666fc08f2b340f5324c2e80a5c5e95585ac12923"
+    }
+,
+    {
+      "path": "windows/lnk/ftp_target.url",
+      "category": "windows",
+      "extension": "url",
+      "offset": 29376512,
+      "offset_hex": "0x1C04000",
+      "size": 51,
+      "sha256": "e02e7ed1bcbd99e93d88200e0d69e97c5246ab3d9b37b236cbdf071df767472d"
+    }
+,
+    {
+      "path": "windows/lnk/hidden_window.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29380608,
+      "offset_hex": "0x1C05000",
+      "size": 901,
+      "sha256": "23031d9949e3d7f24c0de261b82e7acb8591388fa618c4e680e163abf6fe3e76"
+    }
+,
+    {
+      "path": "windows/lnk/http_target.url",
+      "category": "windows",
+      "extension": "url",
+      "offset": 29384704,
+      "offset_hex": "0x1C06000",
+      "size": 52,
+      "sha256": "3d23a95cf59ed04c99e9699c83372a22e2f77ce4fce53abd4886edc43755a4e1"
+    }
+,
+    {
+      "path": "windows/lnk/mapped_drive.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29388800,
+      "offset_hex": "0x1C07000",
+      "size": 317,
+      "sha256": "6732236265ba0160b9ef6ec18acef9f39273d7a1921eb38f11deccae9ba4e354"
+    }
+,
+    {
+      "path": "windows/lnk/real_unc_file.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29392896,
+      "offset_hex": "0x1C08000",
+      "size": 1438,
+      "sha256": "4028825907add6f4591b6e47be5bb03accd6192ec2c1cda4803e4b3e95c6342a"
+    }
+,
+    {
+      "path": "windows/lnk/real_unc_folder.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29396992,
+      "offset_hex": "0x1C09000",
+      "size": 1426,
+      "sha256": "f6e07eed800234a6b6ef1d6b2b443db7eec36fc51bee26c6cf74cea270362cca"
+    }
+,
+    {
+      "path": "windows/lnk/real_unc_with_workdir.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29401088,
+      "offset_hex": "0x1C0A000",
+      "size": 1520,
+      "sha256": "60f433ca762c2f8c1143aca7673a853347432233730c4439f7ffd7ca96eee06a"
+    }
+,
+    {
+      "path": "windows/lnk/truncated_real_unc_file.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29405184,
+      "offset_hex": "0x1C0B000",
+      "size": 160,
+      "sha256": "34ecb5071df38d9ed49f9bbf3398a6dfa01a9d78853c6e30c2097edac74cd6d4"
+    }
+,
+    {
+      "path": "windows/lnk/unc_exe.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29409280,
+      "offset_hex": "0x1C0C000",
+      "size": 1290,
+      "sha256": "fa407476a4eeee39d360cb231b307291a671b6824b5a9006b0824efdc5a88f92"
+    }
+,
+    {
+      "path": "windows/lnk/unc_share.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29413376,
+      "offset_hex": "0x1C0D000",
+      "size": 1276,
+      "sha256": "b30eb5e84887f0d4cad6810e56c34f90fa3129fc87ab5fc69fd5d50f775c4f73"
+    }
+,
+    {
+      "path": "windows/lnk/unc_target.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29417472,
+      "offset_hex": "0x1C0E000",
+      "size": 1244,
+      "sha256": "e41f8d7620066eefcf9d37949fd75f99e37da8bd143d4a82d1dab85b51370800"
+    }
+,
+    {
+      "path": "windows/lnk/with_args.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29421568,
+      "offset_hex": "0x1C0F000",
+      "size": 909,
+      "sha256": "0ad9a8d3d7b307a945629e65f73e6ba3d5d53e4cd4be972600c197a32f2f1305"
+    }
+,
+    {
+      "path": "windows/lnk/with_icon.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29425664,
+      "offset_hex": "0x1C10000",
+      "size": 1518,
+      "sha256": "d9c64d20b864c11369b6f74403dadf1d9b0063ca38b4d9e2bff4e9803c021a09"
+    }
+,
+    {
+      "path": "windows/lnk/with_meta.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29429760,
+      "offset_hex": "0x1C11000",
+      "size": 920,
+      "sha256": "30b14c81885529d2e6760b8c5626a5f44f0d5944097e961b19d3371a8c105208"
+    }
+,
+    {
+      "path": "windows/lnk/with_workdir.lnk",
+      "category": "windows",
+      "extension": "lnk",
+      "offset": 29433856,
+      "offset_hex": "0x1C12000",
+      "size": 937,
+      "sha256": "25c4241f956acb3680143b6e810ca73b51137dab7135ab7ccb1230c47464fb4d"
+    }
+,
+    {
+      "path": "windows/prefetch/CMD.EXE-E4567890.pf",
+      "category": "windows",
+      "extension": "pf",
+      "offset": 29437952,
+      "offset_hex": "0x1C13000",
+      "size": 536,
+      "sha256": "5d7104bbf1f2e64d82bfd7b208e01f49a322b3390bb80a286b7759c1cba4a21a"
+    }
+,
+    {
+      "path": "windows/prefetch/NOTEPAD.EXE-ABCD1234.pf",
+      "category": "windows",
+      "extension": "pf",
+      "offset": 29442048,
+      "offset_hex": "0x1C14000",
+      "size": 156,
+      "sha256": "e96580af4ae71fbdf796a8dd961acba2c8406d0dba8c5159938c49f56b726fc5"
+    }
+,
+    {
+      "path": "windows/prefetch/NOTEPAD.EXE-B1234567.pf",
+      "category": "windows",
+      "extension": "pf",
+      "offset": 29446144,
+      "offset_hex": "0x1C15000",
+      "size": 216,
+      "sha256": "137c96836096d330d42e617d75aa177bae6c14f270055e42b12ee8f6805a67e4"
+    }
+,
+    {
+      "path": "windows/prefetch/NOTEPAD.EXE-C2345678.pf",
+      "category": "windows",
+      "extension": "pf",
+      "offset": 29450240,
+      "offset_hex": "0x1C16000",
+      "size": 216,
+      "sha256": "0fb181253032e839107b9b031883e9dd26e47d4f7b2ef522b7c9c53fb1bc3297"
+    }
+,
+    {
+      "path": "windows/prefetch/NOTEPAD.EXE-D3456789.pf",
+      "category": "windows",
+      "extension": "pf",
+      "offset": 29454336,
+      "offset_hex": "0x1C17000",
+      "size": 272,
+      "sha256": "b8153c2cbb15ab2c34b41ff2811c5a7c9487d3e91311902ed4e66fcef7cdf7db"
+    }
+,
+    {
+      "path": "windows/registry/BBI",
+      "category": "windows",
+      "extension": "",
+      "offset": 29458432,
+      "offset_hex": "0x1C18000",
+      "size": 262144,
+      "sha256": "074c8d432b0b46e3cf4e70a8be52fd05aa7edf4f0a30dfe0503eba0955d41310"
+    }
+,
+    {
+      "path": "windows/registry/BCD-Template",
+      "category": "windows",
+      "extension": "",
+      "offset": 29720576,
+      "offset_hex": "0x1C58000",
+      "size": 28672,
+      "sha256": "98fa1ff3608ffc98c9973c57b58018f72b390b052d01876cbb837ced96fda359"
+    }
+,
+    {
+      "path": "windows/registry/BCD-Template.LOG",
+      "category": "windows",
+      "extension": "log",
+      "offset": 29749248,
+      "offset_hex": "0x1C5F000",
+      "size": 28672,
+      "sha256": "93ec26b4f6055ea3c516f0e157168a94b9340280c81976ca5332b882982fd171"
+    }
+,
+    {
+      "path": "windows/registry/DEFAULT",
+      "category": "windows",
+      "extension": "",
+      "offset": 29777920,
+      "offset_hex": "0x1C66000",
+      "size": 786432,
+      "sha256": "68f2f4bd09514870999d83c1be956855d4f290678d35d5e096c7a6a965a4fda1"
+    }
+,
+    {
+      "path": "windows/registry/DIRTY.synthetic",
+      "category": "windows",
+      "extension": "synthetic",
+      "offset": 30564352,
+      "offset_hex": "0x1D26000",
+      "size": 8192,
+      "sha256": "58f94eccbbe38814f5dbc3705459a760ea99264610d8d5ac00de22e3a173ac51"
+    }
+,
+    {
+      "path": "windows/registry/ELAM",
+      "category": "windows",
+      "extension": "",
+      "offset": 30572544,
+      "offset_hex": "0x1D28000",
+      "size": 8192,
+      "sha256": "57221e27a0fe2bef3e642dacc0d6bac1c4f559034b04d37ce53c77b5ec51c05a"
+    }
+,
+    {
+      "path": "windows/registry/NTUSER.DAT",
+      "category": "windows",
+      "extension": "dat",
+      "offset": 30580736,
+      "offset_hex": "0x1D2A000",
+      "size": 1048576,
+      "sha256": "6805e6e60fc126fd92ff44fc04c7a5b69e06ca48fffdfee01ac137b179c250da"
+    }
+,
+    {
+      "path": "windows/registry/NTUSER.DAT.synthetic",
+      "category": "windows",
+      "extension": "synthetic",
+      "offset": 31629312,
+      "offset_hex": "0x1E2A000",
+      "size": 8192,
+      "sha256": "745b6dc761fb7ed87694a357e266b257e6cd0a15997f4e30062115eb0bdcf7dd"
+    }
+,
+    {
+      "path": "windows/registry/SAM",
+      "category": "windows",
+      "extension": "",
+      "offset": 31637504,
+      "offset_hex": "0x1E2C000",
+      "size": 65536,
+      "sha256": "d0780596807cc18434b76f003023256a8d793e713c1276552122758590926cf0"
+    }
+,
+    {
+      "path": "windows/registry/SAM.synthetic",
+      "category": "windows",
+      "extension": "synthetic",
+      "offset": 31703040,
+      "offset_hex": "0x1E3C000",
+      "size": 8192,
+      "sha256": "46bbb84de51794142a0c1597122cb958b7c10a4691fef6630d90beed7be7d148"
+    }
+,
+    {
+      "path": "windows/registry/SECURITY",
+      "category": "windows",
+      "extension": "",
+      "offset": 31711232,
+      "offset_hex": "0x1E3E000",
+      "size": 32768,
+      "sha256": "4cf32416c9eabb72492f40476f1c2fccabeed23a8e2857b579dedcaef946b12b"
+    }
+,
+    {
+      "path": "windows/registry/SOFTWARE.synthetic",
+      "category": "windows",
+      "extension": "synthetic",
+      "offset": 31744000,
+      "offset_hex": "0x1E46000",
+      "size": 8192,
+      "sha256": "c13426d5d9c932e783f422a27e7a96c0fd7b13fdc69abf16452306719ccd7d94"
+    }
+,
+    {
+      "path": "windows/registry/SYSTEM",
+      "category": "windows",
+      "extension": "",
+      "offset": 31752192,
+      "offset_hex": "0x1E48000",
+      "size": 12845056,
+      "sha256": "150abd13b652dc71ba521b4b6ced358494bc7173981c78e006cd849e500ae411"
+    }
+,
+    {
+      "path": "windows/registry/SYSTEM.synthetic",
+      "category": "windows",
+      "extension": "synthetic",
+      "offset": 44597248,
+      "offset_hex": "0x2A88000",
+      "size": 8192,
+      "sha256": "7bf1c648c3f2c4fb29a977fd906d0c131429879879428c0c97715759d55ebbb7"
+    }
+,
+    {
+      "path": "windows/registry/userdiff",
+      "category": "windows",
+      "extension": "",
+      "offset": 44605440,
+      "offset_hex": "0x2A8A000",
+      "size": 8192,
+      "sha256": "e0dc75cc5a0d003f35146d82ba7b44eced5805a932ad95cbd555693488e53098"
+    }
 
   ],
   "summary": {
-    "total_files": 93,
-    "total_data_size": 26279501,
-    "image_size": 26488832,
+    "total_files": 145,
+    "total_data_size": 44316847,
+    "image_size": 44613632,
     "categories": {
       "archives": {"files": 11, "bytes": 2056860},
       "audio": {"files": 4, "bytes": 3141125},
@@ -949,8 +1469,9 @@
       "images": {"files": 22, "bytes": 7865571},
       "media_tiny": {"files": 4, "bytes": 20346},
       "other": {"files": 17, "bytes": 1266257},
-      "video": {"files": 7, "bytes": 10378868}
+      "video": {"files": 7, "bytes": 10378868},
+      "windows": {"files": 52, "bytes": 18037346}
     }
   },
-  "raw_sha256": "4d9527643e9fd1762a83bbe5b18b4b084c17b3410cfb38de2d6d0c8b1b6d4d03"
+  "raw_sha256": "573f8857010c44d6610019b65b621aca441fc93f8fbcf089944306fc8353f09e"
 }

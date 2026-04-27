@@ -1,6 +1,6 @@
 # Carver Documentation Index
 
-This directory contains detailed documentation for all 35 file format carvers implemented in SwiftBeaver.
+This directory contains detailed documentation for the file format carvers implemented in SwiftBeaver.
 
 ## Documentation Structure
 
@@ -30,7 +30,7 @@ Each carver document includes:
 | [TIFF](tiff.md) | ✅ Complete | Production | Tagged Image File Format (IFD-based) |
 | [WEBP](webp.md) | ✅ Complete | Production | WebP images (RIFF container) |
 | [HEIC](heic.md) | ✅ Complete | Production | HEIC/HEIF images (ISOBMFF container) |
-| ICO | ⏳ TBD | Production | Windows Icon Format |
+| [ICO](ico.md) | ✅ Complete | Production | Windows Icon / Cursor (ICONDIR + ICONDIRENTRY) |
 
 ## Archive Format Carvers
 
@@ -39,19 +39,19 @@ Each carver document includes:
 | [ZIP](zip.md) | ✅ Complete | Production | ZIP archives (PK\\x03\\x04 → EOCD) |
 | [RAR](rar.md) | ✅ Complete | Production | RAR 4.x and RAR 5.x archives |
 | [7Z](7z.md) | ✅ Complete | Production | 7-Zip archives (LZMA/LZMA2) |
-| TAR | ⏳ TBD | Production | TAR archives (ustar format) |
-| GZIP | ⏳ TBD | Production | GZIP compressed files |
-| BZIP2 | ⏳ TBD | Production | BZip2 compressed files |
-| XZ | ⏳ TBD | Production | XZ/LZMA compressed files |
+| [TAR](tar.md) | ✅ Complete | Production | TAR archives (ustar format) |
+| [GZIP](gzip.md) | ✅ Complete | Production | GZIP compressed files |
+| [BZIP2](bzip2.md) | ✅ Complete | Production | BZip2 compressed files |
+| [XZ](xz.md) | ✅ Complete | Production | XZ/LZMA2 compressed files |
 
 ## Document Format Carvers
 
 | Carver | Documentation | Status | Description |
 |--------|--------------|--------|-------------|
 | [PDF](pdf.md) | ✅ Complete | Production | Portable Document Format |
-| OLE | ⏳ TBD | Production | OLE/CFB (DOC, XLS, PPT, MSG) |
-| RTF | ⏳ TBD | Production | Rich Text Format |
-| EML | [eml.md](eml.md) | Production | Email message format |
+| [OLE](ole.md) | ✅ Complete | Production | OLE/CFB (DOC, XLS, PPT, MSG) |
+| [RTF](rtf.md) | ✅ Complete | Production | Rich Text Format |
+| [EML](eml.md) | ✅ Complete | Production | Email message format (RFC 822 / MIME / mbox) |
 
 ## Multimedia Carvers
 
@@ -60,11 +60,11 @@ Each carver document includes:
 | [MP4](mp4.md) | ✅ Complete | Production | MPEG-4 video (box-based) |
 | [MP3](mp3.md) | ✅ Complete | Production | MPEG Audio Layer III |
 | [WAV](wav.md) | ✅ Complete | Production | Waveform Audio (RIFF) |
-| MOV | ⏳ TBD | Production | QuickTime video (box-based) |
-| AVI | ⏳ TBD | Production | Audio Video Interleave (RIFF) |
-| WMV | ⏳ TBD | Production | Windows Media Video (ASF) |
-| WEBM | ⏳ TBD | Production | WebM video (Matroska) |
-| OGG | ⏳ TBD | Production | Ogg Vorbis/Opus audio |
+| [MOV](mov.md) | ✅ Complete | Production | QuickTime video (box-based) |
+| [AVI](avi.md) | ✅ Complete | Production | Audio Video Interleave (RIFF) |
+| [WMV](wmv.md) | ✅ Complete | Production | Windows Media Video / WMA / ASF (ASF container) |
+| [WEBM](webm.md) | ✅ Complete | Production | WebM video (Matroska) |
+| [OGG](ogg.md) | ✅ Complete | Production | Ogg Vorbis/Opus/FLAC/Theora/Speex (page-based) |
 
 ## Database & Special Carvers
 
@@ -73,9 +73,13 @@ Each carver document includes:
 | [SQLite](sqlite.md) | ✅ Complete | Production | SQLite3 database files |
 | [SQLite WAL](sqlite_wal.md) | ✅ Complete | Production | SQLite Write-Ahead Log files |
 | [SQLite Page](sqlite_page.md) | ✅ Complete | Production | SQLite leaf page fragments |
-| ELF | ⏳ TBD | Production | Executable and Linkable Format |
-| MOBI | ⏳ TBD | Production | Mobipocket ebook format |
-| FB2 | ⏳ TBD | Production | FictionBook 2.0 ebook format |
+| [LNK](lnk.md) | ✅ Complete | Production | Windows Shell Link shortcut files |
+| [Prefetch](prefetch.md) | ✅ Complete | Production | Windows Prefetch execution trace files |
+| [Registry](registry.md) | ✅ Complete | Production | Windows Registry hive files (`regf`) |
+| [EVTX](evtx.md) | ✅ Complete | Production | Windows Event Log files (`ElfFile\0`, Vista+) |
+| [ELF](elf.md) | ✅ Complete | Production | Executable and Linkable Format |
+| [MOBI](mobi.md) | ✅ Complete | Production | Mobipocket ebook format |
+| [FB2](fb2.md) | ✅ Complete | Production | FictionBook 2.0 ebook format |
 | [LRF](lrf.md) | ✅ Complete | Production | Sony Portable Reader format |
 
 ## Quick Reference by Signature
@@ -113,7 +117,10 @@ FF FB / FF FA          → MP3 (MPEG frames)
 53 51 4C 69 74 65     → SQLite
 37 7F 06 82 / 83      → SQLite WAL
 0D / 0A               → SQLite page fragment candidates
+4C 00 00 00 01 14 02 00 ... 00 46  → LNK
 7F 45 4C 46           → ELF
+72 65 67 66           → Windows Registry hive (regf)
+45 6C 66 46 69 6C 65 00  → EVTX (Windows Event Log, ElfFile\0)
 ```
 
 ## Testing Coverage
@@ -205,20 +212,4 @@ All carvers follow these principles:
 5. **Metadata Preservation**: Retain all embedded metadata (EXIF, ID3, etc.)
 6. **Size Limits**: Respect min_size and max_size to prevent resource exhaustion
 
-## Future Documentation
 
-The following carvers are production-ready but documentation is pending:
-
-- **GZIP, BZIP2, XZ**: Compression formats (metadata-driven)
-- **TAR**: Archive format (block-based)
-- **ICO**: Icon format (directory structure)
-- **OLE**: Office documents (FAT-based sectors)
-- **RTF**: Rich text (marker-based)
-- **EML**: Email format (marker-based)
-- **MOV**: QuickTime video (box-based, similar to MP4)
-- **AVI, WMV, WEBM**: Video formats (RIFF/ASF/Matroska)
-- **OGG**: Audio format (page-based)
-- **ELF**: Executable format (section-based)
-- **MOBI, FB2, LRF**: Ebook formats (various structures)
-
-For implementation details, consult source code in [src/carve/](../../src/carve/).
