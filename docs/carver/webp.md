@@ -6,11 +6,16 @@ The WEBP carver extracts WebP image files by parsing the RIFF container structur
 
 ## Signature Detection
 
-**Header Pattern**: `RIFF` followed by `WEBP` at offset +8
+**Scanner Pattern**: `RIFF`
 
-Scanner detects:
+The raw signature scanner detects:
+
 - Bytes 0-3: `RIFF` (ASCII: 0x52 0x49 0x46 0x46)
+
+WebP pre-validation then requires:
+
 - Bytes 8-11: `WEBP` (ASCII: 0x57 0x45 0x42 0x50)
+- Bytes 12-15: one of `VP8 `, `VP8L`, or `VP8X`
 
 ## Carving Algorithm
 
@@ -35,30 +40,55 @@ let total_size = size + 8;  // RIFF size field doesn't include first 8 bytes
 ### 3. Data Streaming
 
 ```rust
-let target_size = total_size.min(max_size);
-let remaining = target_size - 12;  // Already read 12-byte header
-stream.read_exact(remaining as usize)?;
+if max_size > 0 && total_size > max_size {
+    reject_candidate();
+}
+
+walk_and_stream_webp_chunks(total_size)?;
 ```
+
+The outer RIFF size is authoritative. SwiftBeaver does not extend a WebP carve to `max_size` when the RIFF size is corrupt or implausible.
+The chunk walker streams each chunk header and payload while validating RIFF chunk bounds.
+
+### 4. Chunk Walk
+
+Complete WebP containers are walked chunk by chunk inside the declared RIFF extent. The first chunk must be a primary image chunk:
+
+- `VP8 `
+- `VP8L`
+- `VP8X`
+
+Common subsequent chunks include:
+
+- `VP8 `, `VP8L`, `VP8X`
+- `ALPH`
+- `ANIM`, `ANMF`
+- `EXIF`, `XMP `, `ICCP`
+
+Unknown non-primary chunks are preserved as long as their declared size fits within the outer RIFF container after applying RIFF word padding for odd-sized payloads.
 
 ## Validation
 
 - **Validated**: `true` if:
   - "RIFF" signature matches
   - "WEBP" form type matches
-  - Size field is reasonable (>= 4)
+  - The RIFF size is at least 20 bytes total and does not exceed the configured `max_size`
+  - The first chunk is `VP8 `, `VP8L`, or `VP8X`
+  - All walked chunks fit inside the declared RIFF container
 - **Truncated**: `true` if:
-  - max_size reached before complete file
-  - EOF reached before complete file
+  - EOF is reached before the complete declared RIFF extent
 - **Invalid**: Removed if:
   - "RIFF" signature mismatch
   - "WEBP" form type mismatch
-  - Size field < 4 bytes
+  - First chunk fourcc is not a primary WebP chunk
+  - RIFF size is too small or exceeds `max_size`
+  - A chunk exceeds the declared RIFF container
 
 ## Size Constraints
 
-- **Default min_size**: 100 bytes
+- **Default min_size**: 20 bytes
 - **Default max_size**: 100 MB
-- Minimum viable WebP: 30 bytes (header + VP8 bitstream header + minimal data)
+- Minimum structurally accepted WebP: 20 bytes (RIFF header + one zero-length primary chunk header)
 - Files below min_size are discarded
 
 ## Hash Computation
@@ -88,14 +118,14 @@ Golden image framework with various WebP types:
    - All WebPs found at expected offsets
    - Sizes match manifest (total_size = RIFF size + 8)
    - All marked as validated
-   - Files open in browsers/viewers
+  - Deterministic malformed RIFF and chunk-layout cases are rejected or marked truncated as expected
 
 ## Edge Cases Handled
 
 1. **Animated WebP**: Contains multiple VP8/VP8L frames (ANMF chunks)
 2. **Extended format**: VP8X chunk enables alpha channel and animation
 3. **Metadata chunks**: EXIF, XMP, ICCP chunks preserved
-4. **Size field edge case**: Handles size=0 (though invalid per spec)
+4. **Truncated evidence**: If the declared RIFF extent is larger than the available evidence, remaining bytes are carved and the metadata row is marked `validated=false`, `truncated=true`
 5. **Chunk alignment**: RIFF chunks are word-aligned (2-byte boundary)
 
 ## Performance Characteristics
@@ -118,10 +148,10 @@ Golden image framework with various WebP types:
 ```
 [RIFF Header: 12 bytes]
   "RIFF"
-  Size: 12340 bytes
+  Size: 12344 bytes
   "WEBP"
 
-[VP8 Chunk: 12344 bytes total]
+[VP8 Chunk: 12340 bytes total]
   "VP8 " (note space)
   Size: 12332
   [VP8 bitstream data]
@@ -198,10 +228,10 @@ Golden image framework with various WebP types:
 
 ## Known Limitations
 
-1. **No chunk validation**: Doesn't verify chunk CRCs or structure
-2. **No bitstream parsing**: VP8/VP8L data not validated
-3. **Assumes contiguous**: Doesn't handle malformed chunk layout
-4. **Size field trusted**: Relies on embedded size (could be incorrect)
+1. **No bitstream decoding**: VP8/VP8L payload data is copied as-is and not decoded
+2. **No payload semantic validation**: Chunk payload contents are not interpreted beyond RIFF chunk bounds and the required primary first chunk
+3. **Contiguous carving only**: Fragmented WebP containers cannot be reconstructed
+4. **RIFF extent required**: The outer RIFF size is authoritative; corrupt oversize declarations are rejected rather than scanned forward
 
 ## Related Carvers
 
