@@ -17,7 +17,7 @@ First read `AGENTS.md` and follow it strictly.
    - existing patterns to follow
    - tests that need updates
 
-3. If the issue is non-trivial, create a short implementation plan before editing code.
+3. Create a implementation plan before editing code and post that as a comment to the GitHub issue.
 
 4. Implement conservatively:
    - preserve backward compatibility unless the issue explicitly requires otherwise
