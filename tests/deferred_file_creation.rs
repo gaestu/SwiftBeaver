@@ -53,13 +53,15 @@ fn crc32_chunk(chunk_type: &[u8], chunk_data: &[u8]) -> u32 {
     hasher.finalize()
 }
 
-/// Create a minimal valid JPEG file in memory.
+/// Create a minimal structurally-valid JPEG file in memory.
 fn make_jpeg() -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(&[0xFF, 0xD8, 0xFF, 0xE0]); // SOI + APP0
-    data.extend_from_slice(&[0x00, 0x10]); // segment length = 16
+    data.extend_from_slice(&[0x00, 0x10]); // APP0 segment length = 16
     data.extend_from_slice(b"JFIF\0");
     data.extend_from_slice(&[0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00]);
+    data.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02]); // SOS, length=2 (no payload)
+    data.extend_from_slice(&[0x10, 0x20, 0x30, 0x40]); // entropy
     data.extend_from_slice(&[0xFF, 0xD9]); // EOI
     data
 }

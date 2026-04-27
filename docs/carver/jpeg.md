@@ -12,34 +12,64 @@ The JPEG carver triggers when the scanner identifies a `FF D8` byte sequence. Al
 
 ## Carving Algorithm
 
-The carver uses a streaming approach with a simple state machine:
+The carver uses a streaming, two-phase JPEG marker walker. A naive
+"first `FF D9` wins" search is incorrect: `FF D9` legitimately appears
+inside `APP1` Exif thumbnails, `APP2` MPF embedded JPEGs, and other
+length-prefixed segments, which would cause the file to be truncated at
+the embedded thumbnail's EOI rather than the real one.
 
-1. **Signature validation**: Verifies the hit matches `FF D8` exactly
-2. **Streaming search**: Reads data chunk-by-chunk (64KB blocks) looking for the EOI marker
-3. **EOI detection**: Uses a 2-byte sliding window to detect `FF D9` byte-by-byte
-   - Maintains `prev` byte from previous iteration
-   - For each byte `cur`:
-     - Check if `prev == 0xFF && cur == 0xD9`
-     - If match: mark as validated and break
-     - Update `prev = cur`
-4. **Truncation handling**: 
-   - If `max_size` is reached before EOI → marks as truncated, keeps file
-   - If EOF is reached before EOI → marks as truncated, keeps file
+### Phase 1 — Header walk (until SOS)
 
-### State Machine
+The walker parses each marker by length and skips its payload exactly:
 
+- Skip fill bytes (`FF FF ...`).
+- Treat standalone markers (`FF 01`, `FF D0..FF D8`) as zero-length.
+- For all other markers (APPn, COM, DQT, DHT, SOFn, ...), read the
+  big-endian `u16` length field and skip exactly that many bytes
+  (the length includes the two length bytes themselves).
+- Reject the carve if a segment length is `< 2` (malformed).
+- On `FF DA` (SOS), consume the SOS segment header (also length-prefixed)
+  and transition to phase 2.
+
+Because the walker honours segment lengths, embedded JPEGs inside
+`APPn` payloads are skipped over as opaque bytes — their internal
+`FF D9` markers can never be mistaken for the outer EOI.
+
+### Phase 2 — Scan walk (entropy-coded stream)
+
+Once inside the entropy-coded stream:
+
+- `FF 00` is a stuffed literal `0xFF` (continue).
+- `FF D0..FF D7` are restart markers (continue).
+- `FF D9` is the true End-Of-Image — stop, mark `validated = true`.
+- `FF DA` is another SOS segment (progressive multi-scan JPEGs); the
+  walker re-enters the SOS-header path, then resumes scanning.
+- Any other `FF xx` mid-scan is treated as a length-bearing marker
+  (e.g. a `DHT` between scans of a progressive image): the length is
+  read and the segment is consumed before scanning resumes.
+
+### State machine (summary)
+
+```text
+HeaderExpectFF → HeaderExpectMarker → HeaderLen{Hi,Lo} → HeaderSkip(N)
+                                  ↘ (FF DA) → SosLen{Hi,Lo} → SosSkip(N) → Scan
+HeaderExpectMarker on standalone markers (01, D0..D8) → HeaderExpectFF
+
+Scan → ScanFF → {
+    FF 00          → Scan        (stuffed byte)
+    FF D0..FF D7   → Scan        (restart marker)
+    FF D9          → DONE         (validated)
+    FF DA          → SosLenHi    (progressive multi-scan)
+    FF other       → ScanLen{Hi,Lo} → ScanSkip(N) → Scan
+}
 ```
-START
-  ↓
-[Read header FF D8]
-  ↓
-[Stream data in 64KB chunks]
-  ↓
-  ├─ Found FF D9? → VALIDATED (break)
-  ├─ Reached max_size? → TRUNCATED (break)
-  ├─ Reached EOF? → TRUNCATED (break)
-  └─ Continue reading
-```
+
+### Truncation and rejection
+
+- `max_size` reached before EOI → `truncated = true`, file kept.
+- EOF reached before EOI → `truncated = true`, file kept.
+- Malformed structure (segment length `< 2` in any phase) → carve dropped
+  entirely; `process_hit` returns `Ok(None)` and no file is written.
 
 ## Validation
 
@@ -94,11 +124,23 @@ Running: tests/carver_jpeg.rs
 
 ## Edge Cases Handled
 
-1. **Embedded JPEG restart markers** (`FF D0` - `FF D7`): Correctly skipped, do not trigger false EOI
-2. **FF byte followed by non-D9**: Continues scanning (common in compressed data)
-3. **Truncated files**: Kept if they contain substantive data (>500 bytes default)
-4. **False positives**: Removed if header doesn't match after streaming starts
-5. **Very small fragments**: Discarded if below min_size threshold
+1. **Embedded thumbnail JPEGs** (e.g. inside `APP1` Exif or `APP2` MPF segments):
+   the inner thumbnail's `FF D9` is contained within a length-prefixed segment
+   and is skipped over as opaque payload — the outer carve runs through to the
+   real EOI rather than truncating at the thumbnail. (Fix for issue #77.)
+2. **Progressive JPEGs** with multiple `FF DA` (SOS) segments: each scan is
+   carried through; additional inter-scan length-prefixed segments
+   (e.g. `DHT`/`DQT`) are consumed correctly.
+3. **Stuffed bytes** (`FF 00`) inside the entropy stream: treated as literal
+   `0xFF` and never mistaken for a marker.
+4. **Restart markers** (`FF D0` – `FF D7`): scan continues across them.
+5. **Malformed segment length** (`length < 2`): the carve is rejected
+   (`process_hit` returns `Ok(None)`) — no partial file is written.
+6. **Truncated files** (EOF before EOI): kept with `truncated = true` and
+   `validated = false` if they exceed `min_size`.
+7. **False positives**: rejected if the header signature does not match
+   `FF D8 FF <valid first marker>`.
+8. **Very small fragments**: discarded if below the `min_size` threshold.
 
 ## Performance Characteristics
 
