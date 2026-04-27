@@ -51,7 +51,7 @@ ICO is a structure-based, metadata-driven carver:
 1. **Pre-validate header** (6 bytes):
    - Reserved bytes must be `0x0000`.
    - Image type must be `1` (ICO) or `2` (CUR).
-   - Image count must be in `1..=255`.
+   - Image count must be in `1..=64`.
 2. **Read the `ICONDIRENTRY` array**: `count * 16` bytes immediately after
    the header. Each entry is:
 
@@ -67,15 +67,20 @@ ICO is a structure-based, metadata-driven carver:
    12      4     Image data offset (from start of file)
    ```
 3. **Walk the directory** and for each entry:
-   - Reject if `bytes_in_res == 0` or `image_offset` falls inside the header.
+   - Reject if `bytes_in_res == 0` or `image_offset` is before the end of the
+     `ICONDIR`/`ICONDIRENTRY` table.
    - Reject if `bytes_in_res` exceeds the per-image cap (512 KiB).
-   - Probe the first 8 bytes at `start + image_offset` and require a valid
-     BMP DIB header (`size = 40`, plausible width) or a PNG signature
-     (`89 50 4E 47 0D 0A 1A 0A`).
+   - Reject if `image_offset + bytes_in_res` overflows or exceeds the
+     effective total cap.
+   - Probe the payload at `start + image_offset` and require either a PNG
+     signature (`89 50 4E 47 0D 0A 1A 0A`) or a BMP DIB header. BMP validation
+     reads the first 16 bytes and checks the DIB header size (`40`, `52`, `56`,
+     `108`, or `124`), width, height, planes, and bit depth.
    - Track the maximum `image_offset + bytes_in_res` across all entries.
-4. **Reject the candidate** if no entry pointed to a valid BMP/PNG image.
-5. **Compute total size** as `max(image_offset + bytes_in_res)`, capped by the
-   reasonable total cap (4 MiB) and the configured `max_size`.
+4. **Reject the candidate** if any declared entry does not point to a valid
+   BMP/PNG image resource.
+5. **Compute total size** as `max(image_offset + bytes_in_res)`. Oversized
+   declared spans are rejected rather than silently capped.
 6. **Copy bytes** to the output file via `write_range`, computing hashes
    on the fly.
 7. **Drop** the carve if the on-disk size is below the configured `min_size`.
@@ -83,15 +88,16 @@ ICO is a structure-based, metadata-driven carver:
 ## Validation
 
 - **Validated** (`validated = true`): all directory entries pass sanity checks
-  and at least one entry is backed by a recognisable BMP or PNG payload.
+  and every entry is backed by a recognisable BMP or PNG payload.
 - **Truncated** (`truncated = true`): the declared end of the last image
-  extends past EOF or the configured `max_size`. The partial file is still
-  written so analysts can inspect it.
+  extends past EOF. The partial file is still written so analysts can inspect
+  it and the metadata includes `eof before ICO end`.
 - **Rejected** (no file emitted) when:
   - Reserved/type/count fields are out of range.
-  - Any entry has `size == 0`, an offset inside the header, or `size`
-    greater than 512 KiB.
-  - No entry points at a valid BMP DIB or PNG header.
+  - Any entry has `size == 0`, an offset before the end of the
+    `ICONDIR`/`ICONDIRENTRY` table, or `size` greater than 512 KiB.
+  - Any entry's declared end overflows or exceeds the effective total cap.
+  - Any entry does not point at a valid BMP DIB or PNG header.
 
 ## Size Constraints
 
@@ -103,8 +109,9 @@ ICO is a structure-based, metadata-driven carver:
 | `MAX_SINGLE_IMAGE_SIZE` | 512 KiB | Per-image sanity cap |
 | `MAX_REASONABLE_ICO_SIZE` | 4 MiB | Internal upper bound on total carved span |
 
-The effective maximum is `min(MAX_REASONABLE_ICO_SIZE, max_size)`. Files
-whose carved span falls below `min_size` are discarded.
+The effective maximum is `min(MAX_REASONABLE_ICO_SIZE, max_size)`. Candidates
+whose declared span exceeds that cap are rejected. Files whose carved span
+falls below `min_size` are discarded.
 
 ## Hash Computation
 
@@ -115,13 +122,14 @@ whose carved span falls below `min_size` are discarded.
 
 ## Testing
 
-- Unit test in [src/carve/ico.rs](../../src/carve/ico.rs) (`carves_minimal_ico`)
-  builds a synthetic ICO with a single 16×16 32-bpp BMP entry, runs the carver
-  against an in-memory `EvidenceSource`, and asserts that a non-empty file is
-  emitted via `PendingCarve::flush`.
-- ICO does not yet have a dedicated `tests/carver_ico.rs` integration suite;
-  end-to-end coverage rides on the standard golden-image framework when an
-  ICO fixture is added to `tests/golden_image/manifest.json`.
+- Unit tests in [src/carve/ico.rs](../../src/carve/ico.rs) build synthetic ICO
+  and CUR containers with BMP and PNG entries, verify exact directory-sized
+  output, reject malformed entries, and assert EOF truncation metadata.
+- Integration tests in [tests/carver_ico.rs](../../tests/carver_ico.rs)
+  exercise public pre-validation for plausible directories and malformed
+  counts.
+- End-to-end golden-image coverage can be added through
+  `tests/golden_image/manifest.json` when an ICO fixture is available.
 
 ## Edge Cases
 
@@ -140,9 +148,10 @@ whose carved span falls below `min_size` are discarded.
    `offset + size` rather than assuming sequential layout.
 5. **Overlapping entries**: Tolerated; the carved span is `max(end)` across
    all entries.
-6. **Partial trailing image**: When the last image runs past EOF or the
-   configured `max_size`, the file is written truncated and flagged with
-   `truncated = true`.
+6. **Partial trailing image**: When the last image runs past EOF, the file is
+   written truncated and flagged with `truncated = true`. When a declared span
+   exceeds the effective total size cap, the candidate is rejected instead of
+   being capped and marked valid.
 7. **Implausible counts**: Counts above 64 are rejected even though the spec
    allows 255, because high counts are almost always coincidental matches on
    the four-byte magic.
@@ -151,10 +160,11 @@ whose carved span falls below `min_size` are discarded.
 
 - **Pattern**: Structure-based, metadata-driven.
 - **Memory usage**: Constant — the carver only buffers the 6-byte header,
-  the directory (at most `64 * 16 = 1024` bytes), and an 8-byte probe per
-  entry.
-- **I/O pattern**: A header read, a directory read, one short probe per
-  entry, then a single sequential copy of the carved range.
+  the directory (at most `64 * 16 = 1024` bytes), and one or two short payload
+  probes per entry.
+- **I/O pattern**: A header read, a directory read, an 8-byte PNG probe plus a
+  16-byte DIB probe for BMP-like entries, then a single sequential copy of the
+  carved range.
 - **CPU**: Minimal; no decompression or pixel decoding is performed.
 
 ## Forensic Considerations
@@ -168,9 +178,9 @@ whose carved span falls below `min_size` are discarded.
   the surrounding PE/ELF carves where available.
 - CUR files preserve hotspot coordinates inside each `ICONDIRENTRY` even
   though the carver does not interpret them.
-- Embedded PNG payloads inside ICO entries are not separately re-emitted by
-  the PNG carver from within the ICO container; the ICO is preserved as a
-  single forensic unit.
+- The ICO handler preserves the ICO/CUR container as one carve. Embedded PNG
+  payloads inside ICO entries may also be emitted as separate PNG carves when
+  their signatures are independently detected and validated.
 
 ## Structure Examples
 
@@ -217,18 +227,20 @@ whose carved span falls below `min_size` are discarded.
 
 ## Known Limitations
 
-1. **No PNG/BMP payload depth-validation**: image bytes are not decoded; only
-   the first 8 bytes of each entry are probed.
-2. **Total span capped at 4 MiB** (`MAX_REASONABLE_ICO_SIZE`). Larger ICOs
-   are truncated even when the configured `max_size` permits more.
+1. **No PNG/BMP payload depth-validation**: image bytes are not decoded. PNG
+   entries are checked by their 8-byte signature, and BMP/DIB entries are
+   checked by a 16-byte header probe.
+2. **Total span capped at 4 MiB** (`MAX_REASONABLE_ICO_SIZE`). Candidates
+   declaring a larger span are rejected even when the configured `max_size`
+   permits more.
 3. **Per-image cap of 512 KiB**: rejects entries that legitimately contain
    very large 256×256 PNG payloads above this size.
 4. **Entry count capped at 64** rather than the spec's 255 to limit false
    positives.
 5. **No CUR-specific hotspot extraction**: cursor hotspots are preserved
    in the carved bytes but not surfaced as metadata.
-6. **No validation that the directory and image ranges are non-overlapping**
-   or contiguous.
+6. **No validation that image resource ranges are non-overlapping with each
+    other** or contiguous.
 
 ## Related Carvers
 
