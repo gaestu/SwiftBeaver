@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+- SQLite carver `validated` flag is now stricter: in addition to the existing magic, page-size, valid-page-ratio, and consecutive-invalid checks, every examined B-tree page (`0x02`, `0x05`, `0x0A`, `0x0D`) must also pass deep structural validation (cell count, cell pointer table, cell content area, freeblock chain). Page-type plausibility alone is no longer sufficient. When deep validation finds failures, an entry is appended to `errors` of the form `deep b-tree validation: N of M pages failed structural checks`. The `validated` field schema is unchanged. Closes #83.
+
 ### Fixed
 - EVTX `windows_artefacts` rows are no longer dropped when a chunk header declares an implausible record-number range. The carver now reports `record_count_estimate` as `null` when any chunk's `(last_record - first_record + 1)` exceeds `i64::MAX` or when the running sum would overflow `i64`, and the Parquet sink falls back to `NULL` instead of returning a metadata error for the whole row. Closes #80.
 - SQLite carver no longer emits standalone `sqlite` databases for `SQLite format 3\0` magic that occurs inside a SQLite WAL frame payload. `pre_validate` now walks back through possible WAL frame boundaries (bounded by the new `sqlite_suppress_wal_frame_lookback_frames` config knob, default `64`) and rejects candidates that sit inside a valid WAL frame. To preserve evidence, suppression requires the full frame chain from the WAL header through the candidate frame to satisfy the same acceptance rules as the `sqlite_wal` carver — matching salts, non-zero page numbers, and valid rolling frame checksums — so a stale or checksum-invalid WAL header cannot cause a real standalone database to be dropped. The WAL itself is still carved by `sqlite_wal`. Closes #82.

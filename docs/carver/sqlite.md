@@ -72,23 +72,35 @@ After the header page is written, each subsequent page is examined before being 
    - `0x0D` — table B-tree leaf page
 3. **Track** consecutive invalid pages. If the count reaches the threshold (`sqlite_max_consecutive_invalid_pages`, default **3**), carving stops early — the database boundary has likely been passed.
 4. **Write** the full page regardless (valid or invalid) to preserve evidence up to the termination point.
+5. **Deep B-tree structural validation**: for every page whose type byte is one of the four B-tree types (`0x02`, `0x05`, `0x0A`, `0x0D`), the carver also validates the page's B-tree header against the rules used by the `sqlite_page` carver:
+   - `fragmented_free_bytes` within the documented bound,
+   - `cell_content_area` within page bounds and after the page header,
+   - cell pointer table fits before the cell content area,
+   - every cell pointer is within `[cell_content_area, page_size)` and unique,
+   - if present, the freeblock chain is bounded, monotonically increasing, and contained in the page.
+
+   Empty pages (`cell_count == 0`) are accepted: SQLite uses them for freshly created or emptied table/index root pages, and they cannot be distinguished structurally from valid empty pages. Overflow / freelist pages (`0x00`) are accepted by type alone (no B-tree layout to validate).
 
 ### 4. Validated Flag
 
-After all pages are processed, the `validated` flag is determined by two criteria:
+After all pages are processed, the `validated` flag requires **all** of the following:
 
-- The ratio of valid pages to total examined pages must be ≥ `sqlite_min_valid_page_ratio` (default **0.5**)
-- Carving must not have been stopped early by the consecutive-invalid threshold
+- magic + page-size header checks pass,
+- carving was **not** stopped early by the consecutive-invalid threshold,
+- the ratio of valid-typed pages to total examined pages is ≥ `sqlite_min_valid_page_ratio` (default **0.5**),
+- **every examined B-tree page passes deep structural validation** (no malformed b-tree headers, pointer tables, or freeblock chains).
 
-Both conditions must be true for `validated = true`.
+When one or more B-tree pages fail deep validation, an entry is appended to `errors` of the form:
+
+```
+deep b-tree validation: N of M pages failed structural checks
+```
+
+Page-type plausibility alone is not sufficient for `validated = true`.
 
 ## Validation
 
-- **Validated**: `true` if:
-  - Header matches "SQLite format 3\0"
-  - Page size is valid
-  - Valid-page ratio ≥ `sqlite_min_valid_page_ratio` (default 0.5)
-  - No early termination from consecutive invalid pages
+- **Validated**: `true` if all four conditions above hold (header magic, no early stop, valid-page ratio met, deep b-tree structural validation passes for every examined b-tree page).
 - **Truncated**: `true` if:
   - EOF reached before all pages read
   - max_size enforced
@@ -218,7 +230,7 @@ Page 2-N (B-tree Pages):
 ## Known Limitations
 
 1. **WAL files not included**: Write-Ahead Log files must be carved separately
-2. **No deep integrity check**: Validates page-type bytes but does not verify full b-tree structure, cell pointers, or checksums
+2. **No SQLite engine integrity check**: Deep B-tree page validation catches malformed page headers, pointer tables, and freeblock chains, but it does not replicate `PRAGMA integrity_check` / `PRAGMA quick_check`. A `validated = true` carve should be interpreted as *structurally consistent at the page level*, not as a guarantee that the SQLite engine will open the file cleanly. Page checksums (SQLite ≥ 3.37 with checksum-enabled WAL) are not verified for the main database file.
 3. **Assumes contiguous**: Does not handle fragmented databases
 4. **Page count trusted**: Relies on header metadata (could be incorrect in corrupted DB)
 

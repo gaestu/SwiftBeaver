@@ -1,3 +1,6 @@
+use crate::carve::sqlite_page::{
+    deep_validate_btree_page, deep_validate_btree_page_with_header_offset,
+};
 use crate::carve::sqlite_wal::{
     WAL_FRAME_HEADER_LEN, WAL_HEADER_LEN, WAL_MAGIC_1, WAL_MAGIC_2, parse_wal_header,
 };
@@ -146,9 +149,11 @@ impl CarveHandler for SqliteCarveHandler {
             }
 
             // --- Write remainder of page 1 (already read 100 bytes of header) ---
+            let mut page1 = header;
             let page1_remaining = (page_size as u64).saturating_sub(100);
             if page1_remaining > 0 {
-                stream.read_exact(page1_remaining as usize)?;
+                let mut remaining = stream.read_exact(page1_remaining as usize)?;
+                page1.append(&mut remaining);
             }
 
             // --- Page-by-page validation loop for pages 2..N ---
@@ -156,6 +161,23 @@ impl CarveHandler for SqliteCarveHandler {
             let mut total_examined = 1u64;
             let mut consecutive_invalid = 0u32;
             let mut stopped_early = false;
+            // Deep b-tree structural validation accounting.
+            let mut btree_pages_examined = 0u64;
+            let mut btree_pages_failed_struct = 0u64;
+
+            // SQLite page 1 contains the 100-byte database header followed by
+            // a normal b-tree page header at byte 100. Validate it so
+            // single-page DBs and malformed schema root pages are covered.
+            let page1_type = page1.get(100).copied().unwrap_or(0);
+            if matches!(page1_type, 0x02 | 0x05 | 0x0A | 0x0D) {
+                btree_pages_examined += 1;
+                if !deep_validate_btree_page_with_header_offset(&page1, 100) {
+                    btree_pages_failed_struct += 1;
+                }
+            } else {
+                btree_pages_examined += 1;
+                btree_pages_failed_struct += 1;
+            }
 
             for _page_idx in 1..target_pages {
                 // Peek at the first byte of the next page to check page type
@@ -196,8 +218,8 @@ impl CarveHandler for SqliteCarveHandler {
                 }
 
                 // Write the full page (valid or not — preserve evidence up to threshold)
-                match stream.read_exact(page_size as usize) {
-                    Ok(_) => {}
+                let page_bytes = match stream.read_exact(page_size as usize) {
+                    Ok(buf) => buf,
                     Err(CarveError::Eof) => {
                         truncated = true;
                         errors.push("eof during page read".to_string());
@@ -209,13 +231,36 @@ impl CarveHandler for SqliteCarveHandler {
                         break;
                     }
                     Err(other) => return Err(other),
+                };
+
+                // Deep b-tree page structural validation. Overflow / freelist
+                // pages (type 0x00) have no b-tree layout, so they are
+                // accepted by type alone (matches SQLite's own treatment).
+                if matches!(type_byte, 0x02 | 0x05 | 0x0A | 0x0D) {
+                    btree_pages_examined += 1;
+                    if !deep_validate_btree_page(&page_bytes) {
+                        btree_pages_failed_struct += 1;
+                    }
                 }
             }
 
-            // Determine validated flag based on valid-page ratio
+            // Determine validated flag. Tightened semantics (issue #83):
+            //   - magic + page-size header checks must pass (already enforced),
+            //   - carving must not have stopped early on the consecutive-invalid threshold,
+            //   - valid-page-type ratio must meet the configured minimum,
+            //   - every examined b-tree page must pass deep structural validation.
+            // Page-type plausibility alone is not sufficient.
             if total_examined > 0 {
                 let ratio = valid_pages as f64 / total_examined as f64;
-                validated = ratio >= self.min_valid_page_ratio && !stopped_early;
+                let ratio_ok = ratio >= self.min_valid_page_ratio;
+                let structure_ok = btree_pages_failed_struct == 0;
+                validated = ratio_ok && !stopped_early && structure_ok;
+                if !structure_ok {
+                    errors.push(format!(
+                        "deep b-tree validation: {} of {} pages failed structural checks",
+                        btree_pages_failed_struct, btree_pages_examined
+                    ));
+                }
             }
 
             Ok(())
@@ -466,9 +511,88 @@ mod tests {
         }
     }
 
+    /// Write a structurally-valid minimal b-tree page header (cell_count=1,
+    /// one cell pointer near the end of the page) into `data[offset..offset+page_size]`.
+    /// Used by the test page builders so that pages tagged with a b-tree type
+    /// also pass deep structural validation.
+    fn write_minimal_btree_page(data: &mut [u8], offset: usize, page_size: u32, page_type: u8) {
+        let header_size: usize = match page_type {
+            0x0A | 0x0D => 8,
+            0x02 | 0x05 => 12,
+            _ => return, // not a b-tree page; leave bytes as-is
+        };
+        let ps = page_size as usize;
+        if offset + ps > data.len() || ps < header_size + 4 {
+            return;
+        }
+        let page = &mut data[offset..offset + ps];
+        // Wipe the page header region we are about to write.
+        for b in page.iter_mut().take(header_size + 2) {
+            *b = 0;
+        }
+        page[0] = page_type;
+        // first_freeblock = 0
+        page[1..3].copy_from_slice(&0u16.to_be_bytes());
+        // cell_count = 1
+        page[3..5].copy_from_slice(&1u16.to_be_bytes());
+        let cell_start = (ps as u16).saturating_sub(16);
+        // cell_content_area
+        page[5..7].copy_from_slice(&cell_start.to_be_bytes());
+        // fragmented_free_bytes
+        page[7] = 0;
+        if header_size == 12 {
+            // right-most child pointer (interior pages only); any non-zero value is fine
+            page[8..12].copy_from_slice(&1u32.to_be_bytes());
+        }
+        // single cell pointer entry
+        page[header_size..header_size + 2].copy_from_slice(&cell_start.to_be_bytes());
+        // a non-zero byte in the cell content area
+        page[cell_start as usize] = 0x01;
+    }
+
+    /// Write a structurally-valid minimal page-1 b-tree header.
+    ///
+    /// In SQLite page 1, the first 100 bytes are the database header and the
+    /// b-tree page header starts at byte 100. Offsets stored in the b-tree
+    /// header remain absolute offsets relative to the beginning of page 1.
+    fn write_minimal_page1_btree(data: &mut [u8], page_size: u32, page_type: u8) {
+        let header_size: usize = match page_type {
+            0x0A | 0x0D => 8,
+            0x02 | 0x05 => 12,
+            _ => return,
+        };
+        let ps = page_size as usize;
+        if data.len() < ps || ps < 100 + header_size + 4 {
+            return;
+        }
+        let page = &mut data[..ps];
+        let header_offset = 100usize;
+        for b in page.iter_mut().skip(header_offset).take(header_size + 2) {
+            *b = 0;
+        }
+        page[header_offset] = page_type;
+        // first_freeblock = 0
+        page[header_offset + 1..header_offset + 3].copy_from_slice(&0u16.to_be_bytes());
+        // cell_count = 1
+        page[header_offset + 3..header_offset + 5].copy_from_slice(&1u16.to_be_bytes());
+        let cell_start = (ps as u16).saturating_sub(16);
+        // cell_content_area (absolute from page start)
+        page[header_offset + 5..header_offset + 7].copy_from_slice(&cell_start.to_be_bytes());
+        // fragmented_free_bytes
+        page[header_offset + 7] = 0;
+        if header_size == 12 {
+            page[header_offset + 8..header_offset + 12].copy_from_slice(&1u32.to_be_bytes());
+        }
+        // single cell pointer entry
+        page[header_offset + header_size..header_offset + header_size + 2]
+            .copy_from_slice(&cell_start.to_be_bytes());
+        page[cell_start as usize] = 0x01;
+    }
+
     /// Build a minimal valid SQLite database image:
     /// - 100-byte header with correct magic, page_size, page_count
-    /// - Remaining pages filled with the given page type byte at offset 0 of each page
+    /// - Remaining pages filled with the given page type byte at offset 0 of each page.
+    ///   B-tree page types additionally get a structurally valid minimal page header.
     fn build_sqlite_image(page_size: u32, page_count: u32, page_type_fill: u8) -> Vec<u8> {
         let total = page_size as usize * page_count.max(1) as usize;
         let mut data = vec![0u8; total];
@@ -483,17 +607,21 @@ mod tests {
         data[16..18].copy_from_slice(&ps_raw.to_be_bytes());
         // Page count
         data[28..32].copy_from_slice(&page_count.to_be_bytes());
+        // Page 1 is always a b-tree page after the 100-byte DB header.
+        write_minimal_page1_btree(&mut data, page_size, 0x0D);
         // Fill page-type byte at the start of each page (skip page 1 = header)
         for i in 1..page_count.max(1) as usize {
             let offset = i * page_size as usize;
             if offset < data.len() {
                 data[offset] = page_type_fill;
+                write_minimal_btree_page(&mut data, offset, page_size, page_type_fill);
             }
         }
         data
     }
 
     /// Build a SQLite image where each page can have a different type byte.
+    /// B-tree page types additionally get a structurally valid minimal page header.
     fn build_sqlite_image_with_types(page_size: u32, page_types: &[u8]) -> Vec<u8> {
         let page_count = (page_types.len() + 1) as u32; // +1 for header page
         let total = page_size as usize * page_count as usize;
@@ -506,10 +634,13 @@ mod tests {
         };
         data[16..18].copy_from_slice(&ps_raw.to_be_bytes());
         data[28..32].copy_from_slice(&page_count.to_be_bytes());
+        // Page 1 is always a b-tree page after the 100-byte DB header.
+        write_minimal_page1_btree(&mut data, page_size, 0x0D);
         for (i, &page_type) in page_types.iter().enumerate() {
             let offset = (i + 1) * page_size as usize;
             if offset < data.len() {
                 data[offset] = page_type;
+                write_minimal_btree_page(&mut data, offset, page_size, page_type);
             }
         }
         data
@@ -976,6 +1107,150 @@ mod tests {
         assert!(
             matches!(result, PreValidation::Proceed),
             "frame with invalid rolling checksum must not suppress real DB"
+        );
+    }
+
+    /// Regression for issue #83: a database whose pages all carry a
+    /// recognised b-tree page type byte (`0x0D` = table leaf) but malformed
+    /// b-tree headers (out-of-bounds `cell_content_area` and bogus cell
+    /// pointers) must NOT be reported as `validated = true`. Page-type
+    /// plausibility alone is insufficient.
+    #[test]
+    fn sqlite_validated_requires_deep_btree_structure() {
+        let page_size: u32 = 4096;
+        let page_count: u32 = 10;
+        let total = page_size as usize * page_count as usize;
+        let mut data = vec![0u8; total];
+        // Page 1: SQLite header.
+        data[..16].copy_from_slice(SQLITE_HEADER);
+        data[16..18].copy_from_slice(&(page_size as u16).to_be_bytes());
+        data[28..32].copy_from_slice(&page_count.to_be_bytes());
+        // Pages 2..N: page-type byte 0x0D (table leaf), with a non-zero
+        // cell_count and a cell_content_area that points outside the page.
+        // This mimics the page-type-plausible but corrupt bytes that
+        // produced false `validated = true` in the bug report.
+        for i in 1..page_count as usize {
+            let off = i * page_size as usize;
+            data[off] = 0x0D;
+            // cell_count = 4
+            data[off + 3..off + 5].copy_from_slice(&4u16.to_be_bytes());
+            // cell_content_area = page_size + 1 (out of bounds)
+            data[off + 5..off + 7]
+                .copy_from_slice(&(page_size as u16).saturating_add(1).to_be_bytes());
+        }
+        let evidence = MemEvidence::new(data.clone());
+        let handler = make_handler(3, 0.5);
+        let carved = carve_and_check(&handler, &evidence)
+            .expect("should produce a carved file (page bytes are written)");
+        assert_eq!(carved.size, data.len() as u64);
+        assert!(
+            !carved.validated,
+            "page-type-plausible but malformed pages must not validate"
+        );
+        assert!(
+            carved
+                .errors
+                .iter()
+                .any(|e| e.contains("deep b-tree validation")),
+            "expected error note from deep validation; got {:?}",
+            carved.errors
+        );
+    }
+
+    /// Regression: a database with one empty-table root page (cell_count=0,
+    /// otherwise a structurally valid b-tree page) must remain
+    /// `validated = true`. Empty pages are legitimate in SQLite.
+    #[test]
+    fn sqlite_validated_allows_empty_btree_root_pages() {
+        // 5 pages: header + 1 empty (cell_count=0) + 3 normal table-leaf pages.
+        let mut data = build_sqlite_image_with_types(4096, &[0x0D, 0x0D, 0x0D, 0x0D]);
+        // Overwrite page 2 (offset 4096) so cell_count = 0 and
+        // cell_content_area = page_size. This is what SQLite emits for an
+        // empty table's root page on non-65536-byte pages.
+        let off = 4096usize;
+        for b in data[off..off + 8].iter_mut() {
+            *b = 0;
+        }
+        data[off] = 0x0D;
+        data[off + 5..off + 7].copy_from_slice(&4096u16.to_be_bytes());
+        let evidence = MemEvidence::new(data.clone());
+        let handler = make_handler(3, 0.5);
+        let carved = carve_and_check(&handler, &evidence).expect("should produce a carved file");
+        assert_eq!(carved.size, data.len() as u64);
+        assert!(
+            carved.validated,
+            "empty b-tree root pages must not break validation; errors={:?}",
+            carved.errors
+        );
+    }
+
+    /// Regression: deep validation must also catch pages whose b-tree
+    /// header would point past the end of the page (e.g. a corrupted
+    /// `cell_content_area`).
+    #[test]
+    fn sqlite_validated_rejects_out_of_bounds_cell_content_area() {
+        let page_size: u32 = 4096;
+        // Build a single data page with a structurally valid header,
+        // then corrupt cell_content_area to point past the page.
+        let mut data = build_sqlite_image(page_size, 2, 0x0D);
+        let off = page_size as usize;
+        // cell_content_area = page_size + 1 (out of bounds)
+        let bad = (page_size as u16).saturating_add(1).to_be_bytes();
+        data[off + 5..off + 7].copy_from_slice(&bad);
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        let carved = carve_and_check(&handler, &evidence).expect("should produce a carved file");
+        assert!(
+            !carved.validated,
+            "out-of-bounds header must fail deep check"
+        );
+        assert!(
+            carved
+                .errors
+                .iter()
+                .any(|e| e.contains("deep b-tree validation"))
+        );
+    }
+
+    #[test]
+    fn sqlite_validated_rejects_zero_cell_content_area_on_non_64k_page() {
+        let mut data = build_sqlite_image(4096, 2, 0x0D);
+        let off = 4096usize;
+        // Set cell_count = 0 and cell_content_area = 0 on a 4096-byte page.
+        // SQLite zero encoding for cell_content_area is only valid for 65536.
+        data[off + 3..off + 5].copy_from_slice(&0u16.to_be_bytes());
+        data[off + 5..off + 7].copy_from_slice(&0u16.to_be_bytes());
+
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        let carved = carve_and_check(&handler, &evidence).expect("should produce a carved file");
+        assert!(!carved.validated);
+        assert!(
+            carved
+                .errors
+                .iter()
+                .any(|e| e.contains("deep b-tree validation"))
+        );
+    }
+
+    #[test]
+    fn sqlite_single_page_db_with_invalid_page1_btree_not_validated() {
+        let mut data = build_sqlite_image(4096, 1, 0x00);
+        // Page 1 b-tree header starts at byte 100. Set an invalid page type.
+        data[100] = 0xFF;
+
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        let carved = carve_and_check(&handler, &evidence).expect("should produce a carved file");
+        assert!(
+            !carved.validated,
+            "single-page DB with invalid page-1 b-tree must not validate"
+        );
+        assert!(
+            carved
+                .errors
+                .iter()
+                .any(|e| e.contains("deep b-tree validation"))
         );
     }
 }
