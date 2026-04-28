@@ -24,6 +24,9 @@ The default config is `config/default.yml`.
 - `entropy_threshold` (float): entropy threshold for marking high-entropy regions.
 - `sqlite_page_max_hits_per_chunk` (usize): cap for `sqlite_page` scanner hits per chunk to limit single-byte marker overload.
 - `sqlite_wal_max_consecutive_checksum_failures` (u32): maximum consecutive WAL frames allowed to fail full rolling checksum validation before carving stops. This controls stop behavior, not frame filtering; mismatching frames observed before the stop threshold may still be included in carved bytes. Set to `0` to stop at the first checksum mismatch.
+- `sqlite_max_consecutive_invalid_pages` (u32): consecutive invalid SQLite page-type bytes before page-by-page carving terminates early. Default: `3`.
+- `sqlite_min_valid_page_ratio` (f64): minimum ratio of valid SQLite page types required to mark a carved database `validated=true`. Default: `0.5`.
+- `sqlite_suppress_wal_frame_lookback_frames` (u32): bound on how many preceding WAL frame boundaries the SQLite carver checks during `pre_validate` to suppress `sqlite` candidates that lie inside a SQLite WAL frame payload. Set to `0` to check only the immediate `wal_start = offset - 56` candidate. Default: `64`.
 - `opencl_platform_index` (usize, optional): select OpenCL platform by index.
 - `opencl_device_index` (usize, optional): select OpenCL device by index.
 - `zip_allowed_kinds` (list, optional): restrict ZIP outputs to `zip`, `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`, `epub` when set.

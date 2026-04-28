@@ -1,3 +1,6 @@
+use crate::carve::sqlite_wal::{
+    WAL_FRAME_HEADER_LEN, WAL_HEADER_LEN, WAL_MAGIC_1, WAL_MAGIC_2, parse_wal_header,
+};
 use crate::carve::{
     CarveError, CarveHandler, CarveStream, CarvedFile, ExtractionContext, PendingCarve,
     PreValidation, output_path,
@@ -19,6 +22,7 @@ pub struct SqliteCarveHandler {
     max_size: u64,
     max_consecutive_invalid_pages: u32,
     min_valid_page_ratio: f64,
+    suppress_wal_frame_lookback_frames: u32,
 }
 
 impl SqliteCarveHandler {
@@ -28,6 +32,7 @@ impl SqliteCarveHandler {
         max_size: u64,
         max_consecutive_invalid_pages: u32,
         min_valid_page_ratio: f64,
+        suppress_wal_frame_lookback_frames: u32,
     ) -> Self {
         Self {
             extension,
@@ -35,6 +40,7 @@ impl SqliteCarveHandler {
             max_size,
             max_consecutive_invalid_pages,
             min_valid_page_ratio,
+            suppress_wal_frame_lookback_frames,
         }
     }
 }
@@ -73,6 +79,14 @@ impl CarveHandler for SqliteCarveHandler {
             return Ok(PreValidation::Reject(
                 "sqlite page size invalid".to_string(),
             ));
+        }
+        if let Some(reason) = wal_frame_payload_reason(
+            evidence,
+            offset,
+            page_size,
+            self.suppress_wal_frame_lookback_frames,
+        )? {
+            return Ok(PreValidation::Reject(reason));
         }
         Ok(PreValidation::Proceed)
     }
@@ -270,6 +284,150 @@ fn is_valid_page_size(page_size: u32) -> bool {
     page_size.is_power_of_two()
 }
 
+/// Determine whether a SQLite header candidate at `offset` actually lies inside
+/// a SQLite WAL frame payload. WAL frames embed full database page images,
+/// including page 1 (which carries the `SQLite format 3\0` magic), so the raw
+/// signature scanner can mistake them for standalone databases.
+///
+/// Walks back through possible frame boundaries `n = 0..=max_lookback_frames`,
+/// computing `candidate_wal_start = offset - 56 - n * (24 + page_size)`. For
+/// each candidate the function performs a strict structural check matching the
+/// rules used by the `sqlite_wal` carver itself (see `walk_frames` in
+/// `src/carve/sqlite_wal.rs`):
+///
+/// 1. The 32-byte WAL header at `candidate_wal_start` must parse (magic,
+///    version, page size, header checksum) and its declared `page_size` must
+///    match the SQLite candidate's `page_size`.
+/// 2. Every frame from frame 0 through frame `n` must have salts that match
+///    the WAL header salts, a non-zero page number, AND a valid rolling
+///    frame checksum (8 bytes of frame header + page payload, seeded with the
+///    previous frame's or header's checksum).
+///
+/// Only when all conditions hold is the SQLite carve suppressed. This avoids
+/// dropping a legitimate standalone SQLite database simply because unrelated
+/// or stale bytes earlier in the image happen to parse as a WAL header at the
+/// computed distance — suppression must be at least as strict as the WAL
+/// carver's acceptance rules.
+///
+/// Returns `Ok(Some(reason))` to reject, `Ok(None)` to allow.
+fn wal_frame_payload_reason(
+    evidence: &dyn EvidenceSource,
+    offset: u64,
+    page_size: u32,
+    max_lookback_frames: u32,
+) -> Result<Option<String>, CarveError> {
+    use crate::carve::sqlite_wal::wal_checksum_bytes;
+
+    let frame_size = WAL_FRAME_HEADER_LEN.saturating_add(page_size as u64);
+    let first_payload_offset = WAL_HEADER_LEN.saturating_add(WAL_FRAME_HEADER_LEN);
+    let mut header_buf = [0u8; WAL_HEADER_LEN as usize];
+    let mut frame_buf = [0u8; WAL_FRAME_HEADER_LEN as usize];
+    let mut page_buf = vec![0u8; page_size as usize];
+    for n in 0..=max_lookback_frames {
+        let back_bytes =
+            match first_payload_offset.checked_add((n as u64).saturating_mul(frame_size)) {
+                Some(v) => v,
+                None => break,
+            };
+        let candidate_start = match offset.checked_sub(back_bytes) {
+            Some(v) => v,
+            None => break,
+        };
+        // Cheap pre-filter: only read the full header if the magic is plausible.
+        let mut magic_buf = [0u8; 4];
+        let magic_n = evidence
+            .read_at(candidate_start, &mut magic_buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if magic_n < magic_buf.len() {
+            continue;
+        }
+        let magic = u32::from_be_bytes(magic_buf);
+        if magic != WAL_MAGIC_1 && magic != WAL_MAGIC_2 {
+            continue;
+        }
+        let header_n = evidence
+            .read_at(candidate_start, &mut header_buf)
+            .map_err(|e| CarveError::Evidence(e.to_string()))?;
+        if header_n < header_buf.len() {
+            continue;
+        }
+        let header = match parse_wal_header(&header_buf) {
+            Some(h) => h,
+            None => continue,
+        };
+        if header.page_size != page_size {
+            continue;
+        }
+        // Walk and checksum-validate every frame 0..=n. Suppression must be at
+        // least as strict as `sqlite_wal::walk_frames`: salts match, page_no
+        // non-zero, and rolling frame checksum agrees with the values stored
+        // in each frame header. A WAL header alone — even with structurally
+        // plausible frame headers — is not sufficient to drop a standalone DB.
+        let mut frame_offset = candidate_start.saturating_add(WAL_HEADER_LEN);
+        let mut rolling = header.frame_checksum;
+        let mut chain_ok = true;
+        for _ in 0..=n {
+            let read_n = evidence
+                .read_at(frame_offset, &mut frame_buf)
+                .map_err(|e| CarveError::Evidence(e.to_string()))?;
+            if read_n < frame_buf.len() {
+                chain_ok = false;
+                break;
+            }
+            let page_no =
+                u32::from_be_bytes([frame_buf[0], frame_buf[1], frame_buf[2], frame_buf[3]]);
+            let salt_1 =
+                u32::from_be_bytes([frame_buf[8], frame_buf[9], frame_buf[10], frame_buf[11]]);
+            let salt_2 =
+                u32::from_be_bytes([frame_buf[12], frame_buf[13], frame_buf[14], frame_buf[15]]);
+            if page_no == 0 || salt_1 != header.salt_1 || salt_2 != header.salt_2 {
+                chain_ok = false;
+                break;
+            }
+            let payload_offset = frame_offset.saturating_add(WAL_FRAME_HEADER_LEN);
+            let payload_n = evidence
+                .read_at(payload_offset, &mut page_buf)
+                .map_err(|e| CarveError::Evidence(e.to_string()))?;
+            if payload_n < page_buf.len() {
+                chain_ok = false;
+                break;
+            }
+            let mut next =
+                match wal_checksum_bytes(header.checksum_byte_order, &frame_buf[..8], rolling) {
+                    Some(c) => c,
+                    None => {
+                        chain_ok = false;
+                        break;
+                    }
+                };
+            next = match wal_checksum_bytes(header.checksum_byte_order, &page_buf, next) {
+                Some(c) => c,
+                None => {
+                    chain_ok = false;
+                    break;
+                }
+            };
+            let expected_1 =
+                u32::from_be_bytes([frame_buf[16], frame_buf[17], frame_buf[18], frame_buf[19]]);
+            let expected_2 =
+                u32::from_be_bytes([frame_buf[20], frame_buf[21], frame_buf[22], frame_buf[23]]);
+            if next[0] != expected_1 || next[1] != expected_2 {
+                chain_ok = false;
+                break;
+            }
+            rolling = next;
+            frame_offset = frame_offset.saturating_add(frame_size);
+        }
+        if !chain_ok {
+            continue;
+        }
+        return Ok(Some(format!(
+            "sqlite hit inside sqlite_wal frame payload (wal_start=0x{candidate_start:X}, frame_index={n})"
+        )));
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,6 +525,7 @@ mod tests {
             0, // no max_size limit
             max_consecutive_invalid_pages,
             min_valid_page_ratio,
+            64,
         )
     }
 
@@ -539,6 +698,7 @@ mod tests {
             4096 * 5, // max 5 pages
             3,
             0.5,
+            64,
         );
         let result = carve_and_check(&handler, &evidence);
         let carved = result.expect("should produce a carved file");
@@ -569,5 +729,253 @@ mod tests {
         let carved = result.expect("should produce a carved file");
         assert_eq!(carved.size, 4096);
         assert!(carved.validated);
+    }
+
+    /// Construct a minimal valid WAL header (32 bytes) for the given page size.
+    /// Uses big-endian checksum byte order (magic 0x377F_0683) so the bytes
+    /// match the parser without computing a checksum manually.
+    fn build_test_wal_header(page_size: u32) -> [u8; 32] {
+        use crate::carve::sqlite_wal::{
+            ChecksumByteOrder, WAL_MAGIC_2, WAL_VERSION, wal_checksum_bytes,
+        };
+        let mut h = [0u8; 32];
+        h[0..4].copy_from_slice(&WAL_MAGIC_2.to_be_bytes());
+        h[4..8].copy_from_slice(&WAL_VERSION.to_be_bytes());
+        h[8..12].copy_from_slice(&page_size.to_be_bytes());
+        h[12..16].copy_from_slice(&0u32.to_be_bytes());
+        h[16..20].copy_from_slice(&TEST_SALT_1.to_be_bytes());
+        h[20..24].copy_from_slice(&TEST_SALT_2.to_be_bytes());
+        let cks = wal_checksum_bytes(ChecksumByteOrder::BigEndian, &h[..24], [0, 0])
+            .expect("wal header checksum");
+        h[24..28].copy_from_slice(&cks[0].to_be_bytes());
+        h[28..32].copy_from_slice(&cks[1].to_be_bytes());
+        h
+    }
+
+    const TEST_SALT_1: u32 = 0xAABB_CCDD;
+    const TEST_SALT_2: u32 = 0x1122_3344;
+
+    /// Append a checksum-valid WAL frame (24-byte header + payload) to `out`,
+    /// updating `rolling` to the new running checksum. `payload` must be
+    /// exactly `page_size` bytes.
+    fn append_valid_frame(out: &mut Vec<u8>, rolling: &mut [u32; 2], page_no: u32, payload: &[u8]) {
+        use crate::carve::sqlite_wal::{ChecksumByteOrder, wal_checksum_bytes};
+        let mut frame = [0u8; 24];
+        frame[0..4].copy_from_slice(&page_no.to_be_bytes());
+        frame[8..12].copy_from_slice(&TEST_SALT_1.to_be_bytes());
+        frame[12..16].copy_from_slice(&TEST_SALT_2.to_be_bytes());
+        let mut next =
+            wal_checksum_bytes(ChecksumByteOrder::BigEndian, &frame[..8], *rolling).unwrap();
+        next = wal_checksum_bytes(ChecksumByteOrder::BigEndian, payload, next).unwrap();
+        frame[16..20].copy_from_slice(&next[0].to_be_bytes());
+        frame[20..24].copy_from_slice(&next[1].to_be_bytes());
+        *rolling = next;
+        out.extend_from_slice(&frame);
+        out.extend_from_slice(payload);
+    }
+
+    /// Build a payload that is a SQLite page-1 image of the given page_size.
+    fn sqlite_page1_payload(page_size: u32) -> Vec<u8> {
+        let mut page = vec![0u8; page_size as usize];
+        page[..16].copy_from_slice(SQLITE_HEADER);
+        let ps_raw = if page_size == 65536 {
+            1u16
+        } else {
+            page_size as u16
+        };
+        page[16..18].copy_from_slice(&ps_raw.to_be_bytes());
+        page[28..32].copy_from_slice(&1u32.to_be_bytes());
+        page
+    }
+
+    /// Build a buffer that places a SQLite page-1 image inside a WAL frame
+    /// payload. Layout:
+    ///   [WAL header (32B)] [WAL frame header (24B)] [SQLite page1 (page_size B)]
+    /// The SQLite header at offset 56 is what would otherwise be carved as a
+    /// standalone DB. Frame checksums match the WAL header (rolling).
+    fn build_wal_with_page1(page_size: u32) -> Vec<u8> {
+        let header = build_test_wal_header(page_size);
+        let mut out = Vec::with_capacity(32 + 24 + page_size as usize);
+        out.extend_from_slice(&header);
+        let header_cks = [
+            u32::from_be_bytes([header[24], header[25], header[26], header[27]]),
+            u32::from_be_bytes([header[28], header[29], header[30], header[31]]),
+        ];
+        let mut rolling = header_cks;
+        let payload = sqlite_page1_payload(page_size);
+        append_valid_frame(&mut out, &mut rolling, 1, &payload);
+        out
+    }
+
+    #[test]
+    fn sqlite_pre_validate_suppresses_wal_page1_frame() {
+        let page_size = 4096u32;
+        let data = build_wal_with_page1(page_size);
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        // SQLite header is at WAL header (32) + frame header (24) = 56.
+        let result = handler
+            .pre_validate(&evidence, 56)
+            .expect("pre_validate must not error");
+        match result {
+            PreValidation::Reject(reason) => {
+                assert!(
+                    reason.contains("sqlite_wal frame payload"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            PreValidation::Proceed => panic!("expected suppression of WAL frame payload"),
+        }
+    }
+
+    #[test]
+    fn sqlite_pre_validate_suppresses_deeper_wal_frame() {
+        let page_size = 4096u32;
+        let header = build_test_wal_header(page_size);
+        let frame_size = 24 + page_size as usize;
+        let mut data = Vec::with_capacity(32 + 3 * frame_size);
+        data.extend_from_slice(&header);
+        let mut rolling = [
+            u32::from_be_bytes([header[24], header[25], header[26], header[27]]),
+            u32::from_be_bytes([header[28], header[29], header[30], header[31]]),
+        ];
+        // Three checksum-valid frames; the third carries a SQLite page-1
+        // image at offset 32 + 2*(24+P) + 24.
+        let dummy_payload = vec![0u8; page_size as usize];
+        append_valid_frame(&mut data, &mut rolling, 1, &dummy_payload);
+        append_valid_frame(&mut data, &mut rolling, 2, &dummy_payload);
+        let page1 = sqlite_page1_payload(page_size);
+        append_valid_frame(&mut data, &mut rolling, 3, &page1);
+        let sqlite_offset = (32 + 2 * frame_size + 24) as u64;
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        let result = handler
+            .pre_validate(&evidence, sqlite_offset)
+            .expect("pre_validate must not error");
+        assert!(
+            matches!(result, PreValidation::Reject(_)),
+            "expected suppression for deeper WAL frame"
+        );
+    }
+
+    #[test]
+    fn sqlite_pre_validate_allows_standalone_db_after_random_bytes() {
+        // No WAL header in the lookback range; SQLite hit must be allowed.
+        let page_size = 4096u32;
+        let mut data = vec![0u8; 8192];
+        // Fill with non-WAL bytes (zeros are not WAL magic).
+        let sqlite_off = 4096usize;
+        data[sqlite_off..sqlite_off + 16].copy_from_slice(SQLITE_HEADER);
+        data[sqlite_off + 16..sqlite_off + 18].copy_from_slice(&(page_size as u16).to_be_bytes());
+        data[sqlite_off + 28..sqlite_off + 32].copy_from_slice(&1u32.to_be_bytes());
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        let result = handler
+            .pre_validate(&evidence, sqlite_off as u64)
+            .expect("pre_validate must not error");
+        assert!(
+            matches!(result, PreValidation::Proceed),
+            "standalone SQLite header must not be suppressed"
+        );
+    }
+
+    #[test]
+    fn sqlite_pre_validate_lookback_disabled_allows_wal_payload() {
+        // With max_lookback_frames = 0 disabled? Actually 0 still checks n=0.
+        // Use the dedicated knob value of 0 to mean "only check immediate wal_start"
+        // which is still the most common case. To verify the knob actually limits
+        // search depth we set it to 0 and place the SQLite hit deeper than n=0.
+        let page_size = 4096u32;
+        let header = build_test_wal_header(page_size);
+        let frame_size = 24 + page_size as usize;
+        let mut data = Vec::with_capacity(32 + 2 * frame_size);
+        data.extend_from_slice(&header);
+        let mut rolling = [
+            u32::from_be_bytes([header[24], header[25], header[26], header[27]]),
+            u32::from_be_bytes([header[28], header[29], header[30], header[31]]),
+        ];
+        let dummy = vec![0u8; page_size as usize];
+        append_valid_frame(&mut data, &mut rolling, 1, &dummy);
+        let page1 = sqlite_page1_payload(page_size);
+        append_valid_frame(&mut data, &mut rolling, 2, &page1);
+        let sqlite_offset = (32 + frame_size + 24) as u64;
+        let evidence = MemEvidence::new(data);
+        // Lookback = 0 means only n=0 (wal_start = offset - 56) is examined,
+        // which does NOT match the actual wal_start for this deeper hit, so the
+        // hit is allowed through (knob honored).
+        let handler = SqliteCarveHandler::new("sqlite".to_string(), 100, 0, 3, 0.5, 0);
+        let result = handler
+            .pre_validate(&evidence, sqlite_offset)
+            .expect("pre_validate must not error");
+        assert!(
+            matches!(result, PreValidation::Proceed),
+            "lookback knob must bound search depth"
+        );
+    }
+
+    /// Regression for forensic-safety review: a stale or unrelated WAL header
+    /// that lands at the computed lookback distance, followed by garbage rather
+    /// than a real WAL frame chain, must NOT cause suppression of a legitimate
+    /// standalone SQLite database whose header happens to land at the same
+    /// offset. Suppression requires the frame chain from the WAL start to the
+    /// candidate frame to be structurally valid.
+    #[test]
+    fn sqlite_pre_validate_does_not_suppress_real_db_after_stale_wal_header() {
+        let page_size = 4096u32;
+        let frame_size = 24 + page_size as usize;
+        let total = 32 + frame_size; // wal header + space for one fake frame
+        let mut data = vec![0u8; total];
+        // Place a structurally valid WAL header at offset 0.
+        let wal_header = build_test_wal_header(page_size);
+        data[..32].copy_from_slice(&wal_header);
+        // Bytes 32..56 (the supposed frame-0 header) are left as zeros, so
+        // salts do NOT match the WAL header salts and the chain check fails.
+        // Place a real standalone SQLite page-1 header at offset 56.
+        let sqlite_off = 56usize;
+        data[sqlite_off..sqlite_off + 16].copy_from_slice(SQLITE_HEADER);
+        data[sqlite_off + 16..sqlite_off + 18].copy_from_slice(&(page_size as u16).to_be_bytes());
+        data[sqlite_off + 28..sqlite_off + 32].copy_from_slice(&1u32.to_be_bytes());
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        let result = handler
+            .pre_validate(&evidence, sqlite_off as u64)
+            .expect("pre_validate must not error");
+        assert!(
+            matches!(result, PreValidation::Proceed),
+            "real standalone DB must not be suppressed when frame chain is invalid"
+        );
+    }
+
+    /// Regression for forensic-safety review: even when the salts and page
+    /// numbers in the frame header look correct, a frame whose stored
+    /// rolling checksum does not match the WAL carver's computation must NOT
+    /// cause suppression. The WAL carver itself rejects such frames in
+    /// `walk_frames`, so suppression must apply the same standard.
+    #[test]
+    fn sqlite_pre_validate_does_not_suppress_when_frame_checksum_invalid() {
+        let page_size = 4096u32;
+        let header = build_test_wal_header(page_size);
+        let mut data = Vec::with_capacity(32 + 24 + page_size as usize);
+        data.extend_from_slice(&header);
+        // Hand-build a frame header with matching salts and a non-zero page
+        // number, but leave the stored checksum bytes (offsets 16..24) at
+        // zero so they will not match the rolling checksum.
+        let mut frame = [0u8; 24];
+        frame[0..4].copy_from_slice(&1u32.to_be_bytes());
+        frame[8..12].copy_from_slice(&TEST_SALT_1.to_be_bytes());
+        frame[12..16].copy_from_slice(&TEST_SALT_2.to_be_bytes());
+        // checksum bytes deliberately left zero
+        data.extend_from_slice(&frame);
+        let payload = sqlite_page1_payload(page_size);
+        data.extend_from_slice(&payload);
+        let evidence = MemEvidence::new(data);
+        let handler = make_handler(3, 0.5);
+        let result = handler
+            .pre_validate(&evidence, 56)
+            .expect("pre_validate must not error");
+        assert!(
+            matches!(result, PreValidation::Proceed),
+            "frame with invalid rolling checksum must not suppress real DB"
+        );
     }
 }

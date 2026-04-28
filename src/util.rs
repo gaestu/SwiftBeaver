@@ -382,6 +382,7 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                         file_type.max_size,
                         cfg.sqlite_max_consecutive_invalid_pages,
                         cfg.sqlite_min_valid_page_ratio,
+                        cfg.sqlite_suppress_wal_frame_lookback_frames,
                     )),
                 );
             }

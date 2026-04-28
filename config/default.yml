@@ -20,6 +20,7 @@ sqlite_page_max_hits_per_chunk: 2048
 sqlite_wal_max_consecutive_checksum_failures: 2
 sqlite_max_consecutive_invalid_pages: 3
 sqlite_min_valid_page_ratio: 0.5
+sqlite_suppress_wal_frame_lookback_frames: 64
 opencl_platform_index:
 opencl_device_index:
 zip_allowed_kinds:

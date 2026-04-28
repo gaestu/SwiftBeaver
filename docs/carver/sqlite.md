@@ -109,6 +109,17 @@ Both conditions must be true for `validated = true`.
 |-----------|---------|-------------|
 | `sqlite_max_consecutive_invalid_pages` | 3 | Number of consecutive invalid page types before early termination |
 | `sqlite_min_valid_page_ratio` | 0.5 | Minimum ratio of valid pages for `validated=true` |
+| `sqlite_suppress_wal_frame_lookback_frames` | 64 | Maximum number of preceding WAL frames examined when checking whether a SQLite header candidate sits inside a SQLite WAL frame payload. Set to `0` to check only the immediate `wal_start = offset - 56` candidate. |
+
+## WAL Frame Suppression
+
+SQLite WAL frames embed full database page images, including page 1 with the `SQLite format 3\0` magic. The raw signature scanner therefore produces SQLite header hits inside WAL frame payloads.
+
+During `pre_validate`, after the magic and page-size checks succeed, the carver walks back through possible WAL frame boundaries (`offset - 56 - n * (24 + page_size)` for `n in 0..=sqlite_suppress_wal_frame_lookback_frames`). For each candidate offset it attempts a strict WAL-header parse (magic, version, page size, header checksum) and, when the WAL header's `page_size` matches the SQLite hit's `page_size`, walks the frame chain from frame 0 through frame `n` applying the same acceptance rules as the `sqlite_wal` carver: each frame header must have salts matching the WAL header salts, a non-zero page number, and a rolling frame checksum that matches the value stored in the frame header (computed across the frame's first 8 header bytes followed by the page payload, seeded with the previous frame's or header's checksum). Only when the full chain validates is the SQLite hit rejected with reason `sqlite hit inside sqlite_wal frame payload`. The reject is counted in `files_prevalidation_rejected`.
+
+This chain check guarantees suppression is at least as strict as the WAL carver's own acceptance rules: a stale, unrelated, or checksum-invalid WAL header lying earlier in the image cannot cause a legitimate standalone SQLite database to be dropped.
+
+The WAL itself is unaffected — only standalone `sqlite` candidates that demonstrably lie inside a valid WAL frame are suppressed. The WAL is still carved by the `sqlite_wal` carver and recorded in `metadata/carved_files.*`.
 
 ## Hash Computation
 

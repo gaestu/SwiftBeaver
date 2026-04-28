@@ -75,6 +75,8 @@ pub struct Config {
     pub sqlite_max_consecutive_invalid_pages: u32,
     #[serde(default = "default_sqlite_min_valid_page_ratio")]
     pub sqlite_min_valid_page_ratio: f64,
+    #[serde(default = "default_sqlite_suppress_wal_frame_lookback_frames")]
+    pub sqlite_suppress_wal_frame_lookback_frames: u32,
     pub opencl_platform_index: Option<usize>,
     pub opencl_device_index: Option<usize>,
     #[serde(default)]
@@ -209,6 +211,10 @@ fn default_sqlite_max_consecutive_invalid_pages() -> u32 {
 
 fn default_sqlite_min_valid_page_ratio() -> f64 {
     0.5
+}
+
+fn default_sqlite_suppress_wal_frame_lookback_frames() -> u32 {
+    64
 }
 
 fn default_deferred_buffer_kb() -> usize {
