@@ -2,10 +2,10 @@
 //!
 //! Worker thread spawning and management for the processing pipeline.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
 
@@ -33,6 +33,13 @@ pub struct ScanJob {
     pub data: Arc<Vec<u8>>,
 }
 
+/// Signature hit plus deterministic sequence assigned in evidence order.
+pub struct HitJob {
+    pub seq: u64,
+    pub hit: NormalizedHit,
+    permit: HitPermit,
+}
+
 /// Job containing string spans to process for artefacts
 pub struct StringJob {
     pub chunk: ScanChunk,
@@ -47,6 +54,137 @@ pub struct WriteJob {
     pub hit_global_offset: u64,
     pub should_discard: bool,
     pub carve_limiter: Arc<CarveLimiter>,
+}
+
+/// Completion event for one sequenced hit. `job == None` means the hit was
+/// rejected before producing a pending carve.
+pub struct CarveResult {
+    pub seq: u64,
+    pub job: Option<WriteJob>,
+    _permit: HitPermit,
+}
+
+struct HitInFlightLimiter {
+    state: Mutex<usize>,
+    cond: Condvar,
+    max: usize,
+}
+
+impl HitInFlightLimiter {
+    fn new(max: usize) -> Self {
+        debug_assert!(max > 0, "HitInFlightLimiter max must be > 0");
+        Self {
+            state: Mutex::new(0),
+            cond: Condvar::new(),
+            max,
+        }
+    }
+
+    fn acquire(self: &Arc<Self>) -> HitPermit {
+        let mut active = self.state.lock().expect("hit limiter lock poisoned");
+        while *active >= self.max {
+            active = self
+                .cond
+                .wait(active)
+                .expect("hit limiter condvar poisoned");
+        }
+        *active += 1;
+        HitPermit {
+            limiter: self.clone(),
+        }
+    }
+
+    fn release(&self) {
+        let mut active = self.state.lock().expect("hit limiter lock poisoned");
+        *active = active.saturating_sub(1);
+        self.cond.notify_one();
+    }
+}
+
+struct HitPermit {
+    limiter: Arc<HitInFlightLimiter>,
+}
+
+impl Drop for HitPermit {
+    fn drop(&mut self) {
+        self.limiter.release();
+    }
+}
+
+struct HitResultGuard<'a> {
+    seq: u64,
+    permit: Option<HitPermit>,
+    write_tx: &'a Sender<CarveResult>,
+    carve_errors: &'a AtomicU64,
+}
+
+impl<'a> HitResultGuard<'a> {
+    fn new(
+        seq: u64,
+        permit: HitPermit,
+        write_tx: &'a Sender<CarveResult>,
+        carve_errors: &'a AtomicU64,
+    ) -> Self {
+        Self {
+            seq,
+            permit: Some(permit),
+            write_tx,
+            carve_errors,
+        }
+    }
+
+    fn send_empty(&mut self) -> bool {
+        let Some(permit) = self.permit.take() else {
+            return true;
+        };
+        self.write_tx
+            .send(CarveResult {
+                seq: self.seq,
+                job: None,
+                _permit: permit,
+            })
+            .is_ok()
+    }
+
+    fn send_job(&mut self, job: WriteJob, hit_offset: u64) -> bool {
+        let Some(permit) = self.permit.take() else {
+            return true;
+        };
+        if let Err(err) = self.write_tx.send(CarveResult {
+            seq: self.seq,
+            job: Some(job),
+            _permit: permit,
+        }) {
+            let result = err.into_inner();
+            if let Some(job) = result.job {
+                let _ = job.pending.discard();
+            }
+            self.carve_errors.fetch_add(1, Ordering::Relaxed);
+            warn!("write channel closed while sending job at offset {hit_offset}");
+            return false;
+        }
+        true
+    }
+}
+
+impl Drop for HitResultGuard<'_> {
+    fn drop(&mut self) {
+        let Some(permit) = self.permit.take() else {
+            return;
+        };
+        if std::thread::panicking() {
+            self.carve_errors.fetch_add(1, Ordering::Relaxed);
+            warn!(
+                "carve worker panicked before emitting result for seq {}",
+                self.seq
+            );
+        }
+        let _ = self.write_tx.send(CarveResult {
+            seq: self.seq,
+            job: None,
+            _permit: permit,
+        });
+    }
 }
 
 /// Spawn the metadata recording thread
@@ -280,8 +418,8 @@ pub fn spawn_scan_workers(
     scanner: Arc<dyn SignatureScanner>,
     string_scanner: Option<Arc<dyn StringScanner>>,
     rx: Receiver<ScanJob>,
-    fast_hit_tx: Sender<NormalizedHit>,
-    slow_hit_tx: Sender<NormalizedHit>,
+    fast_hit_tx: Sender<HitJob>,
+    slow_hit_tx: Sender<HitJob>,
     carve_registry: Arc<CarveRegistry>,
     split_enabled: bool,
     string_tx: Option<Sender<StringJob>>,
@@ -292,9 +430,14 @@ pub fn spawn_scan_workers(
     string_spans: Arc<AtomicU64>,
     sqlite_page_max_hits_per_chunk: usize,
     scan_time_ms: Arc<AtomicU64>,
+    initial_chunk_id: u64,
+    max_inflight_hits: usize,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
+    let emit_order = Arc::new((Mutex::new(initial_chunk_id), Condvar::new()));
+    let hit_sequence = Arc::new(AtomicU64::new(0));
+    let hit_limiter = Arc::new(HitInFlightLimiter::new(max_inflight_hits.max(1)));
 
     for _ in 0..worker_count {
         let scanner = scanner.clone();
@@ -310,6 +453,9 @@ pub fn spawn_scan_workers(
         let run_id = run_id.clone();
         let scan_time_ms = scan_time_ms.clone();
         let sqlite_page_max_hits_per_chunk = sqlite_page_max_hits_per_chunk.max(1);
+        let emit_order = emit_order.clone();
+        let hit_sequence = hit_sequence.clone();
+        let hit_limiter = hit_limiter.clone();
 
         handles.push(thread::spawn(move || {
             for job in rx {
@@ -317,11 +463,13 @@ pub fn spawn_scan_workers(
                 let valid_len = effective_valid as usize;
                 let mut sqlite_page_hits = 0usize;
                 let mut sqlite_page_hits_dropped = 0usize;
+                let chunk_id = job.chunk.id;
 
                 // Scan for file signatures
                 let scan_start = Instant::now();
                 let scan_hits = scanner.scan_chunk(&job.chunk, &job.data);
                 scan_time_ms.fetch_add(scan_start.elapsed().as_millis() as u64, Ordering::Relaxed);
+                let mut normalized_hits = Vec::new();
                 for hit in scan_hits {
                     if hit.local_offset >= effective_valid {
                         continue;
@@ -333,35 +481,76 @@ pub fn spawn_scan_workers(
                         }
                         sqlite_page_hits = sqlite_page_hits.saturating_add(1);
                     }
-                    hits_found.fetch_add(1, Ordering::Relaxed);
                     let global_offset = job.chunk.start + hit.local_offset;
-                    let normalized = NormalizedHit {
+                    normalized_hits.push(NormalizedHit {
                         global_offset,
                         file_type_id: hit.file_type_id,
                         pattern_id: hit.pattern_id,
                         chunk_data: Some(Arc::clone(&job.data)),
                         chunk_start: job.chunk.start,
-                    };
+                    });
+                }
+                normalized_hits.sort_by(|a, b| {
+                    a.global_offset
+                        .cmp(&b.global_offset)
+                        .then(a.file_type_id.cmp(&b.file_type_id))
+                        .then(a.pattern_id.cmp(&b.pattern_id))
+                });
+                let mut hit_channel_closed = false;
+                {
+                    let (lock, cvar) = &*emit_order;
+                    let mut next_chunk = lock.lock().expect("scan emit-order lock poisoned");
+                    while *next_chunk != chunk_id {
+                        next_chunk = cvar
+                            .wait(next_chunk)
+                            .expect("scan emit-order condvar poisoned");
+                    }
+                }
+                // Leave next_chunk pointing at this chunk while emitting hits:
+                // later chunks keep waiting, but permit acquisition and bounded
+                // channel sends do not hold the emit-order mutex.
+                for normalized in normalized_hits {
+                    hits_found.fetch_add(1, Ordering::Relaxed);
+                    let permit = hit_limiter.acquire();
+                    let seq = hit_sequence.fetch_add(1, Ordering::Relaxed);
+                    let file_type_id = normalized.file_type_id.clone();
                     // Classify hit as fast or slow based on carver metadata.
                     // When split is disabled (single worker mode), all hits go to slow.
-                    let tx = if split_enabled && carve_registry.is_fast(&normalized.file_type_id) {
+                    let tx = if split_enabled && carve_registry.is_fast(&file_type_id) {
                         &fast_hit_tx
                     } else {
                         &slow_hit_tx
                     };
-                    if let Err(err) = tx.send(normalized) {
+                    if let Err(err) = tx.send(HitJob {
+                        seq,
+                        hit: normalized,
+                        permit,
+                    }) {
                         warn!("hit channel closed while sending hit: {err}");
+                        hit_channel_closed = true;
                         break;
                     }
+                }
+                {
+                    let (lock, cvar) = &*emit_order;
+                    let mut next_chunk = lock.lock().expect("scan emit-order lock poisoned");
+                    debug_assert_eq!(*next_chunk, chunk_id);
+                    if *next_chunk == chunk_id {
+                        *next_chunk = next_chunk.saturating_add(1);
+                    }
+                    cvar.notify_all();
                 }
                 if sqlite_page_hits_dropped > 0 {
                     debug!(
                         "chunk {} sqlite_page hits capped: kept={} dropped={} cap={}",
-                        job.chunk.id,
+                        chunk_id,
                         sqlite_page_hits,
                         sqlite_page_hits_dropped,
                         sqlite_page_max_hits_per_chunk
                     );
+                }
+                if hit_channel_closed {
+                    break;
                 }
 
                 // Scan for strings if enabled
@@ -412,49 +601,59 @@ pub fn spawn_scan_workers(
     handles
 }
 
-/// Per-worker tracker of carved file ranges to skip interior hits of the same type.
+/// Per-file-type non-overlap accumulator used by the overlap arbiter.
+///
+/// Records committed closed `[start, end]` carve ranges and rejects any range
+/// that intersects an already-accepted range for the same file type. Ranges are
+/// keyed by final carved-file offsets, not signature-hit offsets, so this stays
+/// correct even for carvers whose output start precedes the signature position.
+/// Operates purely in the arbiter thread, so it does not need to be
+/// `Send`/`Sync`-shared.
+#[derive(Default)]
 struct OverlapTracker {
-    ranges: HashMap<String, Vec<(u64, u64)>>,
-    total_checks: u64,
+    ranges_by_type: HashMap<String, BTreeMap<u64, u64>>,
 }
 
 impl OverlapTracker {
     fn new() -> Self {
-        Self {
-            ranges: HashMap::new(),
-            total_checks: 0,
-        }
+        Self::default()
     }
 
-    /// Returns true if `offset` falls within any recorded [start, end] range for `file_type`.
-    fn is_overlapping(&mut self, file_type: &str, offset: u64) -> bool {
-        self.total_checks += 1;
-        if self.total_checks.is_multiple_of(1000) {
-            self.prune_before(offset.saturating_sub(1));
+    fn range_intersects(&self, file_type: &str, start: u64, end: u64) -> bool {
+        let Some(ranges) = self.ranges_by_type.get(file_type) else {
+            return false;
+        };
+        if let Some((_, prev_end)) = ranges.range(..=start).next_back()
+            && *prev_end >= start
+        {
+            return true;
         }
-        if let Some(ranges) = self.ranges.get(file_type) {
-            ranges
-                .iter()
-                .any(|&(start, end)| offset >= start && offset <= end)
-        } else {
-            false
+        if let Some((next_start, _)) = ranges.range(start..).next()
+            && *next_start <= end
+        {
+            return true;
         }
+        false
     }
 
-    /// Records a carved range [start, end] for the given file type.
-    fn record(&mut self, file_type: &str, start: u64, end: u64) {
-        self.ranges
+    fn record_non_overlapping(&mut self, file_type: &str, start: u64, end: u64) {
+        debug_assert!(!self.range_intersects(file_type, start, end));
+        self.ranges_by_type
             .entry(file_type.to_owned())
             .or_default()
-            .push((start, end));
+            .insert(start, end);
     }
 
-    /// Removes all ranges where end < min_offset.
-    fn prune_before(&mut self, min_offset: u64) {
-        for ranges in self.ranges.values_mut() {
-            ranges.retain(|&(_, end)| end >= min_offset);
+    /// Try to record `[start, end]` for `file_type`. Returns `true` if the
+    /// range was accepted (no intersection with prior ranges), `false` if
+    /// it was rejected.
+    #[cfg(test)]
+    fn try_commit(&mut self, file_type: &str, start: u64, end: u64) -> bool {
+        if self.range_intersects(file_type, start, end) {
+            return false;
         }
-        self.ranges.retain(|_, v| !v.is_empty());
+        self.record_non_overlapping(file_type, start, end);
+        true
     }
 }
 
@@ -480,14 +679,17 @@ pub struct CarveWorkerConfig {
 /// Runtime plumbing for a carve worker pool invocation.
 #[derive(Clone)]
 pub struct CarveWorkerRuntime {
-    pub rx: Receiver<NormalizedHit>,
-    pub write_tx: Sender<WriteJob>,
+    pub rx: Receiver<HitJob>,
+    /// Channel that completed [`CarveResult`]s are sent on. Carve workers send
+    /// directly to the overlap arbiter (see [`spawn_overlap_arbiter`]),
+    /// which deterministically deconflicts overlapping ranges before
+    /// forwarding accepted jobs to the writer pool.
+    pub write_tx: Sender<CarveResult>,
     pub carve_limiter: Arc<CarveLimiter>,
     pub carve_errors: Arc<AtomicU64>,
     pub carve_time_ms: Arc<AtomicU64>,
     pub files_rejected: Arc<AtomicU64>,
     pub files_prevalidation_rejected: Arc<AtomicU64>,
-    pub overlap_skipped: Arc<AtomicU64>,
     pub duplicates_found: Arc<AtomicU64>,
 }
 
@@ -571,7 +773,6 @@ pub fn spawn_carve_workers(
         let carve_time_ms = runtime.carve_time_ms.clone();
         let files_rejected = runtime.files_rejected.clone();
         let files_prevalidation_rejected = runtime.files_prevalidation_rejected.clone();
-        let overlap_skipped = runtime.overlap_skipped.clone();
         let hash_config = cfg.hash_config.clone();
         let dedup_tracker = cfg.dedup_tracker.clone();
         let duplicates_found = runtime.duplicates_found.clone();
@@ -582,7 +783,6 @@ pub fn spawn_carve_workers(
 
         handles.push(thread::spawn(move || {
             let carved_root = run_output_dir.join("carved");
-            let mut overlap_tracker = OverlapTracker::new();
             let mut ctx = ExtractionContext {
                 run_id: &run_id,
                 output_root: &carved_root,
@@ -595,48 +795,46 @@ pub fn spawn_carve_workers(
                 chunk_start: 0,
             };
 
-            for hit in rx {
+            for hit_job in rx {
+                let seq = hit_job.seq;
+                let hit = hit_job.hit;
+                let mut result_guard =
+                    HitResultGuard::new(seq, hit_job.permit, &write_tx, &carve_errors);
                 ctx.chunk_data = hit.chunk_data.clone();
                 ctx.chunk_start = hit.chunk_start;
                 let handler = match registry.get(&hit.file_type_id) {
                     Some(handler) => handler,
                     None => {
                         debug!("no handler for file_type={}", hit.file_type_id);
+                        if !result_guard.send_empty() {
+                            break;
+                        }
                         continue;
                     }
                 };
 
-                if overlap_tracker.is_overlapping(&hit.file_type_id, hit.global_offset) {
-                    overlap_skipped.fetch_add(1, Ordering::Relaxed);
-                    debug!(
-                        "overlap skip {} at offset {}",
-                        hit.file_type_id, hit.global_offset
-                    );
-                    continue;
-                }
-
-                if !carve_limiter.try_reserve() {
-                    continue;
-                }
-
                 match handler.pre_validate(evidence.as_ref(), hit.global_offset) {
                     Ok(crate::carve::PreValidation::Proceed) => { /* continue to process_hit */ }
                     Ok(crate::carve::PreValidation::Reject(reason)) => {
-                        carve_limiter.release();
                         files_prevalidation_rejected.fetch_add(1, Ordering::Relaxed);
                         debug!(
                             "pre_validate rejected {} at offset {}: {reason}",
                             hit.file_type_id, hit.global_offset
                         );
+                        if !result_guard.send_empty() {
+                            break;
+                        }
                         continue;
                     }
                     Err(err) => {
-                        carve_limiter.release();
                         carve_errors.fetch_add(1, Ordering::Relaxed);
                         warn!(
                             "pre_validate error for {} at offset {}: {err}",
                             hit.file_type_id, hit.global_offset
                         );
+                        if !result_guard.send_empty() {
+                            break;
+                        }
                         continue;
                     }
                 }
@@ -672,15 +870,6 @@ pub fn spawn_carve_workers(
                             }
                         }
 
-                        // Record overlap before sending to writer to prevent re-carving the same
-                        // range while the write is in-flight. Trade-off: if flush() later fails,
-                        // this range remains "blocked" for this worker.
-                        overlap_tracker.record(
-                            &pending.file.file_type,
-                            pending.file.global_start,
-                            pending.file.global_end,
-                        );
-
                         let write_job = WriteJob {
                             pending,
                             hit_global_offset: hit.global_offset,
@@ -690,25 +879,22 @@ pub fn spawn_carve_workers(
                         // Drop per-type permit before send to avoid holding it
                         // during potential backpressure on the write channel.
                         drop(_type_permit);
-                        if let Err(err) = write_tx.send(write_job) {
-                            // Channel closed — release reservation and stop
-                            err.into_inner().carve_limiter.release();
-                            carve_errors.fetch_add(1, Ordering::Relaxed);
-                            warn!(
-                                "write channel closed while sending job at offset {}",
-                                hit.global_offset
-                            );
+                        if !result_guard.send_job(write_job, hit.global_offset) {
                             break;
                         }
                     }
                     Ok(None) => {
-                        carve_limiter.release();
                         files_rejected.fetch_add(1, Ordering::Relaxed);
+                        if !result_guard.send_empty() {
+                            break;
+                        }
                     }
                     Err(err) => {
-                        carve_limiter.release();
                         carve_errors.fetch_add(1, Ordering::Relaxed);
                         warn!("carve error at offset {}: {err}", hit.global_offset);
+                        if !result_guard.send_empty() {
+                            break;
+                        }
                     }
                 }
             }
@@ -716,6 +902,115 @@ pub fn spawn_carve_workers(
     }
 
     handles
+}
+
+/// Spawn the deterministic overlap arbiter thread.
+///
+/// The arbiter sits between the carve worker pool and the writer pool. It
+/// receives one [`CarveResult`] for every sequenced hit and releases results
+/// to the writer pool in deterministic evidence order:
+///
+/// 1. Scan workers sort each chunk's hits by `(global_offset, file_type, pattern_id)`
+///    and assign monotonic sequences in that order while holding the per-chunk
+///    emit-order turn.
+/// 2. The arbiter waits for the next sequence and accepts each final carved range that does
+///    not intersect any previously accepted range for the same file type.
+///
+/// Accepted jobs are forwarded to the writer pool in sorted order; rejected
+/// jobs are discarded (their on-disk staging files are removed via
+/// [`crate::carve::PendingCarve::discard`]) and counted in
+/// `overlap_skipped`.
+///
+/// Sequenced hits carry an in-flight permit that is released only after the
+/// arbiter processes the result, bounding out-of-order buffering and keeping
+/// overlap decisions reproducible without end-of-input candidate storage.
+pub fn spawn_overlap_arbiter(
+    rx: Receiver<CarveResult>,
+    write_tx: Sender<WriteJob>,
+    overlap_skipped: Arc<AtomicU64>,
+    files_capped: Arc<AtomicU64>,
+    carve_errors: Arc<AtomicU64>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut accepted = OverlapTracker::new();
+        let mut pending: BTreeMap<u64, CarveResult> = BTreeMap::new();
+        let mut next_seq = 0u64;
+        let mut write_closed = false;
+
+        for result in rx {
+            pending.insert(result.seq, result);
+            while let Some(result) = pending.remove(&next_seq) {
+                if let Some(job) = result.job {
+                    arbitrate_write_job(
+                        job,
+                        &write_tx,
+                        &mut accepted,
+                        &overlap_skipped,
+                        &files_capped,
+                        &carve_errors,
+                        &mut write_closed,
+                    );
+                }
+                next_seq = next_seq.saturating_add(1);
+            }
+        }
+
+        for (_, result) in pending {
+            if let Some(job) = result.job {
+                let _ = job.pending.discard();
+            }
+        }
+    })
+}
+
+fn arbitrate_write_job(
+    job: WriteJob,
+    write_tx: &Sender<WriteJob>,
+    accepted: &mut OverlapTracker,
+    overlap_skipped: &AtomicU64,
+    files_capped: &AtomicU64,
+    carve_errors: &AtomicU64,
+    write_closed: &mut bool,
+) {
+    if *write_closed {
+        let _ = job.pending.discard();
+        return;
+    }
+
+    let file_type = job.pending.file.file_type.clone();
+    let start = job.pending.file.global_start;
+    let end = job.pending.file.global_end;
+    if accepted.range_intersects(&file_type, start, end) {
+        overlap_skipped.fetch_add(1, Ordering::Relaxed);
+        let hit_offset = job.hit_global_offset;
+        let _ = job.pending.discard();
+        debug!(
+            "overlap arbiter rejected {} at offset {} ({}..={})",
+            file_type, hit_offset, start, end
+        );
+        return;
+    }
+
+    if !job.carve_limiter.try_reserve() {
+        files_capped.fetch_add(1, Ordering::Relaxed);
+        let hit_offset = job.hit_global_offset;
+        let _ = job.pending.discard();
+        debug!(
+            "max_files cap rejected {} at offset {} ({}..={})",
+            file_type, hit_offset, start, end
+        );
+        return;
+    }
+
+    accepted.record_non_overlapping(&file_type, start, end);
+    if let Err(err) = write_tx.send(job) {
+        let job = err.into_inner();
+        job.carve_limiter.release();
+        let _ = job.pending.discard();
+        carve_errors.fetch_add(1, Ordering::Relaxed);
+        warn!("write channel closed while arbiter forwarding accepted job");
+        *write_closed = true;
+    }
 }
 
 /// Spawn dedicated I/O writer worker threads that flush/discard validated
@@ -833,66 +1128,103 @@ mod tests {
     use super::*;
 
     #[test]
-    fn overlap_tracker_skips_interior_hits() {
+    fn overlap_tracker_accepts_first_range_for_type() {
         let mut tracker = OverlapTracker::new();
-
-        // No ranges recorded yet — nothing should overlap
-        assert!(!tracker.is_overlapping("jpeg", 500));
-
-        // Record a carved JPEG from offset 1000 to 2000
-        tracker.record("jpeg", 1000, 2000);
-
-        // Interior offsets should be detected as overlapping
-        assert!(tracker.is_overlapping("jpeg", 1000)); // exact start
-        assert!(tracker.is_overlapping("jpeg", 1500)); // middle
-        assert!(tracker.is_overlapping("jpeg", 2000)); // exact end
-
-        // Offsets outside the range should NOT overlap
-        assert!(!tracker.is_overlapping("jpeg", 999));
-        assert!(!tracker.is_overlapping("jpeg", 2001));
-
-        // Different file type should NOT overlap
-        assert!(!tracker.is_overlapping("png", 1500));
+        assert!(tracker.try_commit("jpeg", 1000, 2000));
     }
 
     #[test]
-    fn overlap_tracker_multiple_ranges() {
+    fn overlap_tracker_rejects_intersecting_range() {
         let mut tracker = OverlapTracker::new();
-
-        tracker.record("wav", 0, 1000);
-        tracker.record("wav", 5000, 6000);
-
-        assert!(tracker.is_overlapping("wav", 500));
-        assert!(tracker.is_overlapping("wav", 5500));
-        assert!(!tracker.is_overlapping("wav", 2500)); // gap between ranges
+        assert!(tracker.try_commit("sqlite_page", 4096, 8191));
+        assert!(
+            !tracker.try_commit("sqlite_page", 4608, 8703),
+            "later-start range that intersects committed range must be rejected"
+        );
     }
 
     #[test]
-    fn overlap_tracker_prune_removes_old_ranges() {
+    fn overlap_tracker_rejects_range_enclosed_by_prior_range() {
         let mut tracker = OverlapTracker::new();
-
-        tracker.record("bmp", 100, 200);
-        tracker.record("bmp", 500, 600);
-
-        // Prune ranges ending before 300
-        tracker.prune_before(300);
-
-        // Range [100, 200] should be gone
-        assert!(!tracker.is_overlapping("bmp", 150));
-        // Range [500, 600] should remain
-        assert!(tracker.is_overlapping("bmp", 550));
+        assert!(tracker.try_commit("sqlite_page", 4096, 16383));
+        assert!(
+            !tracker.try_commit("sqlite_page", 8192, 12287),
+            "enclosed range must be rejected when its containing range is already committed"
+        );
     }
 
     #[test]
-    fn overlap_tracker_empty_type_after_prune() {
+    fn overlap_tracker_accepts_adjacent_non_overlapping_ranges() {
         let mut tracker = OverlapTracker::new();
+        assert!(tracker.try_commit("sqlite_page", 4096, 8191));
+        assert!(
+            tracker.try_commit("sqlite_page", 8192, 12287),
+            "adjacent non-overlapping range must be accepted"
+        );
+    }
 
-        tracker.record("gif", 100, 200);
-        tracker.prune_before(300);
+    #[test]
+    fn overlap_tracker_rejects_shared_endpoint() {
+        // global_end is inclusive: ranges sharing exactly one byte at the
+        // boundary intersect and the second must be rejected. Guards
+        // against an inadvertent change of `<=` to `<` in the interval
+        // test.
+        let mut tracker = OverlapTracker::new();
+        assert!(tracker.try_commit("sqlite_page", 0, 8192));
+        assert!(
+            !tracker.try_commit("sqlite_page", 8192, 12288),
+            "ranges sharing an endpoint are intersecting under closed-interval semantics"
+        );
+    }
 
-        // Type should be removed entirely from the map
-        assert!(tracker.ranges.is_empty());
-        assert!(!tracker.is_overlapping("gif", 150));
+    #[test]
+    fn overlap_tracker_isolates_file_types() {
+        let mut tracker = OverlapTracker::new();
+        assert!(tracker.try_commit("sqlite_page", 4096, 8191));
+        assert!(
+            tracker.try_commit("jpeg", 4096, 8191),
+            "different file types share no overlap state"
+        );
+    }
+
+    /// Demonstrates the deterministic arbitration case where final ranges
+    /// arrive in start order: the first range wins, overlapping later ranges
+    /// are rejected, and non-overlapping later ranges are still accepted.
+    /// This guards against the greedy-by-arrival regression flagged in the
+    /// post-implementation review of issue #84 (e.g. the A=[100,199],
+    /// B=[150,249], C=[220,319] case where arrival order could otherwise
+    /// drop C).
+    #[test]
+    fn overlap_tracker_sorted_arbitration_keeps_non_conflicting_later_ranges() {
+        let mut tracker = OverlapTracker::new();
+        // Sorted by (start, end): A, B, C
+        assert!(tracker.try_commit("sqlite_page", 100, 199), "A accepted");
+        assert!(
+            !tracker.try_commit("sqlite_page", 150, 249),
+            "B rejected (overlaps A)"
+        );
+        assert!(
+            tracker.try_commit("sqlite_page", 220, 319),
+            "C accepted (does not overlap A)"
+        );
+    }
+
+    #[test]
+    fn overlap_tracker_handles_out_of_order_final_starts() {
+        let mut tracker = OverlapTracker::new();
+        assert!(tracker.try_commit("tar", 1000, 1099));
+        assert!(
+            tracker.try_commit("tar", 500, 599),
+            "non-overlapping earlier final starts must still be accepted"
+        );
+        assert!(
+            !tracker.try_commit("tar", 550, 650),
+            "overlap with an earlier-start range must be rejected even when it arrived later"
+        );
+        assert!(
+            !tracker.try_commit("tar", 900, 1000),
+            "closed intervals sharing an endpoint must be rejected in out-of-order input"
+        );
     }
 
     #[test]

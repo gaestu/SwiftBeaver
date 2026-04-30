@@ -6,7 +6,7 @@ The default config is `config/default.yml`.
 
 - `run_id` (string): optional; if empty, a timestamp-based ID is generated.
 - `overlap_bytes` (u64): overlap between chunks.
-- `max_files` (u64, optional): strict cap on carved files; the pipeline stops once the limit is reached.
+- `max_files` (u64, optional): strict upper bound on accepted carved files. With streaming overlap arbitration, the cap is applied after overlapping candidates are deconflicted so rejected overlaps do not consume output slots. Actual output can be lower if accepted carves fail during final write/flush after scanning has already stopped at the cap.
 - `max_memory_mib` (u64, optional): limit address space in MiB (Unix only).
 - `max_open_files` (u64, optional): limit max open file descriptors (Unix only).
 - `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.
@@ -47,7 +47,7 @@ The default config is `config/default.yml`.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.
 Note: `sqlite_page` and `sqlite_wal` are carve-only outputs; enable/disable them via `file_types` and CLI type filters (`--types` / `--enable-types`).
-Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, and `overlap_skipped` for same-type hits skipped because they fall inside a range already carved by that worker.
+Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, `overlap_skipped` for fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`, and `files_capped` for otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## File type configuration
 

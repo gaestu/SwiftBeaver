@@ -100,3 +100,31 @@ fn enforces_strict_max_files_under_concurrency() {
     assert!(stats.files_carved > 0);
     assert!(stats.hits_found >= max_files);
 }
+
+#[test]
+fn max_files_stops_scanning_before_dense_input_is_exhausted() {
+    let chunks = 256usize;
+    let chunk_size = 64 * 1024usize;
+    let max_files = 1u64;
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let input_path = temp_dir.path().join("dense_large.bin");
+    let mut file = File::create(&input_path).expect("create");
+    let jpeg = minimal_jpeg();
+
+    for _ in 0..chunks {
+        file.write_all(&jpeg).expect("write jpeg");
+        let padding_len = chunk_size - jpeg.len();
+        file.write_all(&vec![0u8; padding_len])
+            .expect("write padding");
+    }
+    file.flush().expect("flush");
+    file.seek(SeekFrom::Start(0)).expect("seek");
+
+    let stats = run_pipeline(&input_path, Some(max_files), 1);
+    assert_eq!(stats.files_carved, max_files);
+    assert!(
+        stats.chunks_processed < chunks as u64 / 2,
+        "max_files should stop scanning early; processed {} of {chunks} chunks",
+        stats.chunks_processed
+    );
+}

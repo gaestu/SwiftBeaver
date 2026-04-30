@@ -158,6 +158,7 @@ Columns:
 - `files_carved`
 - `files_rejected`
 - `files_prevalidation_rejected`
+- `files_capped`
 - `overlap_skipped`
 - `string_spans`
 - `artefacts_extracted`
@@ -168,7 +169,7 @@ Columns:
 - `evidence_path`
 - `evidence_sha256`
 
-`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts same-type hits skipped because they landed inside a range already carved by that worker.
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## entropy_regions.csv
 

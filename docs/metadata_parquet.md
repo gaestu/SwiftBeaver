@@ -220,13 +220,14 @@ For `referenced_files_json`, `null` means extraction is not implemented for that
 - `files_carved` (int64)
 - `files_rejected` (int64)
 - `files_prevalidation_rejected` (int64)
+- `files_capped` (int64)
 - `overlap_skipped` (int64)
 - `string_spans` (int64)
 - `artefacts_extracted` (int64)
 - `duplicates_found` (int64)
 - `duplicates_skipped` (int64)
 
-`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts same-type hits skipped because they landed inside a range already carved by that worker.
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## Entropy regions
 

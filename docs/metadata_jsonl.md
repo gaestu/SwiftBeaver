@@ -178,6 +178,7 @@ Each line in `metadata/run_summary.jsonl` is a JSON object with:
 - `files_carved`
 - `files_rejected`
 - `files_prevalidation_rejected`
+- `files_capped`
 - `overlap_skipped`
 - `string_spans`
 - `artefacts_extracted`
@@ -188,7 +189,7 @@ Each line in `metadata/run_summary.jsonl` is a JSON object with:
 - `evidence_path`
 - `evidence_sha256`
 
-`files_prevalidation_rejected` counts hits rejected by the carver's lightweight `pre_validate()` checks before any carved file is created. `overlap_skipped` counts same-type hits skipped because their offsets fall inside a byte range that was already carved by that worker.
+`files_prevalidation_rejected` counts hits rejected by the carver's lightweight `pre_validate()` checks before any carved file is created. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## Entropy regions (`entropy_regions.jsonl`)
 
