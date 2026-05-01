@@ -7,6 +7,7 @@ use crate::carve::PostCarveMetadata;
 use crate::metadata::{EntropyRegion, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::StringArtefact;
+use crate::strings::phones::PhoneSummaryRow;
 
 /// Events sent to the metadata recording thread
 #[derive(Debug)]
@@ -17,6 +18,8 @@ pub enum MetadataEvent {
     PostCarveMetadata(PostCarveMetadata),
     /// A string artefact (URL, email, phone) was found
     String(StringArtefact),
+    /// Aggregated phone summary row
+    PhoneSummary(PhoneSummaryRow),
     /// A browser history record was parsed
     History(BrowserHistoryRecord),
     /// A browser cookie record was parsed
@@ -47,6 +50,7 @@ pub enum FileShardEvent {
 #[derive(Debug)]
 pub enum StringShardEvent {
     String(StringArtefact),
+    PhoneSummary(PhoneSummaryRow),
     Flush,
 }
 

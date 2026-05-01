@@ -12,6 +12,7 @@ use crate::metadata::windows::flatten_windows_artefact;
 use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
+use crate::strings::phones::PhoneSummaryRow;
 
 pub struct CsvSink {
     tool_version: String,
@@ -191,6 +192,20 @@ struct RunSummaryCsv<'a> {
     artefacts_extracted: u64,
     duplicates_found: u64,
     duplicates_skipped: u64,
+    phone_like_spans_scanned: u64,
+    phone_regex_candidates: u64,
+    phone_prefilter_rejections: u64,
+    phone_rejected_digit_only: u64,
+    phone_rejected_low_entropy: u64,
+    phone_rejected_bad_context: u64,
+    phone_rejected_no_region: u64,
+    phone_rejected_invalid: u64,
+    phone_validation_calls: u64,
+    phone_validated_rows: u64,
+    phone_exact_duplicates_omitted: u64,
+    phone_occurrences_capped: u64,
+    phone_distinct_normalized_values: u64,
+    phone_repeated_normalized_values: u64,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -414,6 +429,20 @@ impl CsvSink {
             "artefacts_extracted",
             "duplicates_found",
             "duplicates_skipped",
+            "phone_like_spans_scanned",
+            "phone_regex_candidates",
+            "phone_prefilter_rejections",
+            "phone_rejected_digit_only",
+            "phone_rejected_low_entropy",
+            "phone_rejected_bad_context",
+            "phone_rejected_no_region",
+            "phone_rejected_invalid",
+            "phone_validation_calls",
+            "phone_validated_rows",
+            "phone_exact_duplicates_omitted",
+            "phone_occurrences_capped",
+            "phone_distinct_normalized_values",
+            "phone_repeated_normalized_values",
             "tool_version",
             "config_hash",
             "evidence_path",
@@ -524,6 +553,11 @@ impl MetadataSink for CsvSink {
             .lock()
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
         guard.serialize(record)?;
+        Ok(())
+    }
+
+    fn record_phone_summary(&self, _summary: &PhoneSummaryRow) -> Result<(), MetadataError> {
+        // Phone summary rows are currently a Parquet-only metadata category.
         Ok(())
     }
 
@@ -666,6 +700,20 @@ impl MetadataSink for CsvSink {
             artefacts_extracted: summary.artefacts_extracted,
             duplicates_found: summary.duplicates_found,
             duplicates_skipped: summary.duplicates_skipped,
+            phone_like_spans_scanned: summary.phone_like_spans_scanned,
+            phone_regex_candidates: summary.phone_regex_candidates,
+            phone_prefilter_rejections: summary.phone_prefilter_rejections,
+            phone_rejected_digit_only: summary.phone_rejected_digit_only,
+            phone_rejected_low_entropy: summary.phone_rejected_low_entropy,
+            phone_rejected_bad_context: summary.phone_rejected_bad_context,
+            phone_rejected_no_region: summary.phone_rejected_no_region,
+            phone_rejected_invalid: summary.phone_rejected_invalid,
+            phone_validation_calls: summary.phone_validation_calls,
+            phone_validated_rows: summary.phone_validated_rows,
+            phone_exact_duplicates_omitted: summary.phone_exact_duplicates_omitted,
+            phone_occurrences_capped: summary.phone_occurrences_capped,
+            phone_distinct_normalized_values: summary.phone_distinct_normalized_values,
+            phone_repeated_normalized_values: summary.phone_repeated_normalized_values,
             tool_version: &self.tool_version,
             config_hash: &self.config_hash,
             evidence_path: &self.evidence_path,
@@ -811,6 +859,9 @@ mod tests {
             encoding: "ascii".to_string(),
             global_start: 100,
             global_end: 120,
+            phone_e164: None,
+            phone_country: None,
+            phone_validation_status: None,
         };
         sink.record_string(&artefact).expect("record string");
 
@@ -887,6 +938,20 @@ mod tests {
             artefacts_extracted: 4,
             duplicates_found: 0,
             duplicates_skipped: 0,
+            phone_like_spans_scanned: 0,
+            phone_regex_candidates: 0,
+            phone_prefilter_rejections: 0,
+            phone_rejected_digit_only: 0,
+            phone_rejected_low_entropy: 0,
+            phone_rejected_bad_context: 0,
+            phone_rejected_no_region: 0,
+            phone_rejected_invalid: 0,
+            phone_validation_calls: 0,
+            phone_validated_rows: 0,
+            phone_exact_duplicates_omitted: 0,
+            phone_occurrences_capped: 0,
+            phone_distinct_normalized_values: 0,
+            phone_repeated_normalized_values: 0,
         };
         sink.record_run_summary(&summary).expect("record summary");
         let region = EntropyRegion {

@@ -1,10 +1,24 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::Result;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use tracing::warn;
+
+pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("yaml error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+    #[error("phone region code cannot be empty")]
+    EmptyPhoneRegion,
+    #[error("unsupported phone region code: {region}")]
+    UnsupportedPhoneRegion { region: String },
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FileTypeConfig {
@@ -32,6 +46,13 @@ pub enum QuicktimeMode {
     Mp4,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PhoneMode {
+    Off,
+    Validated,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub run_id: String,
@@ -49,6 +70,12 @@ pub struct Config {
     pub enable_email_scan: bool,
     #[serde(default = "default_true")]
     pub enable_phone_scan: bool,
+    #[serde(default)]
+    pub phone_mode: Option<PhoneMode>,
+    #[serde(default)]
+    pub phone_default_region: Option<String>,
+    #[serde(default)]
+    pub phone_supported_regions: Vec<String>,
     #[serde(default = "default_true")]
     pub enable_bitlocker_recovery_scan: bool,
     #[serde(default)]
@@ -126,7 +153,7 @@ pub struct LoadedConfig {
     pub config_hash: String,
 }
 
-pub fn load_config(path: Option<&Path>) -> Result<LoadedConfig> {
+pub fn load_config(path: Option<&Path>) -> ConfigResult<LoadedConfig> {
     let bytes: Vec<u8> = if let Some(p) = path {
         std::fs::read(p)?
     } else {
@@ -137,6 +164,7 @@ pub fn load_config(path: Option<&Path>) -> Result<LoadedConfig> {
     if config.run_id.trim().is_empty() {
         config.run_id = generate_run_id();
     }
+    config.normalize_phone_config()?;
 
     let config_hash = hash_bytes(&bytes);
 
@@ -248,6 +276,38 @@ fn default_write_workers() -> usize {
 }
 
 impl Config {
+    pub fn effective_phone_mode(&self) -> PhoneMode {
+        self.phone_mode
+            .expect("normalize_phone_config sets phone_mode")
+    }
+
+    fn normalize_phone_config(&mut self) -> ConfigResult<()> {
+        match self.phone_mode {
+            Some(PhoneMode::Off) => self.enable_phone_scan = false,
+            Some(PhoneMode::Validated) => self.enable_phone_scan = true,
+            None => {
+                self.phone_mode = Some(if self.enable_phone_scan {
+                    PhoneMode::Validated
+                } else {
+                    PhoneMode::Off
+                });
+            }
+        }
+
+        self.phone_default_region =
+            normalize_optional_region(self.phone_default_region.as_deref())?;
+
+        let mut regions = Vec::with_capacity(self.phone_supported_regions.len());
+        for region in &self.phone_supported_regions {
+            regions.push(normalize_region(region)?);
+        }
+        regions.sort();
+        regions.dedup();
+        self.phone_supported_regions = regions;
+
+        Ok(())
+    }
+
     /// Merge CLI options into the config.
     /// CLI flags override config file values.
     pub fn merge_cli(&mut self, cli: &crate::cli::CliOptions) {
@@ -284,9 +344,11 @@ impl Config {
         // Phone scanning
         if cli.scan_phones {
             self.enable_phone_scan = true;
+            self.phone_mode = Some(PhoneMode::Validated);
         }
         if cli.no_scan_phones {
             self.enable_phone_scan = false;
+            self.phone_mode = Some(PhoneMode::Off);
         }
 
         // BitLocker recovery password scanning
@@ -387,5 +449,85 @@ impl Config {
             warn!("carve_workers must be >= 1; using 1");
             *cw = 1;
         }
+    }
+}
+
+fn normalize_optional_region(region: Option<&str>) -> ConfigResult<Option<String>> {
+    region.map(normalize_region).transpose()
+}
+
+fn normalize_region(region: &str) -> ConfigResult<String> {
+    let normalized = region.trim().to_ascii_uppercase();
+    if normalized.is_empty() {
+        return Err(ConfigError::EmptyPhoneRegion);
+    }
+    if normalized.parse::<phonenumber::country::Id>().is_err() {
+        return Err(ConfigError::UnsupportedPhoneRegion {
+            region: region.to_string(),
+        });
+    }
+    Ok(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConfigError, PhoneMode, load_config};
+    use clap::Parser;
+
+    #[test]
+    fn legacy_enable_phone_scan_maps_to_validated_mode() {
+        let mut cfg = load_config(None).expect("config").config;
+        cfg.phone_mode = None;
+        cfg.enable_phone_scan = true;
+        cfg.normalize_phone_config()
+            .expect("normalize phone config");
+        assert_eq!(cfg.effective_phone_mode(), PhoneMode::Validated);
+        assert!(cfg.enable_phone_scan);
+
+        cfg.phone_mode = None;
+        cfg.enable_phone_scan = false;
+        cfg.normalize_phone_config()
+            .expect("normalize phone config");
+        assert_eq!(cfg.effective_phone_mode(), PhoneMode::Off);
+        assert!(!cfg.enable_phone_scan);
+    }
+
+    #[test]
+    fn cli_phone_flags_set_effective_phone_mode() {
+        let mut cfg = load_config(None).expect("config").config;
+        cfg.enable_phone_scan = false;
+        cfg.phone_mode = Some(PhoneMode::Off);
+        let scan_cli = crate::cli::CliOptions::parse_from([
+            "swiftbeaver",
+            "--input",
+            "evidence.dd",
+            "--scan-phones",
+        ]);
+        cfg.merge_cli(&scan_cli);
+        assert_eq!(cfg.effective_phone_mode(), PhoneMode::Validated);
+        assert!(cfg.enable_phone_scan);
+
+        let no_scan_cli = crate::cli::CliOptions::parse_from([
+            "swiftbeaver",
+            "--input",
+            "evidence.dd",
+            "--no-scan-phones",
+        ]);
+        cfg.merge_cli(&no_scan_cli);
+        assert_eq!(cfg.effective_phone_mode(), PhoneMode::Off);
+        assert!(!cfg.enable_phone_scan);
+    }
+
+    #[test]
+    fn invalid_phone_region_is_rejected() {
+        let mut cfg = load_config(None).expect("config").config;
+        cfg.phone_default_region = Some("XX".to_string());
+        let err = cfg
+            .normalize_phone_config()
+            .expect_err("invalid region should fail");
+        assert!(matches!(
+            err,
+            ConfigError::UnsupportedPhoneRegion { ref region } if region == "XX"
+        ));
     }
 }

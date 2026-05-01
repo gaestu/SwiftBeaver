@@ -44,6 +44,7 @@ Schema:
 - `artefacts_urls.parquet`
 - `artefacts_emails.parquet`
 - `artefacts_phones.parquet`
+- `artefacts_phones_summary.parquet`
 - `artefacts_bitlocker_recovery_passwords.parquet`
 
 URL schema:
@@ -65,6 +66,29 @@ URL schema:
 - `source_kind` (string)
 - `source_detail` (string)
 - `certainty` (float64)
+
+Phone rows are validated-only. `phone_raw` preserves the matched source text;
+`phone_e164` stores the normalized E.164 value and `country` stores the inferred
+region for accepted rows.
+
+Phone summary schema (`artefacts_phones_summary.parquet`):
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `normalized_phone` (string)
+- `occurrence_count` (int64)
+- `first_global_start` (int64)
+- `last_global_start` (int64)
+- `country` (string)
+- `validation_status` (string)
+
+Summary rows group accepted occurrence rows by normalized phone value. Repeated
+values at different evidence offsets remain in `artefacts_phones.parquet`; exact
+same-offset processing duplicates are omitted from occurrence output and counted
+in run-summary phone metrics.
 
 Email schema:
 
@@ -270,8 +294,22 @@ For `referenced_files_json`, `null` means extraction is not implemented for that
 - `artefacts_extracted` (int64)
 - `duplicates_found` (int64)
 - `duplicates_skipped` (int64)
+- `phone_like_spans_scanned` (int64)
+- `phone_regex_candidates` (int64)
+- `phone_prefilter_rejections` (int64)
+- `phone_rejected_digit_only` (int64)
+- `phone_rejected_low_entropy` (int64)
+- `phone_rejected_bad_context` (int64)
+- `phone_rejected_no_region` (int64)
+- `phone_rejected_invalid` (int64)
+- `phone_validation_calls` (int64)
+- `phone_validated_rows` (int64)
+- `phone_exact_duplicates_omitted` (int64)
+- `phone_occurrences_capped` (int64)
+- `phone_distinct_normalized_values` (int64)
+- `phone_repeated_normalized_values` (int64)
 
-`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Phone counters cover validated phone extraction from string spans: scanned phone-like spans, regex candidates, prefilter and validation rejection classes, validation calls, accepted rows, omitted exact duplicates, occurrence rows omitted after the duplicate-tracking memory cap, distinct normalized values, and repeated normalized values across different offsets. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## Entropy regions
 

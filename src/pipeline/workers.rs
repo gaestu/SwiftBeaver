@@ -20,7 +20,8 @@ use crate::entropy;
 use crate::evidence::EvidenceSource;
 use crate::metadata::MetadataSink;
 use crate::scanner::{NormalizedHit, SignatureScanner};
-use crate::strings::artifacts::ArtefactScanConfig;
+use crate::strings::artifacts::{ArtefactKind, ArtefactScanConfig};
+use crate::strings::phones::{PhoneArtefactTracker, PhoneScanMetrics};
 use crate::strings::{self, StringScanner, StringSpan};
 
 use super::EntropyConfig;
@@ -211,6 +212,12 @@ pub fn spawn_metadata_thread(
                         warn!("metadata record error: {err}");
                     }
                 }
+                MetadataEvent::PhoneSummary(summary) => {
+                    if let Err(err) = sink.record_phone_summary(&summary) {
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                        warn!("metadata record error: {err}");
+                    }
+                }
                 MetadataEvent::History(record) => {
                     if let Err(err) = sink.record_history(&record) {
                         error_count.fetch_add(1, Ordering::Relaxed);
@@ -277,6 +284,9 @@ pub fn spawn_metadata_router(
                     file_tx.send(FileShardEvent::PostCarveMetadata(r)).is_ok()
                 }
                 MetadataEvent::String(s) => string_tx.send(StringShardEvent::String(s)).is_ok(),
+                MetadataEvent::PhoneSummary(s) => {
+                    string_tx.send(StringShardEvent::PhoneSummary(s)).is_ok()
+                }
                 MetadataEvent::History(h) => file_tx.send(FileShardEvent::History(h)).is_ok(),
                 MetadataEvent::Cookie(c) => file_tx.send(FileShardEvent::Cookie(c)).is_ok(),
                 MetadataEvent::Download(d) => file_tx.send(FileShardEvent::Download(d)).is_ok(),
@@ -374,6 +384,7 @@ pub fn spawn_string_shard_thread(
         for event in rx {
             let result = match event {
                 StringShardEvent::String(ref artefact) => sink.record_string(artefact),
+                StringShardEvent::PhoneSummary(ref summary) => sink.record_phone_summary(summary),
                 StringShardEvent::Flush => sink.flush(),
             };
             if let Err(err) = result {
@@ -1082,6 +1093,7 @@ pub fn spawn_string_workers(
     meta_tx: Sender<MetadataEvent>,
     artefacts_found: Arc<AtomicU64>,
     scan_cfg: ArtefactScanConfig,
+    phone_tracker: Arc<Mutex<PhoneArtefactTracker>>,
 ) -> Vec<thread::JoinHandle<()>> {
     let mut handles = Vec::new();
     let worker_count = workers.max(1);
@@ -1091,8 +1103,11 @@ pub fn spawn_string_workers(
         let meta_tx = meta_tx.clone();
         let run_id = run_id.clone();
         let artefacts_found = artefacts_found.clone();
+        let scan_cfg = scan_cfg.clone();
+        let phone_tracker = phone_tracker.clone();
 
         handles.push(thread::spawn(move || {
+            let mut local_phone_metrics = PhoneScanMetrics::default();
             for job in rx {
                 for span in job.spans {
                     let start = span.local_start as usize;
@@ -1101,16 +1116,39 @@ pub fn spawn_string_workers(
                         continue;
                     }
                     let slice = &job.data[start..end];
-                    let artefacts = strings::artifacts::extract_artefacts(
+                    let extraction = strings::artifacts::extract_artefacts_with_metrics(
                         &run_id,
                         job.chunk.start,
                         span.local_start,
                         span.flags,
                         slice,
-                        scan_cfg,
+                        &scan_cfg,
                     );
-                    artefacts_found.fetch_add(artefacts.len() as u64, Ordering::Relaxed);
+
+                    local_phone_metrics.add(&extraction.phone_metrics);
+
+                    let mut artefacts = extraction.artefacts;
+                    if artefacts
+                        .iter()
+                        .any(|artefact| matches!(artefact.artefact_kind, ArtefactKind::Phone))
+                    {
+                        match phone_tracker.lock() {
+                            Ok(mut tracker) => {
+                                retain_accepted_phone_artefacts(&mut artefacts, &mut tracker)
+                            }
+                            Err(poisoned) => {
+                                warn!("phone tracker lock poisoned while recording phone");
+                                let mut tracker = poisoned.into_inner();
+                                retain_accepted_phone_artefacts(&mut artefacts, &mut tracker);
+                            }
+                        }
+                    }
+
                     for artefact in artefacts {
+                        if matches!(artefact.artefact_kind, ArtefactKind::Phone) {
+                            debug_assert!(artefact.phone_e164.is_some());
+                        }
+                        artefacts_found.fetch_add(1, Ordering::Relaxed);
                         if let Err(err) = meta_tx.send(MetadataEvent::String(artefact)) {
                             warn!("metadata channel closed while sending string artefact: {err}");
                             break;
@@ -1118,10 +1156,45 @@ pub fn spawn_string_workers(
                     }
                 }
             }
+            if scan_cfg.phones {
+                match phone_tracker.lock() {
+                    Ok(mut tracker) => tracker.record_scan_metrics(&local_phone_metrics),
+                    Err(poisoned) => {
+                        warn!("phone tracker lock poisoned while recording metrics");
+                        poisoned
+                            .into_inner()
+                            .record_scan_metrics(&local_phone_metrics);
+                    }
+                }
+            }
         }));
     }
 
     handles
+}
+
+fn retain_accepted_phone_artefacts(
+    artefacts: &mut Vec<strings::artifacts::StringArtefact>,
+    tracker: &mut PhoneArtefactTracker,
+) {
+    artefacts.retain(|artefact| {
+        if !matches!(artefact.artefact_kind, ArtefactKind::Phone) {
+            return true;
+        }
+        let Some(normalized) = artefact.phone_e164.as_deref() else {
+            return false;
+        };
+        tracker.accept_occurrence(
+            normalized,
+            artefact.phone_country.as_deref().unwrap_or(""),
+            artefact
+                .phone_validation_status
+                .as_deref()
+                .unwrap_or("validated"),
+            artefact.global_start,
+            artefact.global_end,
+        )
+    });
 }
 
 #[cfg(test)]

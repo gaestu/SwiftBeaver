@@ -12,7 +12,10 @@ The default config is `config/default.yml`.
 - `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.
 - `enable_url_scan` (bool): enable URL extraction from string spans.
 - `enable_email_scan` (bool): enable email extraction from string spans.
-- `enable_phone_scan` (bool): enable phone extraction from string spans.
+- `enable_phone_scan` (bool): legacy compatibility switch for phone extraction from string spans. `true` maps to `phone_mode: validated`; `false` maps to `phone_mode: off` unless `phone_mode` is set explicitly.
+- `phone_mode` (string): phone extraction mode. Supported values are `off` and `validated`. `validated` emits only locally validated phone artefacts; broad numeric candidates are rejected. Validation is fully local/offline and does not call external services.
+- `phone_default_region` (string, optional): CLDR region code such as `US`, `CH`, or `TR` used to validate local/national phone formats. Leave unset to avoid local-region assumptions.
+- `phone_supported_regions` (list): optional CLDR region allow-list used for local/national validation when a defensible single-region match is available. International `+` numbers are validated directly from their country code.
 - `enable_bitlocker_recovery_scan` (bool): enable detection of textual BitLocker recovery passwords (eight groups of six decimal digits, each divisible by 11 with quotient ≤ `0xFFFF`) in string spans. Default: `true`. Has no effect unless `enable_string_scan` is also enabled. This feature only inspects extracted string spans; it does not parse `.bek` recovery key files or BitLocker key packages.
 - `string_scan_utf16` (bool): enable UTF-16LE/BE printable string scanning.
 - `string_min_len` (usize): minimum printable string length.
@@ -49,6 +52,7 @@ The default config is `config/default.yml`.
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.
 Note: The `bek` carver detects binary BitLocker External Key files structurally. It is separate from textual BitLocker recovery password scanning and does not parse `.KPG` key packages or unlock/decrypt BitLocker volumes.
 Note: `sqlite_page` and `sqlite_wal` are carve-only outputs; enable/disable them via `file_types` and CLI type filters (`--types` / `--enable-types`).
+Note: Phone extraction favors precision over recall. Plain digit-only `10..=15` values, timestamp-like values, low-entropy runs, and unvalidated local/national candidates are rejected by default. Accepted phone occurrence rows keep their evidence offsets; exact duplicate `(normalized_phone, global_start, global_end)` processing repeats are omitted and counted in run-summary phone metrics. To avoid unbounded memory growth on hostile inputs, duplicate tracking keeps up to 5,000,000 accepted phone occurrences per run; additional new occurrences are omitted and counted as `phone_occurrences_capped`.
 Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, `overlap_skipped` for fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`, and `files_capped` for otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## File type configuration

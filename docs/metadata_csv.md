@@ -187,12 +187,26 @@ Columns:
 - `artefacts_extracted`
 - `duplicates_found`
 - `duplicates_skipped`
+- `phone_like_spans_scanned`
+- `phone_regex_candidates`
+- `phone_prefilter_rejections`
+- `phone_rejected_digit_only`
+- `phone_rejected_low_entropy`
+- `phone_rejected_bad_context`
+- `phone_rejected_no_region`
+- `phone_rejected_invalid`
+- `phone_validation_calls`
+- `phone_validated_rows`
+- `phone_exact_duplicates_omitted`
+- `phone_occurrences_capped`
+- `phone_distinct_normalized_values`
+- `phone_repeated_normalized_values`
 - `tool_version`
 - `config_hash`
 - `evidence_path`
 - `evidence_sha256`
 
-`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Phone counters cover validated phone extraction from string spans, including candidate counts, rejection classes, validation calls, accepted rows, exact same-offset duplicate omissions, occurrence rows omitted after the duplicate-tracking memory cap, distinct normalized values, and repeated normalized values across different offsets. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## entropy_regions.csv
 

@@ -14,6 +14,7 @@ use crate::parsers::browser::{
     BrowserCookieRecord as CookieRecord, BrowserDownloadRecord as DownloadRecord,
 };
 use crate::strings::artifacts::StringArtefact;
+use crate::strings::phones::PhoneSummaryRow;
 
 pub struct JsonlSink {
     tool_version: String,
@@ -217,6 +218,11 @@ impl MetadataSink for JsonlSink {
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
+        Ok(())
+    }
+
+    fn record_phone_summary(&self, _summary: &PhoneSummaryRow) -> Result<(), MetadataError> {
+        // Phone summary rows are currently a Parquet-only metadata category.
         Ok(())
     }
 

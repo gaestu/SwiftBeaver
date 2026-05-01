@@ -7,6 +7,9 @@ enable_string_scan: false
 enable_url_scan: true
 enable_email_scan: true
 enable_phone_scan: true
+phone_mode: validated
+phone_default_region:
+phone_supported_regions: []
 enable_bitlocker_recovery_scan: true
 string_scan_utf16: false
 string_min_len: 6

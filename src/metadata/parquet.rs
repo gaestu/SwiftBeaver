@@ -19,6 +19,7 @@ use crate::metadata::windows::flatten_windows_artefact;
 use crate::metadata::{MetadataError, MetadataSink, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
+use crate::strings::phones::PhoneSummaryRow;
 
 #[derive(Clone)]
 struct ParquetContext {
@@ -42,6 +43,7 @@ enum ParquetCategory {
     ArtefactsUrls,
     ArtefactsEmails,
     ArtefactsPhones,
+    ArtefactsPhonesSummary,
     ArtefactsBitlockerRecoveryPasswords,
     ArtefactsBitlockerBek,
     BrowserHistory,
@@ -66,6 +68,7 @@ impl ParquetCategory {
             ParquetCategory::ArtefactsUrls => "artefacts_urls.parquet",
             ParquetCategory::ArtefactsEmails => "artefacts_emails.parquet",
             ParquetCategory::ArtefactsPhones => "artefacts_phones.parquet",
+            ParquetCategory::ArtefactsPhonesSummary => "artefacts_phones_summary.parquet",
             ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
                 "artefacts_bitlocker_recovery_passwords.parquet"
             }
@@ -151,6 +154,16 @@ struct PhoneArtefactRow {
     source_kind: String,
     source_detail: String,
     certainty: f64,
+}
+
+#[derive(Debug, Clone)]
+struct PhoneSummaryParquetRow {
+    normalized_phone: String,
+    occurrence_count: i64,
+    first_global_start: i64,
+    last_global_start: i64,
+    country: String,
+    validation_status: String,
 }
 
 #[derive(Debug, Clone)]
@@ -273,6 +286,20 @@ struct RunSummaryRow {
     artefacts_extracted: i64,
     duplicates_found: i64,
     duplicates_skipped: i64,
+    phone_like_spans_scanned: i64,
+    phone_regex_candidates: i64,
+    phone_prefilter_rejections: i64,
+    phone_rejected_digit_only: i64,
+    phone_rejected_low_entropy: i64,
+    phone_rejected_bad_context: i64,
+    phone_rejected_no_region: i64,
+    phone_rejected_invalid: i64,
+    phone_validation_calls: i64,
+    phone_validated_rows: i64,
+    phone_exact_duplicates_omitted: i64,
+    phone_occurrences_capped: i64,
+    phone_distinct_normalized_values: i64,
+    phone_repeated_normalized_values: i64,
 }
 
 enum CategoryBuffer {
@@ -280,6 +307,7 @@ enum CategoryBuffer {
     Urls(Vec<UrlArtefactRow>),
     Emails(Vec<EmailArtefactRow>),
     Phones(Vec<PhoneArtefactRow>),
+    PhoneSummaries(Vec<PhoneSummaryParquetRow>),
     BitlockerRecoveryPasswords(Vec<BitlockerRecoveryRow>),
     BitlockerBek(Vec<BitlockerBekRow>),
     History(Vec<BrowserHistoryRow>),
@@ -317,6 +345,7 @@ impl CategoryWriter {
             ParquetCategory::ArtefactsUrls => CategoryBuffer::Urls(Vec::new()),
             ParquetCategory::ArtefactsEmails => CategoryBuffer::Emails(Vec::new()),
             ParquetCategory::ArtefactsPhones => CategoryBuffer::Phones(Vec::new()),
+            ParquetCategory::ArtefactsPhonesSummary => CategoryBuffer::PhoneSummaries(Vec::new()),
             ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
                 CategoryBuffer::BitlockerRecoveryPasswords(Vec::new())
             }
@@ -395,6 +424,21 @@ impl CategoryWriter {
             }
             _ => Err(MetadataError::Other(
                 "phone row on non-phone category".to_string(),
+            )),
+        }
+    }
+
+    fn append_phone_summary(&mut self, row: PhoneSummaryParquetRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::PhoneSummaries(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "phone summary row on non-phone-summary category".to_string(),
             )),
         }
     }
@@ -547,6 +591,11 @@ impl CategoryWriter {
                 rows.clear();
                 batch
             }
+            CategoryBuffer::PhoneSummaries(rows) => {
+                let batch = build_phone_summaries_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
             CategoryBuffer::BitlockerRecoveryPasswords(rows) => {
                 let batch = build_bitlocker_recovery_batch(&self.context, rows, &self.schema)?;
                 rows.clear();
@@ -612,6 +661,7 @@ impl CategoryWriter {
             CategoryBuffer::Urls(rows) => rows.len(),
             CategoryBuffer::Emails(rows) => rows.len(),
             CategoryBuffer::Phones(rows) => rows.len(),
+            CategoryBuffer::PhoneSummaries(rows) => rows.len(),
             CategoryBuffer::BitlockerRecoveryPasswords(rows) => rows.len(),
             CategoryBuffer::BitlockerBek(rows) => rows.len(),
             CategoryBuffer::History(rows) => rows.len(),
@@ -639,6 +689,7 @@ struct ParquetSinkInner {
     artefacts_urls: Option<CategoryWriter>,
     artefacts_emails: Option<CategoryWriter>,
     artefacts_phones: Option<CategoryWriter>,
+    artefacts_phones_summary: Option<CategoryWriter>,
     artefacts_bitlocker_recovery_passwords: Option<CategoryWriter>,
     artefacts_bitlocker_bek: Option<CategoryWriter>,
     browser_history: Option<CategoryWriter>,
@@ -666,6 +717,7 @@ impl ParquetSinkInner {
             ParquetCategory::ArtefactsUrls => &mut self.artefacts_urls,
             ParquetCategory::ArtefactsEmails => &mut self.artefacts_emails,
             ParquetCategory::ArtefactsPhones => &mut self.artefacts_phones,
+            ParquetCategory::ArtefactsPhonesSummary => &mut self.artefacts_phones_summary,
             ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
                 &mut self.artefacts_bitlocker_recovery_passwords
             }
@@ -728,6 +780,9 @@ impl ParquetSinkInner {
         if let Some(writer) = &mut self.artefacts_phones {
             writer.finish()?;
         }
+        if let Some(writer) = &mut self.artefacts_phones_summary {
+            writer.finish()?;
+        }
         if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
             writer.finish()?;
         }
@@ -788,6 +843,9 @@ impl ParquetSinkInner {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.artefacts_phones {
+            writer.flush_buffer()?;
+        }
+        if let Some(writer) = &mut self.artefacts_phones_summary {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
@@ -858,6 +916,7 @@ impl ParquetSink {
                 artefacts_urls: None,
                 artefacts_emails: None,
                 artefacts_phones: None,
+                artefacts_phones_summary: None,
                 artefacts_bitlocker_recovery_passwords: None,
                 artefacts_bitlocker_bek: None,
                 browser_history: None,
@@ -947,6 +1006,21 @@ impl MetadataSink for ParquetSink {
             }
             ArtefactKind::GenericString => Ok(()),
         }
+    }
+
+    fn record_phone_summary(&self, summary: &PhoneSummaryRow) -> Result<(), MetadataError> {
+        let row = PhoneSummaryParquetRow {
+            normalized_phone: summary.normalized_phone.clone(),
+            occurrence_count: to_i64(summary.occurrence_count)?,
+            first_global_start: to_i64(summary.first_global_start)?,
+            last_global_start: to_i64(summary.last_global_start)?,
+            country: summary.country.clone(),
+            validation_status: summary.validation_status.clone(),
+        };
+
+        let mut inner = self.lock_inner()?;
+        let writer = inner.get_or_create_writer(ParquetCategory::ArtefactsPhonesSummary)?;
+        writer.append_phone_summary(row)
     }
 
     fn record_history(&self, record: &BrowserHistoryRecord) -> Result<(), MetadataError> {
@@ -1065,6 +1139,20 @@ impl MetadataSink for ParquetSink {
             artefacts_extracted: to_i64(summary.artefacts_extracted)?,
             duplicates_found: to_i64(summary.duplicates_found)?,
             duplicates_skipped: to_i64(summary.duplicates_skipped)?,
+            phone_like_spans_scanned: to_i64(summary.phone_like_spans_scanned)?,
+            phone_regex_candidates: to_i64(summary.phone_regex_candidates)?,
+            phone_prefilter_rejections: to_i64(summary.phone_prefilter_rejections)?,
+            phone_rejected_digit_only: to_i64(summary.phone_rejected_digit_only)?,
+            phone_rejected_low_entropy: to_i64(summary.phone_rejected_low_entropy)?,
+            phone_rejected_bad_context: to_i64(summary.phone_rejected_bad_context)?,
+            phone_rejected_no_region: to_i64(summary.phone_rejected_no_region)?,
+            phone_rejected_invalid: to_i64(summary.phone_rejected_invalid)?,
+            phone_validation_calls: to_i64(summary.phone_validation_calls)?,
+            phone_validated_rows: to_i64(summary.phone_validated_rows)?,
+            phone_exact_duplicates_omitted: to_i64(summary.phone_exact_duplicates_omitted)?,
+            phone_occurrences_capped: to_i64(summary.phone_occurrences_capped)?,
+            phone_distinct_normalized_values: to_i64(summary.phone_distinct_normalized_values)?,
+            phone_repeated_normalized_values: to_i64(summary.phone_repeated_normalized_values)?,
         };
         let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::RunSummary)?;
@@ -1218,6 +1306,19 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("source_kind", DataType::Utf8, false),
             Field::new("source_detail", DataType::Utf8, false),
             Field::new("certainty", DataType::Float64, false),
+        ])),
+        ParquetCategory::ArtefactsPhonesSummary => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("normalized_phone", DataType::Utf8, false),
+            Field::new("occurrence_count", DataType::Int64, false),
+            Field::new("first_global_start", DataType::Int64, false),
+            Field::new("last_global_start", DataType::Int64, false),
+            Field::new("country", DataType::Utf8, false),
+            Field::new("validation_status", DataType::Utf8, false),
         ])),
         ParquetCategory::ArtefactsBitlockerRecoveryPasswords => Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
@@ -1404,6 +1505,20 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("artefacts_extracted", DataType::Int64, false),
             Field::new("duplicates_found", DataType::Int64, false),
             Field::new("duplicates_skipped", DataType::Int64, false),
+            Field::new("phone_like_spans_scanned", DataType::Int64, false),
+            Field::new("phone_regex_candidates", DataType::Int64, false),
+            Field::new("phone_prefilter_rejections", DataType::Int64, false),
+            Field::new("phone_rejected_digit_only", DataType::Int64, false),
+            Field::new("phone_rejected_low_entropy", DataType::Int64, false),
+            Field::new("phone_rejected_bad_context", DataType::Int64, false),
+            Field::new("phone_rejected_no_region", DataType::Int64, false),
+            Field::new("phone_rejected_invalid", DataType::Int64, false),
+            Field::new("phone_validation_calls", DataType::Int64, false),
+            Field::new("phone_validated_rows", DataType::Int64, false),
+            Field::new("phone_exact_duplicates_omitted", DataType::Int64, false),
+            Field::new("phone_occurrences_capped", DataType::Int64, false),
+            Field::new("phone_distinct_normalized_values", DataType::Int64, false),
+            Field::new("phone_repeated_normalized_values", DataType::Int64, false),
         ])),
         _ => Arc::new(Schema::empty()),
     }
@@ -1656,6 +1771,55 @@ fn build_phones_batch(
         Arc::new(source_kind.finish()),
         Arc::new(source_detail.finish()),
         Arc::new(certainty.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_phone_summaries_batch(
+    ctx: &ParquetContext,
+    rows: &[PhoneSummaryParquetRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut normalized_phone = StringBuilder::new();
+    let mut occurrence_count = Int64Builder::new();
+    let mut first_global_start = Int64Builder::new();
+    let mut last_global_start = Int64Builder::new();
+    let mut country = StringBuilder::new();
+    let mut validation_status = StringBuilder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        normalized_phone.append_value(&row.normalized_phone);
+        occurrence_count.append_value(row.occurrence_count);
+        first_global_start.append_value(row.first_global_start);
+        last_global_start.append_value(row.last_global_start);
+        country.append_value(&row.country);
+        validation_status.append_value(&row.validation_status);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(normalized_phone.finish()),
+        Arc::new(occurrence_count.finish()),
+        Arc::new(first_global_start.finish()),
+        Arc::new(last_global_start.finish()),
+        Arc::new(country.finish()),
+        Arc::new(validation_status.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)
@@ -2135,6 +2299,20 @@ fn build_summary_batch(
     let mut artefacts_extracted = Int64Builder::new();
     let mut duplicates_found = Int64Builder::new();
     let mut duplicates_skipped = Int64Builder::new();
+    let mut phone_like_spans_scanned = Int64Builder::new();
+    let mut phone_regex_candidates = Int64Builder::new();
+    let mut phone_prefilter_rejections = Int64Builder::new();
+    let mut phone_rejected_digit_only = Int64Builder::new();
+    let mut phone_rejected_low_entropy = Int64Builder::new();
+    let mut phone_rejected_bad_context = Int64Builder::new();
+    let mut phone_rejected_no_region = Int64Builder::new();
+    let mut phone_rejected_invalid = Int64Builder::new();
+    let mut phone_validation_calls = Int64Builder::new();
+    let mut phone_validated_rows = Int64Builder::new();
+    let mut phone_exact_duplicates_omitted = Int64Builder::new();
+    let mut phone_occurrences_capped = Int64Builder::new();
+    let mut phone_distinct_normalized_values = Int64Builder::new();
+    let mut phone_repeated_normalized_values = Int64Builder::new();
 
     for row in rows {
         run_id.append_value(&ctx.run_id);
@@ -2154,6 +2332,20 @@ fn build_summary_batch(
         artefacts_extracted.append_value(row.artefacts_extracted);
         duplicates_found.append_value(row.duplicates_found);
         duplicates_skipped.append_value(row.duplicates_skipped);
+        phone_like_spans_scanned.append_value(row.phone_like_spans_scanned);
+        phone_regex_candidates.append_value(row.phone_regex_candidates);
+        phone_prefilter_rejections.append_value(row.phone_prefilter_rejections);
+        phone_rejected_digit_only.append_value(row.phone_rejected_digit_only);
+        phone_rejected_low_entropy.append_value(row.phone_rejected_low_entropy);
+        phone_rejected_bad_context.append_value(row.phone_rejected_bad_context);
+        phone_rejected_no_region.append_value(row.phone_rejected_no_region);
+        phone_rejected_invalid.append_value(row.phone_rejected_invalid);
+        phone_validation_calls.append_value(row.phone_validation_calls);
+        phone_validated_rows.append_value(row.phone_validated_rows);
+        phone_exact_duplicates_omitted.append_value(row.phone_exact_duplicates_omitted);
+        phone_occurrences_capped.append_value(row.phone_occurrences_capped);
+        phone_distinct_normalized_values.append_value(row.phone_distinct_normalized_values);
+        phone_repeated_normalized_values.append_value(row.phone_repeated_normalized_values);
     }
 
     let arrays: Vec<ArrayRef> = vec![
@@ -2174,6 +2366,20 @@ fn build_summary_batch(
         Arc::new(artefacts_extracted.finish()),
         Arc::new(duplicates_found.finish()),
         Arc::new(duplicates_skipped.finish()),
+        Arc::new(phone_like_spans_scanned.finish()),
+        Arc::new(phone_regex_candidates.finish()),
+        Arc::new(phone_prefilter_rejections.finish()),
+        Arc::new(phone_rejected_digit_only.finish()),
+        Arc::new(phone_rejected_low_entropy.finish()),
+        Arc::new(phone_rejected_bad_context.finish()),
+        Arc::new(phone_rejected_no_region.finish()),
+        Arc::new(phone_rejected_invalid.finish()),
+        Arc::new(phone_validation_calls.finish()),
+        Arc::new(phone_validated_rows.finish()),
+        Arc::new(phone_exact_duplicates_omitted.finish()),
+        Arc::new(phone_occurrences_capped.finish()),
+        Arc::new(phone_distinct_normalized_values.finish()),
+        Arc::new(phone_repeated_normalized_values.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)
@@ -2217,8 +2423,8 @@ fn map_phone_artefact(artefact: &StringArtefact) -> Result<PhoneArtefactRow, Met
         global_start: to_i64(artefact.global_start)?,
         global_end: to_i64(artefact.global_end)?,
         phone_raw: artefact.content.clone(),
-        phone_e164: None,
-        country: None,
+        phone_e164: artefact.phone_e164.clone(),
+        country: artefact.phone_country.clone(),
         source_kind: "string_span".to_string(),
         source_detail: "strings_artefacts".to_string(),
         certainty: 1.0,

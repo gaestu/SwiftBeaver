@@ -9,6 +9,7 @@ pub mod workers;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -31,6 +32,7 @@ use crate::metadata::{MetadataSink, RunSummary};
 use crate::scanner::SignatureScanner;
 use crate::strings::StringScanner;
 use crate::strings::artifacts::ArtefactScanConfig;
+use crate::strings::phones::{PhoneArtefactTracker, PhoneValidationConfig};
 
 use events::MetadataEvent;
 use limiter::CarveLimiter;
@@ -241,6 +243,7 @@ struct PipelineCounters {
     overlap_skipped: Arc<AtomicU64>,
     duplicates_found: Arc<AtomicU64>,
     duplicates_skipped: Arc<AtomicU64>,
+    phone_tracker: Arc<Mutex<PhoneArtefactTracker>>,
 }
 
 impl PipelineCounters {
@@ -263,6 +266,7 @@ impl PipelineCounters {
             overlap_skipped: Arc::new(AtomicU64::new(0)),
             duplicates_found: Arc::new(AtomicU64::new(0)),
             duplicates_skipped: Arc::new(AtomicU64::new(0)),
+            phone_tracker: Arc::new(Mutex::new(PhoneArtefactTracker::default())),
         }
     }
 }
@@ -695,6 +699,10 @@ impl<'a> PipelineRunner<'a> {
                 urls: self.cfg.enable_url_scan,
                 emails: self.cfg.enable_email_scan,
                 phones: self.cfg.enable_phone_scan,
+                phone_validation: PhoneValidationConfig::from_regions(
+                    self.cfg.phone_default_region.as_deref(),
+                    &self.cfg.phone_supported_regions,
+                ),
                 bitlocker_recovery_passwords: self.cfg.enable_bitlocker_recovery_scan,
             };
             workers::spawn_string_workers(
@@ -704,6 +712,7 @@ impl<'a> PipelineRunner<'a> {
                 channels.meta_tx.clone(),
                 counters.artefacts_found.clone(),
                 scan_cfg,
+                counters.phone_tracker.clone(),
             )
         } else {
             Vec::new()
@@ -969,6 +978,22 @@ impl<'a> PipelineRunner<'a> {
             let _ = handle.join();
         }
 
+        let (phone_metrics, phone_summaries) = match counters.phone_tracker.lock() {
+            Ok(tracker) => (tracker.metrics_snapshot(), tracker.summary_rows()),
+            Err(poisoned) => {
+                warn!("phone tracker lock poisoned while finalizing summaries");
+                let tracker = poisoned.into_inner();
+                (tracker.metrics_snapshot(), tracker.summary_rows())
+            }
+        };
+
+        for row in phone_summaries {
+            if let Err(err) = meta_tx.send(MetadataEvent::PhoneSummary(row)) {
+                warn!("metadata channel closed while sending phone summary: {err}");
+                break;
+            }
+        }
+
         let bytes_scanned_total = counters
             .bytes_scanned
             .load(Ordering::Relaxed)
@@ -993,6 +1018,20 @@ impl<'a> PipelineRunner<'a> {
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
             duplicates_found: counters.duplicates_found.load(Ordering::Relaxed),
             duplicates_skipped: counters.duplicates_skipped.load(Ordering::Relaxed),
+            phone_like_spans_scanned: phone_metrics.phone_like_spans_scanned,
+            phone_regex_candidates: phone_metrics.phone_regex_candidates,
+            phone_prefilter_rejections: phone_metrics.phone_prefilter_rejections,
+            phone_rejected_digit_only: phone_metrics.phone_rejected_digit_only,
+            phone_rejected_low_entropy: phone_metrics.phone_rejected_low_entropy,
+            phone_rejected_bad_context: phone_metrics.phone_rejected_bad_context,
+            phone_rejected_no_region: phone_metrics.phone_rejected_no_region,
+            phone_rejected_invalid: phone_metrics.phone_rejected_invalid,
+            phone_validation_calls: phone_metrics.phone_validation_calls,
+            phone_validated_rows: phone_metrics.phone_validated_rows,
+            phone_exact_duplicates_omitted: phone_metrics.phone_exact_duplicates_omitted,
+            phone_occurrences_capped: phone_metrics.phone_occurrences_capped,
+            phone_distinct_normalized_values: phone_metrics.phone_distinct_normalized_values,
+            phone_repeated_normalized_values: phone_metrics.phone_repeated_normalized_values,
         };
         if let Err(err) = meta_tx.send(MetadataEvent::RunSummary(summary)) {
             warn!("metadata channel closed while sending run summary: {err}");

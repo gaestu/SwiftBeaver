@@ -3,6 +3,7 @@ pub mod cpu;
 pub mod cuda;
 #[cfg(feature = "gpu-opencl")]
 pub mod opencl;
+pub mod phones;
 
 use crate::chunk::ScanChunk;
 
@@ -75,24 +76,30 @@ mod build_tests {
 
 pub mod artifacts {
     use crate::strings::flags;
+    use crate::strings::phones::{
+        PhoneScanMetrics, PhoneValidationConfig, record_rejection, validate_candidate,
+    };
     use once_cell::sync::Lazy;
     use regex::Regex;
     use serde::Serialize;
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone)]
     pub struct ArtefactScanConfig {
         pub urls: bool,
         pub emails: bool,
         pub phones: bool,
+        pub phone_validation: PhoneValidationConfig,
         pub bitlocker_recovery_passwords: bool,
     }
 
     impl ArtefactScanConfig {
+        #[cfg(test)]
         pub fn all() -> Self {
             Self {
                 urls: true,
                 emails: true,
                 phones: true,
+                phone_validation: PhoneValidationConfig::from_regions(Some("US"), &[]),
                 bitlocker_recovery_passwords: true,
             }
         }
@@ -115,6 +122,18 @@ pub mod artifacts {
         pub encoding: String,
         pub global_start: u64,
         pub global_end: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub phone_e164: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub phone_country: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub phone_validation_status: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct ArtefactExtraction {
+        pub artefacts: Vec<StringArtefact>,
+        pub phone_metrics: PhoneScanMetrics,
     }
 
     static URL_RE: Lazy<Regex> = Lazy::new(|| {
@@ -124,7 +143,7 @@ pub mod artifacts {
         Regex::new(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b").expect("email regex")
     });
     static PHONE_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"\b\+?\d[\d\s().-]{6,}\d\b").expect("phone regex"));
+        Lazy::new(|| Regex::new(r"\+?\d[\d\s().-]{6,}\d\b").expect("phone regex"));
 
     // Eight groups of six decimal digits separated by a single hyphen or ASCII
     // whitespace character (space, tab, CR, LF). Uniformity of separator and
@@ -145,7 +164,20 @@ pub mod artifacts {
         data: &[u8],
         scan_cfg: ArtefactScanConfig,
     ) -> Vec<StringArtefact> {
+        extract_artefacts_with_metrics(run_id, chunk_start, local_start, flags, data, &scan_cfg)
+            .artefacts
+    }
+
+    pub fn extract_artefacts_with_metrics(
+        run_id: &str,
+        chunk_start: u64,
+        local_start: u64,
+        flags: u32,
+        data: &[u8],
+        scan_cfg: &ArtefactScanConfig,
+    ) -> ArtefactExtraction {
         let mut out = Vec::new();
+        let mut phone_metrics = PhoneScanMetrics::default();
         let (text, encoding) = decode_span(flags, data);
         let hint_mask = flags::URL_LIKE | flags::EMAIL_LIKE | flags::PHONE_LIKE;
         let use_hints = (flags & hint_mask) != 0;
@@ -186,16 +218,26 @@ pub mod artifacts {
         }
 
         if scan_cfg.phones && (!use_hints || (flags & flags::PHONE_LIKE) != 0) {
+            phone_metrics.phone_like_spans_scanned += 1;
             for mat in PHONE_RE.find_iter(&text) {
-                let value = mat.as_str();
-                if is_plausible_phone(value) {
-                    out.push(build_artefact(
+                phone_metrics.phone_regex_candidates += 1;
+                match validate_candidate(
+                    mat.as_str(),
+                    &text,
+                    mat.start(),
+                    mat.end(),
+                    &scan_cfg.phone_validation,
+                    &mut phone_metrics,
+                ) {
+                    Ok(phone) => out.push(build_phone_artefact(
                         run_id,
-                        ArtefactKind::Phone,
-                        value,
+                        phone,
+                        &text,
                         encoding,
-                        chunk_start + local_start + mat.start() as u64,
-                    ));
+                        chunk_start + local_start,
+                        mat.start()..mat.end(),
+                    )),
+                    Err(reason) => record_rejection(&mut phone_metrics, reason),
                 }
             }
         }
@@ -248,12 +290,18 @@ pub mod artifacts {
                         encoding: encoding.to_string(),
                         global_start,
                         global_end,
+                        phone_e164: None,
+                        phone_country: None,
+                        phone_validation_status: None,
                     });
                 }
             }
         }
 
-        out
+        ArtefactExtraction {
+            artefacts: out,
+            phone_metrics,
+        }
     }
 
     /// Validate a candidate BitLocker recovery password and return its canonical
@@ -344,24 +392,6 @@ pub mod artifacts {
         out
     }
 
-    fn is_plausible_phone(value: &str) -> bool {
-        let digits: Vec<char> = value.chars().filter(|c| c.is_ascii_digit()).collect();
-        let len = digits.len();
-        if !(10..=15).contains(&len) {
-            return false;
-        }
-        if digits.is_empty() {
-            return false;
-        }
-        // Require at least 4 unique digits to filter low-entropy false positives
-        // (e.g., "7676766773" has only 3 unique digits: 7, 6, 3)
-        let unique: std::collections::HashSet<_> = digits.iter().collect();
-        if unique.len() < 4 {
-            return false;
-        }
-        true
-    }
-
     fn build_artefact(
         run_id: &str,
         kind: ArtefactKind,
@@ -382,6 +412,46 @@ pub mod artifacts {
             encoding: encoding.to_string(),
             global_start,
             global_end,
+            phone_e164: None,
+            phone_country: None,
+            phone_validation_status: None,
+        }
+    }
+
+    fn build_phone_artefact(
+        run_id: &str,
+        phone: crate::strings::phones::ValidatedPhone,
+        text: &str,
+        encoding: &str,
+        span_base: u64,
+        match_range: std::ops::Range<usize>,
+    ) -> StringArtefact {
+        let source_start = decoded_offset_to_source_offset(text, encoding, match_range.start);
+        let source_end = decoded_offset_to_source_offset(text, encoding, match_range.end);
+        let global_start = span_base + source_start;
+        let global_end = if source_end <= source_start {
+            global_start
+        } else {
+            span_base + source_end - 1
+        };
+
+        StringArtefact {
+            run_id: run_id.to_string(),
+            artefact_kind: ArtefactKind::Phone,
+            content: phone.raw,
+            encoding: encoding.to_string(),
+            global_start,
+            global_end,
+            phone_e164: Some(phone.e164),
+            phone_country: Some(phone.country),
+            phone_validation_status: Some(phone.validation_status),
+        }
+    }
+
+    fn decoded_offset_to_source_offset(text: &str, encoding: &str, offset: usize) -> u64 {
+        match encoding {
+            "utf-16le" | "utf-16be" => text[..offset].encode_utf16().count() as u64 * 2,
+            _ => offset as u64,
         }
     }
 
@@ -401,14 +471,17 @@ pub mod artifacts {
     }
 
     fn decode_utf16_bytes(data: &[u8], little_endian: bool) -> String {
-        let mut out = Vec::with_capacity(data.len() / 2);
-        let start = if little_endian { 0 } else { 1 };
-        let mut i = start;
-        while i < data.len() {
-            out.push(data[i]);
-            i += 2;
-        }
-        String::from_utf8_lossy(&out).to_string()
+        let units = data.chunks_exact(2).map(|pair| {
+            let bytes = [pair[0], pair[1]];
+            if little_endian {
+                u16::from_le_bytes(bytes)
+            } else {
+                u16::from_be_bytes(bytes)
+            }
+        });
+        char::decode_utf16(units)
+            .map(|decoded| decoded.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect()
     }
 
     fn normalize_url(value: &str) -> Option<String> {
@@ -534,6 +607,7 @@ pub mod artifacts {
     mod tests {
         use super::{ArtefactKind, ArtefactScanConfig, extract_artefacts};
         use crate::strings::flags;
+        use crate::strings::phones::PhoneValidationConfig;
 
         #[test]
         fn extracts_basic_artefacts() {
@@ -572,15 +646,63 @@ pub mod artifacts {
 
         #[test]
         fn filters_noisy_phone_matches() {
-            let data = b"0000000000 bad +1 (415) 555-1234 good";
+            let data = b"0000000000 bad +1 650-253-0000 good";
             let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
             let phones: Vec<&str> = out
                 .iter()
                 .filter(|a| matches!(a.artefact_kind, ArtefactKind::Phone))
                 .map(|a| a.content.as_str())
                 .collect();
-            assert!(phones.iter().any(|v| v.contains("415")));
+            assert!(phones.iter().any(|v| v.contains("650")));
             assert!(!phones.iter().any(|v| v.starts_with("0000")));
+        }
+
+        #[test]
+        fn rejects_timestamp_and_identifier_phone_false_positives() {
+            let data = b"ts=2026-04-26 22:53:14 id=acct-1234567890123";
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
+            assert!(
+                out.iter()
+                    .all(|a| !matches!(a.artefact_kind, ArtefactKind::Phone))
+            );
+        }
+
+        #[test]
+        fn extracts_phone_e164_and_country_for_validated_rows() {
+            let data = b"phone +1 650-253-0000";
+            let out = extract_artefacts("run1", 0, 0, 0, data, ArtefactScanConfig::all());
+            let phone = out
+                .iter()
+                .find(|a| matches!(a.artefact_kind, ArtefactKind::Phone))
+                .expect("phone artefact");
+            assert_eq!(phone.content, "+1 650-253-0000");
+            assert_eq!(phone.phone_e164.as_deref(), Some("+16502530000"));
+            assert_eq!(phone.phone_country.as_deref(), Some("US"));
+        }
+
+        #[test]
+        fn reports_utf16_phone_offsets_after_non_ascii_prefix() {
+            let text = "é call +1 650-253-0000";
+            let data: Vec<u8> = text
+                .encode_utf16()
+                .flat_map(|unit| unit.to_le_bytes())
+                .collect();
+            let out = extract_artefacts(
+                "run1",
+                100,
+                3,
+                flags::UTF16_LE | flags::PHONE_LIKE,
+                &data,
+                ArtefactScanConfig::all(),
+            );
+            let phone = out
+                .iter()
+                .find(|a| matches!(a.artefact_kind, ArtefactKind::Phone))
+                .expect("phone artefact");
+            let prefix_source_len = "é call ".encode_utf16().count() as u64 * 2;
+            let phone_source_len = "+1 650-253-0000".encode_utf16().count() as u64 * 2;
+            assert_eq!(phone.global_start, 100 + 3 + prefix_source_len);
+            assert_eq!(phone.global_end, phone.global_start + phone_source_len - 1);
         }
 
         #[test]
@@ -682,6 +804,7 @@ pub mod artifacts {
                     urls: false,
                     emails: true,
                     phones: false,
+                    phone_validation: PhoneValidationConfig::from_regions(Some("US"), &[]),
                     bitlocker_recovery_passwords: false,
                 },
             );
@@ -873,6 +996,7 @@ pub mod artifacts {
                     urls: false,
                     emails: false,
                     phones: false,
+                    phone_validation: PhoneValidationConfig::from_regions(Some("US"), &[]),
                     bitlocker_recovery_passwords: false,
                 },
             );
