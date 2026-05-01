@@ -63,6 +63,27 @@ Each line in `metadata/string_artefacts.jsonl` is a JSON object with:
 
 Known `artefact_kind` values: `Url`, `Email`, `Phone`, `BitlockerRecoveryPassword`, `GenericString`. For `BitlockerRecoveryPassword`, `content` is the canonical hyphen-separated form (`XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX`).
 
+## BitLocker BEK artefacts (`bitlocker_bek.jsonl`)
+
+Each line in `metadata/bitlocker_bek.jsonl` is a JSON object with:
+
+- `run_id`
+- `global_start`
+- `global_end`
+- `size`
+- `carved_path`
+- `key_identifier_guid`
+- `description`
+- `key_data_length`
+- `key_encryption_method`
+- `modification_filetime`
+- `tool_version`
+- `config_hash`
+- `evidence_path`
+- `evidence_sha256`
+
+This category covers binary BitLocker External Key (`.bek`) files only. Textual 48-digit BitLocker recovery passwords remain in `string_artefacts.jsonl`, and BitLocker key packages (`.KPG`) are out of scope.
+
 ## Browser history (`browser_history.jsonl`)
 
 Each line in `metadata/browser_history.jsonl` is a JSON object with:

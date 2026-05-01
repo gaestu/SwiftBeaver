@@ -43,6 +43,27 @@ Columns:
 
 Known `artefact_kind` values: `url`, `email`, `phone`, `bitlocker_recovery_password`, `string`. For `bitlocker_recovery_password`, `content` is the canonical hyphen-separated form (`XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX`).
 
+## bitlocker_bek.csv
+
+Columns:
+
+- `run_id`
+- `global_start`
+- `global_end`
+- `size`
+- `carved_path`
+- `key_identifier_guid`
+- `description`
+- `key_data_length`
+- `key_encryption_method`
+- `modification_filetime`
+- `tool_version`
+- `config_hash`
+- `evidence_path`
+- `evidence_sha256`
+
+This category covers binary BitLocker External Key (`.bek`) files only. Textual 48-digit BitLocker recovery passwords remain in `string_artefacts.csv`, and BitLocker key packages (`.KPG`) are out of scope.
+
 ## browser_history.csv
 
 Columns:

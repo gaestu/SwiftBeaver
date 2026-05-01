@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 
 use swiftbeaver::carve::CarvedFile;
+use swiftbeaver::carve::bek::BitlockerBekRecord;
 use swiftbeaver::carve::windows::{
     EvtxArtefact, LnkArtefact, PrefetchArtefact, RegistryHiveArtefact, WindowsArtefactRecord,
 };
@@ -53,6 +54,21 @@ fn parquet_writes_expected_files() {
         duplicate_of_offset: None,
     };
     sink.record_file(&file).expect("record file");
+
+    let bek_record = BitlockerBekRecord {
+        run_id: "run_001".to_string(),
+        global_start: 512,
+        global_end: 667,
+        size: 156,
+        carved_path: "bek/bek_000000000200.bek".to_string(),
+        key_identifier_guid: "00112233-4455-6677-8899-aabbccddeeff".to_string(),
+        description: Some("ExternalKey".to_string()),
+        key_data_length: 32,
+        key_encryption_method: u32::MAX,
+        modification_filetime: u64::MAX,
+    };
+    sink.record_bitlocker_bek(&bek_record)
+        .expect("record bitlocker bek");
 
     let artefact = StringArtefact {
         run_id: "run_001".to_string(),
@@ -212,6 +228,7 @@ fn parquet_writes_expected_files() {
 
     let parquet_dir = run_output_dir.join("parquet");
     let files_path = parquet_dir.join("files_jpeg.parquet");
+    let bek_path = parquet_dir.join("artefacts_bitlocker_bek.parquet");
     let urls_path = parquet_dir.join("artefacts_urls.parquet");
     let bitlocker_path = parquet_dir.join("artefacts_bitlocker_recovery_passwords.parquet");
     let history_path = parquet_dir.join("browser_history.parquet");
@@ -222,6 +239,7 @@ fn parquet_writes_expected_files() {
     let entropy_path = parquet_dir.join("entropy_regions.parquet");
 
     assert!(files_path.exists());
+    assert!(bek_path.exists());
     assert!(urls_path.exists());
     assert!(bitlocker_path.exists());
     assert!(history_path.exists());
@@ -232,6 +250,7 @@ fn parquet_writes_expected_files() {
     assert!(entropy_path.exists());
 
     assert_eq!(count_rows(&files_path), 1);
+    assert_eq!(count_rows(&bek_path), 1);
     assert_eq!(count_rows(&urls_path), 1);
     assert_eq!(count_rows(&bitlocker_path), 1);
     assert_eq!(count_rows(&history_path), 1);
@@ -242,6 +261,9 @@ fn parquet_writes_expected_files() {
     assert_eq!(count_rows(&entropy_path), 1);
 
     assert_has_column(&files_path, "evidence_sha256");
+    assert_has_column(&bek_path, "key_identifier_guid");
+    assert_has_column(&bek_path, "key_data_length");
+    assert_has_column(&bek_path, "evidence_sha256");
     assert_has_column(&urls_path, "evidence_sha256");
     assert_has_column(&bitlocker_path, "recovery_password");
     assert_has_column(&bitlocker_path, "evidence_sha256");

@@ -359,6 +359,7 @@ fn write_post_carve_metadata(
     record: PostCarveMetadata,
 ) -> Result<(), crate::metadata::MetadataError> {
     match record {
+        PostCarveMetadata::BitlockerBek(record) => sink.record_bitlocker_bek(&record),
         PostCarveMetadata::WindowsArtefact(record) => sink.record_windows_artefact(&record),
     }
 }

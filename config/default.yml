@@ -356,6 +356,18 @@ file_types:
     max_size: 65536
     min_size: 76
     validator: "lnk"
+  - id: "bek"
+    extensions: ["bek"]
+    header_patterns:
+      # BEK has no standalone magic. This pattern matches the version/header-size
+      # fields at offset +4; the carver subtracts four bytes and performs full
+      # structural validation before accepting the candidate.
+      - id: "bek_v1_header_fields"
+        hex: "0100000030000000"
+    footer_patterns: []
+    max_size: 65536
+    min_size: 48
+    validator: "bek"
   - id: "prefetch"
     extensions: ["pf"]
     header_patterns:

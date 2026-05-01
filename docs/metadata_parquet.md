@@ -117,6 +117,30 @@ This category covers textual BitLocker recovery passwords found in extracted
 string spans only. `.bek` recovery key files and BitLocker key packages are
 out of scope for this output.
 
+## BitLocker BEK artefacts
+
+`artefacts_bitlocker_bek.parquet` schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `global_start` (int64)
+- `global_end` (int64)
+- `size` (int64)
+- `carved_path` (string)
+- `key_identifier_guid` (string)
+- `description` (string, nullable)
+- `key_data_length` (int64)
+- `key_encryption_method` (int64)
+- `modification_filetime` (uint64)
+
+This category covers binary BitLocker External Key (`.bek`) files only. Textual
+48-digit BitLocker recovery passwords remain in
+`artefacts_bitlocker_recovery_passwords.parquet`, and BitLocker key packages
+(`.KPG`) are out of scope.
+
 ## Browser history
 
 `browser_history.parquet` schema:

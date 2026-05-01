@@ -8,6 +8,7 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::carve::CarvedFile;
+use crate::carve::bek::BitlockerBekRecord;
 use crate::carve::windows::WindowsArtefactRecord;
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::StringArtefact;
@@ -113,6 +114,7 @@ pub enum MetadataError {
 /// ```
 pub trait MetadataSink: Send + Sync {
     fn record_file(&self, file: &CarvedFile) -> Result<(), MetadataError>;
+    fn record_bitlocker_bek(&self, record: &BitlockerBekRecord) -> Result<(), MetadataError>;
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError>;
     fn record_windows_artefact(&self, record: &WindowsArtefactRecord) -> Result<(), MetadataError>;
     fn record_history(&self, record: &BrowserHistoryRecord) -> Result<(), MetadataError>;
@@ -128,6 +130,9 @@ pub struct DryRunSink;
 
 impl MetadataSink for DryRunSink {
     fn record_file(&self, _file: &CarvedFile) -> Result<(), MetadataError> {
+        Ok(())
+    }
+    fn record_bitlocker_bek(&self, _record: &BitlockerBekRecord) -> Result<(), MetadataError> {
         Ok(())
     }
     fn record_string(&self, _artefact: &StringArtefact) -> Result<(), MetadataError> {

@@ -248,6 +248,9 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
     simple_builders.insert("bmp", |ext, min, max| {
         boxed(carve::bmp::BmpCarveHandler::new(ext, min, max))
     });
+    simple_builders.insert("bek", |ext, min, max| {
+        boxed(carve::bek::BekCarveHandler::new(ext, min, max))
+    });
     simple_builders.insert("tiff", |ext, min, max| {
         boxed(carve::tiff::TiffCarveHandler::new(ext, min, max))
     });

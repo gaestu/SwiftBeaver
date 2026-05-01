@@ -166,6 +166,7 @@ Complete reference of all file formats supported by SwiftBeaver, organized by ca
 | **SQLite WAL** | sqlite-wal | `37 7F 06 82` or `37 7F 06 83` | 512 MB | Yes | Walks WAL frames using page size from header |
 | **SQLite Page Fragment** | sqlite-page | `0D` / `0A` + page-structure checks | 64 KB | Yes | Carves one validated raw SQLite page per hit |
 | **Windows Shell Link** | lnk | `4C 00 00 00 01 14 02 00 ... 00 46` | 64 KB | Yes | Walks LNK sections and emits Windows artefact metadata |
+| **BitLocker BEK** | bek | `01 00 00 00 30 00 00 00` at offset +4 | 64 KB | Yes | Structurally validates binary BitLocker External Key files |
 | **ELF** | (none), bin | `7F 45 4C 46` | 100 MB | Yes | Linux executables, section-based structure |
 | **EML** | eml | `46 72 6F 6D 3A` or RFC 2822 headers | 50 MB | Yes | Email message format, preserves headers and body |
 
@@ -199,6 +200,13 @@ Complete reference of all file formats supported by SwiftBeaver, organized by ca
 - Validation: requires a valid Shell Link header, bounded section layout, and consistent LinkInfo flags/offsets
 - Metadata: recorded as both a carved file and a `windows_artefacts` row with parsed path/timestamp fields
 - Edge Cases: unknown ExtraData blocks are skipped conservatively, ANSI path strings decode as Windows-1252 when Unicode strings are absent, and truncated links are rejected to avoid over-carving unrelated trailing bytes
+
+**BitLocker BEK**:
+- Detection: version/header-size fields at offset +4, followed by full structural validation
+- Size Calculation: BEK metadata-size field from the 48-byte header
+- Validation: requires version 1, header size 48, matching size copy, startup-key external-key entry, and exactly 32 nested key bytes
+- Metadata: recorded as a carved file and as a `bitlocker_bek` row with key identifier GUID, optional description, key data length, key method, FILETIME, and provenance
+- Edge Cases: filenames and GUID-looking names are ignored; `.KPG` key packages and textual 48-digit recovery passwords are separate features
 
 **ELF**:
 - Detection: ELF magic number + class/endianness

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use arrow_array::builder::{
     BinaryBuilder, BooleanBuilder, Int32Builder, Int64Builder, StringBuilder,
-    TimestampMicrosecondBuilder,
+    TimestampMicrosecondBuilder, UInt64Builder,
 };
 use arrow_array::{ArrayRef, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
@@ -12,6 +12,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 
 use crate::carve::CarvedFile;
+use crate::carve::bek::BitlockerBekRecord;
 use crate::carve::windows::WindowsArtefactRecord;
 use crate::config::Config;
 use crate::metadata::windows::flatten_windows_artefact;
@@ -42,6 +43,7 @@ enum ParquetCategory {
     ArtefactsEmails,
     ArtefactsPhones,
     ArtefactsBitlockerRecoveryPasswords,
+    ArtefactsBitlockerBek,
     BrowserHistory,
     BrowserCookies,
     BrowserDownloads,
@@ -67,6 +69,7 @@ impl ParquetCategory {
             ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
                 "artefacts_bitlocker_recovery_passwords.parquet"
             }
+            ParquetCategory::ArtefactsBitlockerBek => "artefacts_bitlocker_bek.parquet",
             ParquetCategory::BrowserHistory => "browser_history.parquet",
             ParquetCategory::BrowserCookies => "browser_cookies.parquet",
             ParquetCategory::BrowserDownloads => "browser_downloads.parquet",
@@ -159,6 +162,19 @@ struct BitlockerRecoveryRow {
     source_kind: String,
     source_detail: String,
     certainty: f64,
+}
+
+#[derive(Debug, Clone)]
+struct BitlockerBekRow {
+    global_start: i64,
+    global_end: i64,
+    size: i64,
+    carved_path: String,
+    key_identifier_guid: String,
+    description: Option<String>,
+    key_data_length: i64,
+    key_encryption_method: i64,
+    modification_filetime: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -265,6 +281,7 @@ enum CategoryBuffer {
     Emails(Vec<EmailArtefactRow>),
     Phones(Vec<PhoneArtefactRow>),
     BitlockerRecoveryPasswords(Vec<BitlockerRecoveryRow>),
+    BitlockerBek(Vec<BitlockerBekRow>),
     History(Vec<BrowserHistoryRow>),
     Cookies(Vec<BrowserCookieRow>),
     Downloads(Vec<BrowserDownloadRow>),
@@ -303,6 +320,7 @@ impl CategoryWriter {
             ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
                 CategoryBuffer::BitlockerRecoveryPasswords(Vec::new())
             }
+            ParquetCategory::ArtefactsBitlockerBek => CategoryBuffer::BitlockerBek(Vec::new()),
             ParquetCategory::BrowserHistory => CategoryBuffer::History(Vec::new()),
             ParquetCategory::BrowserCookies => CategoryBuffer::Cookies(Vec::new()),
             ParquetCategory::BrowserDownloads => CategoryBuffer::Downloads(Vec::new()),
@@ -395,6 +413,21 @@ impl CategoryWriter {
             }
             _ => Err(MetadataError::Other(
                 "bitlocker recovery row on non-bitlocker category".to_string(),
+            )),
+        }
+    }
+
+    fn append_bitlocker_bek(&mut self, row: BitlockerBekRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::BitlockerBek(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "bitlocker bek row on non-bitlocker-bek category".to_string(),
             )),
         }
     }
@@ -519,6 +552,11 @@ impl CategoryWriter {
                 rows.clear();
                 batch
             }
+            CategoryBuffer::BitlockerBek(rows) => {
+                let batch = build_bitlocker_bek_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
             CategoryBuffer::History(rows) => {
                 let batch = build_history_batch(&self.context, rows, &self.schema)?;
                 rows.clear();
@@ -575,6 +613,7 @@ impl CategoryWriter {
             CategoryBuffer::Emails(rows) => rows.len(),
             CategoryBuffer::Phones(rows) => rows.len(),
             CategoryBuffer::BitlockerRecoveryPasswords(rows) => rows.len(),
+            CategoryBuffer::BitlockerBek(rows) => rows.len(),
             CategoryBuffer::History(rows) => rows.len(),
             CategoryBuffer::Cookies(rows) => rows.len(),
             CategoryBuffer::Downloads(rows) => rows.len(),
@@ -601,6 +640,7 @@ struct ParquetSinkInner {
     artefacts_emails: Option<CategoryWriter>,
     artefacts_phones: Option<CategoryWriter>,
     artefacts_bitlocker_recovery_passwords: Option<CategoryWriter>,
+    artefacts_bitlocker_bek: Option<CategoryWriter>,
     browser_history: Option<CategoryWriter>,
     browser_cookies: Option<CategoryWriter>,
     browser_downloads: Option<CategoryWriter>,
@@ -629,6 +669,7 @@ impl ParquetSinkInner {
             ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
                 &mut self.artefacts_bitlocker_recovery_passwords
             }
+            ParquetCategory::ArtefactsBitlockerBek => &mut self.artefacts_bitlocker_bek,
             ParquetCategory::BrowserHistory => &mut self.browser_history,
             ParquetCategory::BrowserCookies => &mut self.browser_cookies,
             ParquetCategory::BrowserDownloads => &mut self.browser_downloads,
@@ -690,6 +731,9 @@ impl ParquetSinkInner {
         if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
             writer.finish()?;
         }
+        if let Some(writer) = &mut self.artefacts_bitlocker_bek {
+            writer.finish()?;
+        }
         if let Some(writer) = &mut self.browser_history {
             writer.finish()?;
         }
@@ -747,6 +791,9 @@ impl ParquetSinkInner {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
+            writer.flush_buffer()?;
+        }
+        if let Some(writer) = &mut self.artefacts_bitlocker_bek {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.browser_history {
@@ -812,6 +859,7 @@ impl ParquetSink {
                 artefacts_emails: None,
                 artefacts_phones: None,
                 artefacts_bitlocker_recovery_passwords: None,
+                artefacts_bitlocker_bek: None,
                 browser_history: None,
                 browser_cookies: None,
                 browser_downloads: None,
@@ -853,6 +901,24 @@ impl MetadataSink for ParquetSink {
         let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(category)?;
         writer.append_file(row)
+    }
+
+    fn record_bitlocker_bek(&self, record: &BitlockerBekRecord) -> Result<(), MetadataError> {
+        let row = BitlockerBekRow {
+            global_start: to_i64(record.global_start)?,
+            global_end: to_i64(record.global_end)?,
+            size: to_i64(record.size)?,
+            carved_path: record.carved_path.clone(),
+            key_identifier_guid: record.key_identifier_guid.clone(),
+            description: record.description.clone(),
+            key_data_length: to_i64(record.key_data_length)?,
+            key_encryption_method: i64::from(record.key_encryption_method),
+            modification_filetime: record.modification_filetime,
+        };
+
+        let mut inner = self.lock_inner()?;
+        let writer = inner.get_or_create_writer(ParquetCategory::ArtefactsBitlockerBek)?;
+        writer.append_bitlocker_bek(row)
     }
 
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError> {
@@ -1166,6 +1232,22 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("source_kind", DataType::Utf8, false),
             Field::new("source_detail", DataType::Utf8, false),
             Field::new("certainty", DataType::Float64, false),
+        ])),
+        ParquetCategory::ArtefactsBitlockerBek => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("global_start", DataType::Int64, false),
+            Field::new("global_end", DataType::Int64, false),
+            Field::new("size", DataType::Int64, false),
+            Field::new("carved_path", DataType::Utf8, false),
+            Field::new("key_identifier_guid", DataType::Utf8, false),
+            Field::new("description", DataType::Utf8, true),
+            Field::new("key_data_length", DataType::Int64, false),
+            Field::new("key_encryption_method", DataType::Int64, false),
+            Field::new("modification_filetime", DataType::UInt64, false),
         ])),
         ParquetCategory::BrowserHistory => Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
@@ -1626,6 +1708,64 @@ fn build_bitlocker_recovery_batch(
         Arc::new(source_kind.finish()),
         Arc::new(source_detail.finish()),
         Arc::new(certainty.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_bitlocker_bek_batch(
+    ctx: &ParquetContext,
+    rows: &[BitlockerBekRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut global_start = Int64Builder::new();
+    let mut global_end = Int64Builder::new();
+    let mut size = Int64Builder::new();
+    let mut carved_path = StringBuilder::new();
+    let mut key_identifier_guid = StringBuilder::new();
+    let mut description = StringBuilder::new();
+    let mut key_data_length = Int64Builder::new();
+    let mut key_encryption_method = Int64Builder::new();
+    let mut modification_filetime = UInt64Builder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        global_start.append_value(row.global_start);
+        global_end.append_value(row.global_end);
+        size.append_value(row.size);
+        carved_path.append_value(&row.carved_path);
+        key_identifier_guid.append_value(&row.key_identifier_guid);
+        description.append_option(row.description.as_deref());
+        key_data_length.append_value(row.key_data_length);
+        key_encryption_method.append_value(row.key_encryption_method);
+        modification_filetime.append_value(row.modification_filetime);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(global_start.finish()),
+        Arc::new(global_end.finish()),
+        Arc::new(size.finish()),
+        Arc::new(carved_path.finish()),
+        Arc::new(key_identifier_guid.finish()),
+        Arc::new(description.finish()),
+        Arc::new(key_data_length.finish()),
+        Arc::new(key_encryption_method.finish()),
+        Arc::new(modification_filetime.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)

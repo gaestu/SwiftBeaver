@@ -47,6 +47,7 @@ The default config is `config/default.yml`.
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.
+Note: The `bek` carver detects binary BitLocker External Key files structurally. It is separate from textual BitLocker recovery password scanning and does not parse `.KPG` key packages or unlock/decrypt BitLocker volumes.
 Note: `sqlite_page` and `sqlite_wal` are carve-only outputs; enable/disable them via `file_types` and CLI type filters (`--types` / `--enable-types`).
 Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, `overlap_skipped` for fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`, and `files_capped` for otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
@@ -60,7 +61,7 @@ Each entry in `file_types` contains:
 - `footer_patterns`: footer signatures used by the `footer` validator
 - `max_size`: maximum carve size in bytes
 - `min_size`: minimum carve size in bytes
-- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `sqlite_wal`, `sqlite_page`, `pdf`, `zip`, `webp`, `bmp`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `lnk`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `footer`)
+- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `sqlite_wal`, `sqlite_page`, `pdf`, `zip`, `webp`, `bmp`, `bek`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `lnk`, `prefetch`, `registry`, `evtx`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `heic`, `footer`)
 - `require_eocd`: optional; for ZIP, require an EOCD before carving (prevents large false positives)
 
 The `footer` validator performs a simple header-to-footer carve for formats without a dedicated handler.
