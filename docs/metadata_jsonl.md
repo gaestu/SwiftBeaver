@@ -61,6 +61,8 @@ Each line in `metadata/string_artefacts.jsonl` is a JSON object with:
 - `evidence_path`
 - `evidence_sha256`
 
+Known `artefact_kind` values: `Url`, `Email`, `Phone`, `BitlockerRecoveryPassword`, `GenericString`. For `BitlockerRecoveryPassword`, `content` is the canonical hyphen-separated form (`XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX`).
+
 ## Browser history (`browser_history.jsonl`)
 
 Each line in `metadata/browser_history.jsonl` is a JSON object with:

@@ -682,6 +682,7 @@ fn artefact_kind_label(kind: &ArtefactKind) -> &'static str {
         ArtefactKind::Url => "url",
         ArtefactKind::Email => "email",
         ArtefactKind::Phone => "phone",
+        ArtefactKind::BitlockerRecoveryPassword => "bitlocker_recovery_password",
         ArtefactKind::GenericString => "string",
     }
 }

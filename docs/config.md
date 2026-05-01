@@ -13,6 +13,7 @@ The default config is `config/default.yml`.
 - `enable_url_scan` (bool): enable URL extraction from string spans.
 - `enable_email_scan` (bool): enable email extraction from string spans.
 - `enable_phone_scan` (bool): enable phone extraction from string spans.
+- `enable_bitlocker_recovery_scan` (bool): enable detection of textual BitLocker recovery passwords (eight groups of six decimal digits, each divisible by 11 with quotient ≤ `0xFFFF`) in string spans. Default: `true`. Has no effect unless `enable_string_scan` is also enabled. This feature only inspects extracted string spans; it does not parse `.bek` recovery key files or BitLocker key packages.
 - `string_scan_utf16` (bool): enable UTF-16LE/BE printable string scanning.
 - `string_min_len` (usize): minimum printable string length.
 - `string_max_len` (usize): maximum string length per span.

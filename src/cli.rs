@@ -98,6 +98,14 @@ pub struct CliOptions {
     #[arg(long, conflicts_with = "scan_phones")]
     pub no_scan_phones: bool,
 
+    /// Enable BitLocker recovery password detection in string spans
+    #[arg(long, conflicts_with = "no_scan_bitlocker_recovery")]
+    pub scan_bitlocker_recovery: bool,
+
+    /// Disable BitLocker recovery password detection in string spans
+    #[arg(long, conflicts_with = "scan_bitlocker_recovery")]
+    pub no_scan_bitlocker_recovery: bool,
+
     /// Override minimum string length when scanning
     #[arg(long)]
     pub string_min_len: Option<usize>,

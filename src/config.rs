@@ -49,6 +49,8 @@ pub struct Config {
     pub enable_email_scan: bool,
     #[serde(default = "default_true")]
     pub enable_phone_scan: bool,
+    #[serde(default = "default_true")]
+    pub enable_bitlocker_recovery_scan: bool,
     #[serde(default)]
     pub string_scan_utf16: bool,
     #[serde(default = "default_string_min_len")]
@@ -250,7 +252,12 @@ impl Config {
     /// CLI flags override config file values.
     pub fn merge_cli(&mut self, cli: &crate::cli::CliOptions) {
         // String scanning
-        if cli.scan_strings || cli.scan_utf16 || cli.scan_urls || cli.scan_emails || cli.scan_phones
+        if cli.scan_strings
+            || cli.scan_utf16
+            || cli.scan_urls
+            || cli.scan_emails
+            || cli.scan_phones
+            || cli.scan_bitlocker_recovery
         {
             self.enable_string_scan = true;
         }
@@ -280,6 +287,14 @@ impl Config {
         }
         if cli.no_scan_phones {
             self.enable_phone_scan = false;
+        }
+
+        // BitLocker recovery password scanning
+        if cli.scan_bitlocker_recovery {
+            self.enable_bitlocker_recovery_scan = true;
+        }
+        if cli.no_scan_bitlocker_recovery {
+            self.enable_bitlocker_recovery_scan = false;
         }
 
         // String length

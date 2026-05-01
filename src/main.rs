@@ -72,6 +72,7 @@ fn main() -> Result<()> {
         && !cfg.enable_url_scan
         && !cfg.enable_email_scan
         && !cfg.enable_phone_scan
+        && !cfg.enable_bitlocker_recovery_scan
     {
         warn!("string scanning enabled but all artefact types are disabled");
     }

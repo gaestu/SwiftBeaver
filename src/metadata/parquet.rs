@@ -41,6 +41,7 @@ enum ParquetCategory {
     ArtefactsUrls,
     ArtefactsEmails,
     ArtefactsPhones,
+    ArtefactsBitlockerRecoveryPasswords,
     BrowserHistory,
     BrowserCookies,
     BrowserDownloads,
@@ -63,6 +64,9 @@ impl ParquetCategory {
             ParquetCategory::ArtefactsUrls => "artefacts_urls.parquet",
             ParquetCategory::ArtefactsEmails => "artefacts_emails.parquet",
             ParquetCategory::ArtefactsPhones => "artefacts_phones.parquet",
+            ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
+                "artefacts_bitlocker_recovery_passwords.parquet"
+            }
             ParquetCategory::BrowserHistory => "browser_history.parquet",
             ParquetCategory::BrowserCookies => "browser_cookies.parquet",
             ParquetCategory::BrowserDownloads => "browser_downloads.parquet",
@@ -141,6 +145,17 @@ struct PhoneArtefactRow {
     phone_raw: String,
     phone_e164: Option<String>,
     country: Option<String>,
+    source_kind: String,
+    source_detail: String,
+    certainty: f64,
+}
+
+#[derive(Debug, Clone)]
+struct BitlockerRecoveryRow {
+    global_start: i64,
+    global_end: i64,
+    recovery_password: String,
+    encoding: String,
     source_kind: String,
     source_detail: String,
     certainty: f64,
@@ -249,6 +264,7 @@ enum CategoryBuffer {
     Urls(Vec<UrlArtefactRow>),
     Emails(Vec<EmailArtefactRow>),
     Phones(Vec<PhoneArtefactRow>),
+    BitlockerRecoveryPasswords(Vec<BitlockerRecoveryRow>),
     History(Vec<BrowserHistoryRow>),
     Cookies(Vec<BrowserCookieRow>),
     Downloads(Vec<BrowserDownloadRow>),
@@ -284,6 +300,9 @@ impl CategoryWriter {
             ParquetCategory::ArtefactsUrls => CategoryBuffer::Urls(Vec::new()),
             ParquetCategory::ArtefactsEmails => CategoryBuffer::Emails(Vec::new()),
             ParquetCategory::ArtefactsPhones => CategoryBuffer::Phones(Vec::new()),
+            ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
+                CategoryBuffer::BitlockerRecoveryPasswords(Vec::new())
+            }
             ParquetCategory::BrowserHistory => CategoryBuffer::History(Vec::new()),
             ParquetCategory::BrowserCookies => CategoryBuffer::Cookies(Vec::new()),
             ParquetCategory::BrowserDownloads => CategoryBuffer::Downloads(Vec::new()),
@@ -358,6 +377,24 @@ impl CategoryWriter {
             }
             _ => Err(MetadataError::Other(
                 "phone row on non-phone category".to_string(),
+            )),
+        }
+    }
+
+    fn append_bitlocker_recovery(
+        &mut self,
+        row: BitlockerRecoveryRow,
+    ) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::BitlockerRecoveryPasswords(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "bitlocker recovery row on non-bitlocker category".to_string(),
             )),
         }
     }
@@ -477,6 +514,11 @@ impl CategoryWriter {
                 rows.clear();
                 batch
             }
+            CategoryBuffer::BitlockerRecoveryPasswords(rows) => {
+                let batch = build_bitlocker_recovery_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
             CategoryBuffer::History(rows) => {
                 let batch = build_history_batch(&self.context, rows, &self.schema)?;
                 rows.clear();
@@ -532,6 +574,7 @@ impl CategoryWriter {
             CategoryBuffer::Urls(rows) => rows.len(),
             CategoryBuffer::Emails(rows) => rows.len(),
             CategoryBuffer::Phones(rows) => rows.len(),
+            CategoryBuffer::BitlockerRecoveryPasswords(rows) => rows.len(),
             CategoryBuffer::History(rows) => rows.len(),
             CategoryBuffer::Cookies(rows) => rows.len(),
             CategoryBuffer::Downloads(rows) => rows.len(),
@@ -557,6 +600,7 @@ struct ParquetSinkInner {
     artefacts_urls: Option<CategoryWriter>,
     artefacts_emails: Option<CategoryWriter>,
     artefacts_phones: Option<CategoryWriter>,
+    artefacts_bitlocker_recovery_passwords: Option<CategoryWriter>,
     browser_history: Option<CategoryWriter>,
     browser_cookies: Option<CategoryWriter>,
     browser_downloads: Option<CategoryWriter>,
@@ -582,6 +626,9 @@ impl ParquetSinkInner {
             ParquetCategory::ArtefactsUrls => &mut self.artefacts_urls,
             ParquetCategory::ArtefactsEmails => &mut self.artefacts_emails,
             ParquetCategory::ArtefactsPhones => &mut self.artefacts_phones,
+            ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
+                &mut self.artefacts_bitlocker_recovery_passwords
+            }
             ParquetCategory::BrowserHistory => &mut self.browser_history,
             ParquetCategory::BrowserCookies => &mut self.browser_cookies,
             ParquetCategory::BrowserDownloads => &mut self.browser_downloads,
@@ -640,6 +687,9 @@ impl ParquetSinkInner {
         if let Some(writer) = &mut self.artefacts_phones {
             writer.finish()?;
         }
+        if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
+            writer.finish()?;
+        }
         if let Some(writer) = &mut self.browser_history {
             writer.finish()?;
         }
@@ -694,6 +744,9 @@ impl ParquetSinkInner {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.artefacts_phones {
+            writer.flush_buffer()?;
+        }
+        if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.browser_history {
@@ -758,6 +811,7 @@ impl ParquetSink {
                 artefacts_urls: None,
                 artefacts_emails: None,
                 artefacts_phones: None,
+                artefacts_bitlocker_recovery_passwords: None,
                 browser_history: None,
                 browser_cookies: None,
                 browser_downloads: None,
@@ -818,6 +872,12 @@ impl MetadataSink for ParquetSink {
                 let row = map_phone_artefact(artefact)?;
                 let writer = inner.get_or_create_writer(ParquetCategory::ArtefactsPhones)?;
                 writer.append_phone(row)
+            }
+            ArtefactKind::BitlockerRecoveryPassword => {
+                let row = map_bitlocker_recovery_artefact(artefact)?;
+                let writer = inner
+                    .get_or_create_writer(ParquetCategory::ArtefactsBitlockerRecoveryPasswords)?;
+                writer.append_bitlocker_recovery(row)
             }
             ArtefactKind::GenericString => Ok(()),
         }
@@ -1089,6 +1149,20 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("phone_raw", DataType::Utf8, false),
             Field::new("phone_e164", DataType::Utf8, true),
             Field::new("country", DataType::Utf8, true),
+            Field::new("source_kind", DataType::Utf8, false),
+            Field::new("source_detail", DataType::Utf8, false),
+            Field::new("certainty", DataType::Float64, false),
+        ])),
+        ParquetCategory::ArtefactsBitlockerRecoveryPasswords => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("global_start", DataType::Int64, false),
+            Field::new("global_end", DataType::Int64, false),
+            Field::new("recovery_password", DataType::Utf8, false),
+            Field::new("encoding", DataType::Utf8, false),
             Field::new("source_kind", DataType::Utf8, false),
             Field::new("source_detail", DataType::Utf8, false),
             Field::new("certainty", DataType::Float64, false),
@@ -1497,6 +1571,58 @@ fn build_phones_batch(
         Arc::new(phone_raw.finish()),
         Arc::new(phone_e164.finish()),
         Arc::new(country.finish()),
+        Arc::new(source_kind.finish()),
+        Arc::new(source_detail.finish()),
+        Arc::new(certainty.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_bitlocker_recovery_batch(
+    ctx: &ParquetContext,
+    rows: &[BitlockerRecoveryRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut global_start = Int64Builder::new();
+    let mut global_end = Int64Builder::new();
+    let mut recovery_password = StringBuilder::new();
+    let mut encoding = StringBuilder::new();
+    let mut source_kind = StringBuilder::new();
+    let mut source_detail = StringBuilder::new();
+    let mut certainty = arrow_array::builder::Float64Builder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        global_start.append_value(row.global_start);
+        global_end.append_value(row.global_end);
+        recovery_password.append_value(&row.recovery_password);
+        encoding.append_value(&row.encoding);
+        source_kind.append_value(&row.source_kind);
+        source_detail.append_value(&row.source_detail);
+        certainty.append_value(row.certainty);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(global_start.finish()),
+        Arc::new(global_end.finish()),
+        Arc::new(recovery_password.finish()),
+        Arc::new(encoding.finish()),
         Arc::new(source_kind.finish()),
         Arc::new(source_detail.finish()),
         Arc::new(certainty.finish()),
@@ -1953,6 +2079,20 @@ fn map_phone_artefact(artefact: &StringArtefact) -> Result<PhoneArtefactRow, Met
         phone_raw: artefact.content.clone(),
         phone_e164: None,
         country: None,
+        source_kind: "string_span".to_string(),
+        source_detail: "strings_artefacts".to_string(),
+        certainty: 1.0,
+    })
+}
+
+fn map_bitlocker_recovery_artefact(
+    artefact: &StringArtefact,
+) -> Result<BitlockerRecoveryRow, MetadataError> {
+    Ok(BitlockerRecoveryRow {
+        global_start: to_i64(artefact.global_start)?,
+        global_end: to_i64(artefact.global_end)?,
+        recovery_password: artefact.content.clone(),
+        encoding: artefact.encoding.clone(),
         source_kind: "string_span".to_string(),
         source_detail: "strings_artefacts".to_string(),
         certainty: 1.0,

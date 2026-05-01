@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - `sqlite_suppress_wal_frame_lookback_frames` configuration knob to bound the WAL-frame lookback search performed by the SQLite carver. Set to `0` to check only the immediate `wal_start = offset - 56` candidate.
+- BitLocker recovery password detection in string artefact extraction. New `enable_bitlocker_recovery_scan` config flag (default `true`) and matching CLI flags `--scan-bitlocker-recovery` / `--no-scan-bitlocker-recovery`. New `ArtefactKind::BitlockerRecoveryPassword` variant and a new Parquet category file `artefacts_bitlocker_recovery_passwords.parquet` (CSV/JSONL outputs continue to share `string_artefacts.{csv,jsonl}`). Detection accepts hyphen- or whitespace-separated 8 × 6-digit passwords, validates each group is divisible by 11 with quotient ≤ `0xFFFF`, and canonicalises stored content to hyphenated form. Textual recovery passwords only; `.bek` recovery key files and BitLocker volume unlock are out of scope. Closes #88.
 
 ## 0.5.1 (2026-04-27)
 

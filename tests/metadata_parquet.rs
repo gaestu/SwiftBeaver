@@ -64,6 +64,17 @@ fn parquet_writes_expected_files() {
     };
     sink.record_string(&artefact).expect("record url");
 
+    let bitlocker_artefact = StringArtefact {
+        run_id: "run_001".to_string(),
+        artefact_kind: ArtefactKind::BitlockerRecoveryPassword,
+        content: "111111-222222-333333-444444-555555-666666-072765-720885".to_string(),
+        encoding: "ascii".to_string(),
+        global_start: 200,
+        global_end: 254,
+    };
+    sink.record_string(&bitlocker_artefact)
+        .expect("record bitlocker recovery password");
+
     let visit_time = chrono::DateTime::from_timestamp(1_600_000_000, 0).map(|dt| dt.naive_utc());
     let windows_records = vec![
         WindowsArtefactRecord::Lnk(LnkArtefact {
@@ -202,6 +213,7 @@ fn parquet_writes_expected_files() {
     let parquet_dir = run_output_dir.join("parquet");
     let files_path = parquet_dir.join("files_jpeg.parquet");
     let urls_path = parquet_dir.join("artefacts_urls.parquet");
+    let bitlocker_path = parquet_dir.join("artefacts_bitlocker_recovery_passwords.parquet");
     let history_path = parquet_dir.join("browser_history.parquet");
     let cookies_path = parquet_dir.join("browser_cookies.parquet");
     let downloads_path = parquet_dir.join("browser_downloads.parquet");
@@ -211,6 +223,7 @@ fn parquet_writes_expected_files() {
 
     assert!(files_path.exists());
     assert!(urls_path.exists());
+    assert!(bitlocker_path.exists());
     assert!(history_path.exists());
     assert!(cookies_path.exists());
     assert!(downloads_path.exists());
@@ -220,6 +233,7 @@ fn parquet_writes_expected_files() {
 
     assert_eq!(count_rows(&files_path), 1);
     assert_eq!(count_rows(&urls_path), 1);
+    assert_eq!(count_rows(&bitlocker_path), 1);
     assert_eq!(count_rows(&history_path), 1);
     assert_eq!(count_rows(&cookies_path), 1);
     assert_eq!(count_rows(&downloads_path), 1);
@@ -229,6 +243,8 @@ fn parquet_writes_expected_files() {
 
     assert_has_column(&files_path, "evidence_sha256");
     assert_has_column(&urls_path, "evidence_sha256");
+    assert_has_column(&bitlocker_path, "recovery_password");
+    assert_has_column(&bitlocker_path, "evidence_sha256");
     assert_has_column(&history_path, "evidence_sha256");
     assert_has_column(&cookies_path, "evidence_sha256");
     assert_has_column(&downloads_path, "evidence_sha256");

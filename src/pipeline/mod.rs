@@ -695,6 +695,7 @@ impl<'a> PipelineRunner<'a> {
                 urls: self.cfg.enable_url_scan,
                 emails: self.cfg.enable_email_scan,
                 phones: self.cfg.enable_phone_scan,
+                bitlocker_recovery_passwords: self.cfg.enable_bitlocker_recovery_scan,
             };
             workers::spawn_string_workers(
                 self.scan_workers,

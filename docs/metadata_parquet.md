@@ -44,6 +44,7 @@ Schema:
 - `artefacts_urls.parquet`
 - `artefacts_emails.parquet`
 - `artefacts_phones.parquet`
+- `artefacts_bitlocker_recovery_passwords.parquet`
 
 URL schema:
 
@@ -96,6 +97,25 @@ Phone schema:
 - `source_kind` (string)
 - `source_detail` (string)
 - `certainty` (float64)
+
+BitLocker recovery password schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `global_start` (int64)
+- `global_end` (int64)
+- `recovery_password` (string, canonical hyphen-separated form `XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX`)
+- `encoding` (string, e.g. `ascii`, `utf-8`, `utf-16le`, `utf-16be`)
+- `source_kind` (string)
+- `source_detail` (string)
+- `certainty` (float64)
+
+This category covers textual BitLocker recovery passwords found in extracted
+string spans only. `.bek` recovery key files and BitLocker key packages are
+out of scope for this output.
 
 ## Browser history
 

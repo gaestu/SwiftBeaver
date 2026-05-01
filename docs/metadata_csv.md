@@ -41,6 +41,8 @@ Columns:
 - `evidence_path`
 - `evidence_sha256`
 
+Known `artefact_kind` values: `url`, `email`, `phone`, `bitlocker_recovery_password`, `string`. For `bitlocker_recovery_password`, `content` is the canonical hyphen-separated form (`XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX`).
+
 ## browser_history.csv
 
 Columns:
