@@ -530,4 +530,15 @@ mod tests {
             ConfigError::UnsupportedPhoneRegion { ref region } if region == "XX"
         ));
     }
+
+    #[test]
+    fn default_xz_max_size_is_1_gib() {
+        let cfg = load_config(None).expect("config").config;
+        let xz = cfg
+            .file_types
+            .iter()
+            .find(|file_type| file_type.id == "xz")
+            .expect("xz file type");
+        assert_eq!(xz.max_size, 1024 * 1024 * 1024);
+    }
 }
