@@ -23,6 +23,7 @@ Complete documentation for SwiftBeaver forensic file carving tool.
 - **[Carver Algorithms](carver/README.md)** - Detailed carver documentation
 - **[Golden Image Testing](golden_image.md)** - Testing framework
 - **[SQLite Carve Handoff](sqlite_carve_handoff.md)** - Carve-only workflow for external SQLite analysis
+- **[Third-Party License Reports](third_party_licenses.md)** - Release workflow for generated dependency license notices
 
 ---
 

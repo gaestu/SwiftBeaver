@@ -1,0 +1,31 @@
+SwiftBeaver Third-Party License Report
+======================================
+
+This report is generated from the Cargo dependency graph using cargo-about.
+It includes third-party Rust crates selected by the current Cargo.lock and
+the feature set used by the generator command.
+
+License Summary
+---------------
+
+{{#each overview}}
+- {{name}} ({{id}}): {{count}}
+{{/each}}
+
+License Texts and Crate Usage
+-----------------------------
+
+{{#each licenses}}
+================================================================================
+License: {{name}} ({{id}})
+{{#if source_path}}Source: {{source_path}}{{/if}}
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}{{#if path}} [{{path}}]{{/if}}
+{{/each}}
+
+Text:
+{{text}}
+
+{{/each}}

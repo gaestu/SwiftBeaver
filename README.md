@@ -210,3 +210,6 @@ cargo test golden --features ewf
 Apache-2.0 (see [LICENSE](LICENSE)).
 
 Third-party licenses and notices: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+For release artifacts, generate the full dependency license report with
+[`scripts/generate-third-party-licenses.sh`](scripts/generate-third-party-licenses.sh);
+see [`docs/third_party_licenses.md`](docs/third_party_licenses.md).
