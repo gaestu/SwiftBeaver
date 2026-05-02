@@ -1104,8 +1104,27 @@ impl<'a> PipelineRunner<'a> {
             duplicates_skipped: counters.duplicates_skipped.load(Ordering::Relaxed),
         };
 
+        let (cache_hits, cache_misses, cache_bytes_saved, cache_hit_rate_pct) = self
+            .evidence
+            .cache_stats()
+            .map(|cache_stats| {
+                let cache_lookups = cache_stats.hits.saturating_add(cache_stats.misses);
+                let cache_hit_rate_pct = if cache_lookups > 0 {
+                    (cache_stats.hits as f64 / cache_lookups as f64) * 100.0
+                } else {
+                    0.0
+                };
+                (
+                    cache_stats.hits,
+                    cache_stats.misses,
+                    cache_stats.bytes_saved,
+                    cache_hit_rate_pct,
+                )
+            })
+            .unwrap_or((0, 0, 0, 0.0));
+
         info!(
-            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} files_capped={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={} overlap_skipped={} duplicates_found={} duplicates_skipped={}",
+            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} files_capped={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={} overlap_skipped={} duplicates_found={} duplicates_skipped={} cache_hits={} cache_misses={} cache_hit_rate_pct={:.2} cache_bytes_saved={}",
             stats.bytes_scanned,
             stats.chunks_processed,
             stats.hits_found,
@@ -1120,6 +1139,10 @@ impl<'a> PipelineRunner<'a> {
             stats.overlap_skipped,
             stats.duplicates_found,
             stats.duplicates_skipped,
+            cache_hits,
+            cache_misses,
+            cache_hit_rate_pct,
+            cache_bytes_saved,
         );
 
         if (outcome.cancelled
