@@ -99,11 +99,11 @@ if (-not (Test-Path $VsToolsDir)) {
 
 Push-Location $SourceDir.FullName
 try {
-    if (Test-Path ".\synclibs.ps1") {
-        .\synclibs.ps1
-    }
     if (Test-Path ".\syncwinflexbison.ps1") {
         .\syncwinflexbison.ps1
+    }
+    if (Test-Path ".\synclibs.ps1") {
+        .\synclibs.ps1
     }
     if (Test-Path ".\synczlib.ps1") {
         .\synczlib.ps1
