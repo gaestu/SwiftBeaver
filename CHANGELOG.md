@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- No changes yet.
+
+## 0.6.0 (2026-05-04)
+
 ### Schema
 - Run summary metadata now includes `files_capped` in CSV, JSONL, and Parquet outputs. The Parquet run summary schema adds a non-nullable `Int64` `files_capped` column, so downstream tools that pin the exact run-summary schema should handle this as a schema change.
 - Added BitLocker BEK metadata outputs: `metadata/bitlocker_bek.{jsonl,csv}` and `parquet/artefacts_bitlocker_bek.parquet`, each carrying provenance plus key identifier GUID, optional description, key data length, key method, and FILETIME for structurally valid binary `.bek` files.
