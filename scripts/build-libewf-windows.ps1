@@ -53,7 +53,7 @@ New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $LibDir, $BinDir, $LicenseDir | Out-Null
 
 $Archive = Join-Path $BuildRoot "libewf.tar.gz"
-$Url = "https://github.com/libyal/libewf/releases/download/$Version/libewf-experimental-$Version.tar.gz"
+$Url = "https://github.com/libyal/libewf/archive/refs/tags/$Version.tar.gz"
 
 Write-Host "Downloading libewf $Version from $Url"
 Invoke-WebRequest -Uri $Url -OutFile $Archive
@@ -115,6 +115,9 @@ try {
     $Python = (Get-Command python).Source
     $PythonPath = Split-Path $Python
     $BuildScript = Join-Path $SourceDir.FullName "build.ps1"
+    if (-not (Test-Path $BuildScript)) {
+        throw "Missing libewf Windows build script: $BuildScript"
+    }
     $BuildScriptContent = Get-Content -Raw $BuildScript
     $VsToolsUpdatePattern = '(?s)Else\s*\{\s*Push-Location "\$\{VSToolsPath\}".*?Pop-Location\s*\}\s*\}'
     $VsToolsUpdateMatches = [regex]::Matches($BuildScriptContent, $VsToolsUpdatePattern)
