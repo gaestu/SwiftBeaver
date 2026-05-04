@@ -99,13 +99,41 @@ if (-not (Test-Path $VsToolsDir)) {
 
 Push-Location $SourceDir.FullName
 try {
-    if (Test-Path ".\synclibs.ps1") {
-        .\synclibs.ps1
-    }
     if (Test-Path ".\syncwinflexbison.ps1") {
         .\syncwinflexbison.ps1
     }
+    if (Test-Path ".\synclibs.ps1") {
+        .\synclibs.ps1
+    }
     if (Test-Path ".\synczlib.ps1") {
+        $ZlibSyncScript = Join-Path $SourceDir.FullName "synczlib.ps1"
+        $ZlibSyncContent = Get-Content -Raw $ZlibSyncScript
+        $ZlibOriginalUrl = '$Url = "https://zlib.net/zlib131.zip"'
+        $ZlibPinnedUrl = '$Url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib131.zip"'
+        if ([regex]::Matches($ZlibSyncContent, [regex]::Escape($ZlibOriginalUrl)).Count -ne 1) {
+            throw "Unable to patch libewf synczlib.ps1 URL deterministically"
+        }
+        $ZlibSyncContent = $ZlibSyncContent.Replace($ZlibOriginalUrl, $ZlibPinnedUrl)
+
+        $ZlibDownloadLine = 'Invoke-WebRequest -Uri ${Url} -OutFile ${Filename}'
+        $ZlibDownloadReplacement = @'
+Invoke-WebRequest -Uri ${Url} -OutFile ${Filename}
+
+$ExpectedSha256 = "72af66d44fcc14c22013b46b814d5d2514673dda3d115e64b690c1ad636e7b17"
+$ActualSha256 = (Get-FileHash -Algorithm SHA256 ${Filename}).Hash.ToLowerInvariant()
+If (${ActualSha256} -ne ${ExpectedSha256})
+{
+        Write-Host "zlib archive SHA-256 mismatch: expected ${ExpectedSha256}, got ${ActualSha256}" -foreground Red
+
+        Exit 1
+}
+'@
+        if ([regex]::Matches($ZlibSyncContent, [regex]::Escape($ZlibDownloadLine)).Count -ne 1) {
+            throw "Unable to patch libewf synczlib.ps1 checksum block deterministically"
+        }
+        $ZlibSyncContent = $ZlibSyncContent.Replace($ZlibDownloadLine, $ZlibDownloadReplacement)
+        Set-Content -Path $ZlibSyncScript -Value $ZlibSyncContent -Encoding UTF8
+
         .\synczlib.ps1
     }
     if (Test-Path ".\autogen.ps1") {
@@ -119,6 +147,25 @@ try {
         throw "Missing libewf Windows build script: $BuildScript"
     }
     $BuildScriptContent = Get-Content -Raw $BuildScript
+
+    $MsvscppConvertPath = Join-Path $VsToolsDir "vstools\scripts\msvscpp_convert.py"
+    if (-not (Test-Path $MsvscppConvertPath)) {
+        throw "Missing pinned vstools converter: $MsvscppConvertPath"
+    }
+    $MsvscppConvertOriginal = '$MSVSCppConvert = "${VSToolsPath}\scripts\msvscpp-convert.py"'
+    if ([regex]::Matches($BuildScriptContent, [regex]::Escape($MsvscppConvertOriginal)).Count -ne 1) {
+        throw "Unable to patch libewf build.ps1 msvscpp converter path deterministically"
+    }
+    $MsvscppConvertReplacement = '$MSVSCppConvert = "' + $MsvscppConvertPath + '"'
+    $BuildScriptContent = $BuildScriptContent.Replace($MsvscppConvertOriginal, $MsvscppConvertReplacement)
+
+    $MSBuildOptionsOriginal = '$MSBuildOptions = "/verbosity:quiet /target:Build /property:Configuration=${Configuration},Platform=${Platform}"'
+    if ([regex]::Matches($BuildScriptContent, [regex]::Escape($MSBuildOptionsOriginal)).Count -ne 1) {
+        throw "Unable to patch libewf build.ps1 MSBuild target deterministically"
+    }
+    $MSBuildOptionsReplacement = '$MSBuildOptions = "/verbosity:quiet /target:libewf /property:Configuration=${Configuration},Platform=${Platform}"'
+    $BuildScriptContent = $BuildScriptContent.Replace($MSBuildOptionsOriginal, $MSBuildOptionsReplacement)
+
     $VsToolsUpdatePattern = '(?s)Else\s*\{\s*Push-Location "\$\{VSToolsPath\}".*?Pop-Location\s*\}\s*\}'
     $VsToolsUpdateMatches = [regex]::Matches($BuildScriptContent, $VsToolsUpdatePattern)
     if ($VsToolsUpdateMatches.Count -ne 1) {
@@ -144,6 +191,9 @@ try {
         -PythonPath $PythonPath `
         -VSToolsPath $VsToolsDir `
         -VSToolsOptions "--extend-with-x64 --no-python-dll"
+    if ($LASTEXITCODE -ne 0) {
+        throw "libewf build.ps1 failed with exit code $LASTEXITCODE"
+    }
 }
 finally {
     Pop-Location

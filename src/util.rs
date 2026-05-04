@@ -71,8 +71,6 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
     } else {
         std::fs::create_dir_all(path)?;
     }
-    let metadata = std::fs::metadata(path)?;
-
     let probe_path = path.join(".swiftbeaver_write_probe");
     match OpenOptions::new()
         .write(true)
@@ -95,6 +93,7 @@ pub fn ensure_output_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        let metadata = std::fs::metadata(path)?;
         let mode = metadata.permissions().mode();
         if mode & 0o002 != 0 {
             warn!("output directory is world-writable: {}", path.display());

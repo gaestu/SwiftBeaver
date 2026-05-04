@@ -1,4 +1,6 @@
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -186,12 +188,13 @@ mod ewf {
     use std::ptr;
     use std::sync::Mutex;
 
-    use libc::{c_char, c_int, c_void, off64_t, size_t, ssize_t};
+    use libc::{c_char, c_int, c_void, size_t};
 
     use super::{EvidenceError, EvidenceSource};
 
     type LibEwfHandle = libc::intptr_t;
     type LibEwfError = libc::intptr_t;
+    type LibEwfOffset = i64;
 
     const LIBEWF_FORMAT_UNKNOWN: u8 = 0x00;
 
@@ -243,9 +246,9 @@ mod ewf {
             handle: *mut LibEwfHandle,
             buffer: *mut c_void,
             buffer_size: size_t,
-            offset: off64_t,
+            offset: LibEwfOffset,
             error: *mut *mut LibEwfError,
-        ) -> ssize_t;
+        ) -> isize;
 
         fn libewf_error_sprint(error: *mut LibEwfError, string: *mut c_char, size: size_t)
         -> c_int;
@@ -362,7 +365,7 @@ mod ewf {
                     guard.handle,
                     buf.as_mut_ptr() as *mut c_void,
                     buf.len(),
-                    offset as off64_t,
+                    offset as LibEwfOffset,
                     &mut error,
                 );
                 if read < 0 {
@@ -614,7 +617,7 @@ mod ewf {
                     guard.handle,
                     buf.as_mut_ptr() as *mut c_void,
                     buf.len(),
-                    offset as off64_t,
+                    offset as LibEwfOffset,
                     &mut error,
                 );
                 if read < 0 {
