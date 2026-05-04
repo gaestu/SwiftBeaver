@@ -12,6 +12,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  LIBEWF_VERSION: "20240506"
+  LIBEWF_SHA256: "247d8ee9572392a2404be514d1137f099970f41f240c1134ddc3f04322281c67"
+  BZIP2_REF: "3bdf198c9ffd3469afe62045bef33c3c6b5105b4"
+  VSTOOLS_REF: "a19882bf6f46c4eaeb2b323eeef3cfe94956fde6"
 
 jobs:
   build-linux:
@@ -94,9 +98,90 @@ jobs:
           name: swiftbeaver-linux-${{ matrix.variant.suffix }}
           path: dist/swiftbeaver-linux-x86_64-${{ matrix.variant.suffix }}.tar.gz
 
+  build-windows:
+    name: Build Windows Binaries (${{ matrix.variant.name }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: cpu-only
+            build_args: "--no-default-features"
+            suffix: "cpu-only"
+            ewf: false
+          - name: ewf
+            build_args: ""
+            suffix: "ewf"
+            ewf: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore libewf cache
+        if: matrix.variant.ewf
+        id: cache-libewf
+        uses: actions/cache@v4
+        with:
+          path: deps/libewf/dist
+          key: ${{ runner.os }}-libewf-${{ env.LIBEWF_VERSION }}-${{ env.BZIP2_REF }}-${{ env.VSTOOLS_REF }}-${{ hashFiles('scripts/build-libewf-windows.ps1') }}-x64-v1
+
+      - name: Set up Python
+        if: matrix.variant.ewf && steps.cache-libewf.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build libewf
+        if: matrix.variant.ewf && steps.cache-libewf.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\scripts\build-libewf-windows.ps1
+
+      - name: Configure libewf environment
+        if: matrix.variant.ewf
+        shell: pwsh
+        run: |
+          $libewfRoot = "${{ github.workspace }}\deps\libewf\dist"
+          "LIBEWF_LIB_DIR=$libewfRoot\lib" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$libewfRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Build release binary
+        run: cargo build --release ${{ matrix.variant.build_args }}
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist, package | Out-Null
+          Copy-Item target/release/swiftbeaver.exe package/swiftbeaver.exe
+          if ("${{ matrix.variant.ewf }}" -eq "true") {
+            Copy-Item deps/libewf/dist/bin/*.dll package/ -Force
+            Copy-Item deps/libewf/dist/licenses package/third_party_licenses -Recurse -Force
+          }
+          Compress-Archive -Path package/* -DestinationPath dist/swiftbeaver-windows-x86_64-${{ matrix.variant.suffix }}.zip -Force
+
+      - name: Verify packaged executable
+        shell: pwsh
+        run: |
+          .\package\swiftbeaver.exe --version
+          if ("${{ matrix.variant.ewf }}" -eq "true") {
+            $out = Join-Path $env:RUNNER_TEMP "swiftbeaver-ewf-smoke"
+            Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
+            .\package\swiftbeaver.exe --input tests\golden_image\golden.E01 --output $out --max-chunks 1 --metadata-only
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiftbeaver-windows-${{ matrix.variant.suffix }}
+          path: dist/swiftbeaver-windows-x86_64-${{ matrix.variant.suffix }}.zip
+
   create-release:
     name: Create Release
-    needs: build-linux
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
@@ -112,12 +197,13 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+          find artifacts -name "*.zip" -exec cp {} release/ \;
           ls -lh release/
 
       - name: Generate checksums
         run: |
           cd release
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub release
@@ -125,6 +211,7 @@ jobs:
         with:
           files: |
             release/*.tar.gz
+            release/*.zip
             release/SHA256SUMS
           body: |
             ## SwiftBeaver Release ${{ github.ref_name }}
@@ -146,7 +233,17 @@ jobs:
               - Requires CUDA runtime (version 12.x)
               - Best performance on NVIDIA hardware
               - Use with `--gpu` flag
-            
+
+            - **swiftbeaver-windows-x86_64-cpu-only.zip** - Windows CPU-only build
+              - No GPU support
+              - E01/libewf support is not included
+              - Best for native Windows compatibility
+
+            - **swiftbeaver-windows-x86_64-ewf.zip** - Windows build with E01/libewf support
+              - No GPU support
+              - Bundles libewf runtime DLLs
+              - Use this build for E01/E02 evidence on Windows
+
             ### Installation
             
             ```bash
@@ -159,7 +256,9 @@ jobs:
             # Verify installation
             swiftbeaver --version
             ```
-            
+
+            On Windows, extract the selected `.zip` and run `swiftbeaver.exe` from PowerShell or Command Prompt. Use `swiftbeaver-windows-x86_64-ewf.zip` for E01/E02 inputs.
+
             ### Verify Checksums
             
             ```bash
@@ -170,7 +269,7 @@ jobs:
 
   build-latest:
     name: Build Latest Binaries (Main Branch)
-    needs: build-linux
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
@@ -186,12 +285,13 @@ jobs:
         run: |
           mkdir -p latest
           find artifacts -name "*.tar.gz" -exec cp {} latest/ \;
+          find artifacts -name "*.zip" -exec cp {} latest/ \;
           ls -lh latest/
 
       - name: Generate checksums
         run: |
           cd latest
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
       - name: Update latest release
@@ -202,6 +302,7 @@ jobs:
           prerelease: true
           files: |
             latest/*.tar.gz
+            latest/*.zip
             latest/SHA256SUMS
           body: |
             ## Latest Development Build
@@ -217,6 +318,7 @@ jobs:
             - **swiftbeaver-linux-x86_64-cpu-only.tar.gz** - CPU-only
             - **swiftbeaver-linux-x86_64-opencl.tar.gz** - OpenCL GPU
             - **swiftbeaver-linux-x86_64-cuda.tar.gz** - CUDA GPU
+            - **swiftbeaver-windows-x86_64-cpu-only.zip** - Windows CPU-only
+            - **swiftbeaver-windows-x86_64-ewf.zip** - Windows with E01/libewf
             
             See release notes for variant details and installation instructions.
-

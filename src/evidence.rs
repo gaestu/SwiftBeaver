@@ -195,7 +195,8 @@ mod ewf {
 
     const LIBEWF_FORMAT_UNKNOWN: u8 = 0x00;
 
-    #[link(name = "ewf")]
+    #[cfg_attr(target_os = "windows", link(name = "libewf"))]
+    #[cfg_attr(not(target_os = "windows"), link(name = "ewf"))]
     unsafe extern "C" {
         fn libewf_get_access_flags_read() -> c_int;
 
@@ -1253,6 +1254,8 @@ mod tests {
             no_scan_emails: false,
             scan_phones: false,
             no_scan_phones: false,
+            scan_bitlocker_recovery: false,
+            no_scan_bitlocker_recovery: false,
             string_min_len: None,
             scan_entropy: false,
             entropy_window_bytes: None,
