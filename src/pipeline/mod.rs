@@ -9,6 +9,7 @@ pub mod workers;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -31,6 +32,7 @@ use crate::metadata::{MetadataSink, RunSummary};
 use crate::scanner::SignatureScanner;
 use crate::strings::StringScanner;
 use crate::strings::artifacts::ArtefactScanConfig;
+use crate::strings::phones::{PhoneArtefactTracker, PhoneValidationConfig};
 
 use events::MetadataEvent;
 use limiter::CarveLimiter;
@@ -52,6 +54,7 @@ pub struct PipelineStats {
     pub files_carved: u64,
     pub files_rejected: u64,
     pub files_prevalidation_rejected: u64,
+    pub files_capped: u64,
     pub string_spans: u64,
     pub artefacts_extracted: u64,
     pub scan_time_ms: u64,
@@ -200,14 +203,18 @@ pub fn run_pipeline_with_cancel(
 struct PipelineChannels {
     scan_tx: crossbeam_channel::Sender<ScanJob>,
     scan_rx: crossbeam_channel::Receiver<ScanJob>,
-    fast_hit_tx: crossbeam_channel::Sender<crate::scanner::NormalizedHit>,
-    fast_hit_rx: crossbeam_channel::Receiver<crate::scanner::NormalizedHit>,
-    slow_hit_tx: crossbeam_channel::Sender<crate::scanner::NormalizedHit>,
-    slow_hit_rx: crossbeam_channel::Receiver<crate::scanner::NormalizedHit>,
+    fast_hit_tx: crossbeam_channel::Sender<workers::HitJob>,
+    fast_hit_rx: crossbeam_channel::Receiver<workers::HitJob>,
+    slow_hit_tx: crossbeam_channel::Sender<workers::HitJob>,
+    slow_hit_rx: crossbeam_channel::Receiver<workers::HitJob>,
     meta_tx: crossbeam_channel::Sender<MetadataEvent>,
     meta_rx: crossbeam_channel::Receiver<MetadataEvent>,
     string_tx: Option<crossbeam_channel::Sender<StringJob>>,
     string_rx: Option<crossbeam_channel::Receiver<StringJob>>,
+    /// Channel from carve workers into the overlap arbiter. Hit completion
+    /// events are forwarded to the writer pool in deterministic sequence.
+    arbiter_tx: crossbeam_channel::Sender<workers::CarveResult>,
+    arbiter_rx: crossbeam_channel::Receiver<workers::CarveResult>,
     write_tx: crossbeam_channel::Sender<workers::WriteJob>,
     write_rx: crossbeam_channel::Receiver<workers::WriteJob>,
     file_shard_tx: crossbeam_channel::Sender<events::FileShardEvent>,
@@ -224,6 +231,7 @@ struct PipelineCounters {
     hits_found: Arc<AtomicU64>,
     files_rejected: Arc<AtomicU64>,
     files_prevalidation_rejected: Arc<AtomicU64>,
+    files_capped: Arc<AtomicU64>,
     string_spans: Arc<AtomicU64>,
     artefacts_found: Arc<AtomicU64>,
     carve_errors: Arc<AtomicU64>,
@@ -235,6 +243,7 @@ struct PipelineCounters {
     overlap_skipped: Arc<AtomicU64>,
     duplicates_found: Arc<AtomicU64>,
     duplicates_skipped: Arc<AtomicU64>,
+    phone_tracker: Arc<Mutex<PhoneArtefactTracker>>,
 }
 
 impl PipelineCounters {
@@ -245,6 +254,7 @@ impl PipelineCounters {
             hits_found: Arc::new(AtomicU64::new(0)),
             files_rejected: Arc::new(AtomicU64::new(0)),
             files_prevalidation_rejected: Arc::new(AtomicU64::new(0)),
+            files_capped: Arc::new(AtomicU64::new(0)),
             string_spans: Arc::new(AtomicU64::new(0)),
             artefacts_found: Arc::new(AtomicU64::new(0)),
             carve_errors: Arc::new(AtomicU64::new(0)),
@@ -256,6 +266,7 @@ impl PipelineCounters {
             overlap_skipped: Arc::new(AtomicU64::new(0)),
             duplicates_found: Arc::new(AtomicU64::new(0)),
             duplicates_skipped: Arc::new(AtomicU64::new(0)),
+            phone_tracker: Arc::new(Mutex::new(PhoneArtefactTracker::default())),
         }
     }
 }
@@ -266,6 +277,7 @@ struct WorkerHandles {
     scan_handles: Vec<std::thread::JoinHandle<()>>,
     fast_carve_handles: Vec<std::thread::JoinHandle<()>>,
     slow_carve_handles: Vec<std::thread::JoinHandle<()>>,
+    arbiter_handle: std::thread::JoinHandle<()>,
     write_handles: Vec<std::thread::JoinHandle<()>>,
     string_handles: Vec<std::thread::JoinHandle<()>>,
 }
@@ -356,7 +368,8 @@ impl<'a> PipelineRunner<'a> {
 
         let meta_sinks = std::mem::take(&mut self.meta_sinks);
         let entropy_cfg = self.entropy_config();
-        let handles = self.spawn_workers(meta_sinks, &channels, &counters, entropy_cfg)?;
+        let handles =
+            self.spawn_workers(meta_sinks, &channels, &counters, entropy_cfg, resume_chunks)?;
 
         let outcome = self.scan_loop(
             total_bytes,
@@ -474,6 +487,10 @@ impl<'a> PipelineRunner<'a> {
             .saturating_mul(WRITE_QUEUE_CAPACITY_MULTIPLIER)
             .max(MIN_CHANNEL_CAPACITY);
         let (write_tx, write_rx) = bounded::<workers::WriteJob>(write_cap);
+        // The arbiter reorders per-hit completion events by deterministic
+        // sequence. Reuse write capacity for balanced backpressure between
+        // carve workers, the arbiter, and writer workers.
+        let (arbiter_tx, arbiter_rx) = bounded::<workers::CarveResult>(write_cap);
 
         let shard_cap = meta_cap * 4;
         let (file_shard_tx, file_shard_rx) = bounded::<events::FileShardEvent>(shard_cap);
@@ -494,6 +511,8 @@ impl<'a> PipelineRunner<'a> {
             meta_rx,
             string_tx,
             string_rx,
+            arbiter_tx,
+            arbiter_rx,
             write_tx,
             write_rx,
             file_shard_tx,
@@ -511,6 +530,7 @@ impl<'a> PipelineRunner<'a> {
         channels: &PipelineChannels,
         counters: &PipelineCounters,
         entropy_cfg: Option<EntropyConfig>,
+        initial_chunk_id: u64,
     ) -> Result<WorkerHandles> {
         let dedup_tracker = if self.cfg.enable_deduplication {
             Some(Arc::new(DedupTracker::new()))
@@ -611,6 +631,11 @@ impl<'a> PipelineRunner<'a> {
             counters.string_spans.clone(),
             self.cfg.sqlite_page_max_hits_per_chunk,
             counters.scan_time_ms.clone(),
+            initial_chunk_id,
+            self.carve_workers
+                .max(1)
+                .saturating_mul(CHANNEL_CAPACITY_MULTIPLIER)
+                .max(MIN_CHANNEL_CAPACITY),
         );
 
         // Build per-type semaphores from carver_limits config
@@ -638,13 +663,12 @@ impl<'a> PipelineRunner<'a> {
                 },
                 workers::CarveWorkerRuntime {
                     rx: channels.fast_hit_rx.clone(),
-                    write_tx: channels.write_tx.clone(),
+                    write_tx: channels.arbiter_tx.clone(),
                     carve_limiter: counters.carve_limiter.clone(),
                     carve_errors: counters.carve_errors.clone(),
                     carve_time_ms: counters.carve_time_ms.clone(),
                     files_rejected: counters.files_rejected.clone(),
                     files_prevalidation_rejected: counters.files_prevalidation_rejected.clone(),
-                    overlap_skipped: counters.overlap_skipped.clone(),
                     duplicates_found: counters.duplicates_found.clone(),
                 },
             )
@@ -660,13 +684,12 @@ impl<'a> PipelineRunner<'a> {
             },
             workers::CarveWorkerRuntime {
                 rx: channels.slow_hit_rx.clone(),
-                write_tx: channels.write_tx.clone(),
+                write_tx: channels.arbiter_tx.clone(),
                 carve_limiter: counters.carve_limiter.clone(),
                 carve_errors: counters.carve_errors.clone(),
                 carve_time_ms: counters.carve_time_ms.clone(),
                 files_rejected: counters.files_rejected.clone(),
                 files_prevalidation_rejected: counters.files_prevalidation_rejected.clone(),
-                overlap_skipped: counters.overlap_skipped.clone(),
                 duplicates_found: counters.duplicates_found.clone(),
             },
         );
@@ -676,6 +699,11 @@ impl<'a> PipelineRunner<'a> {
                 urls: self.cfg.enable_url_scan,
                 emails: self.cfg.enable_email_scan,
                 phones: self.cfg.enable_phone_scan,
+                phone_validation: PhoneValidationConfig::from_regions(
+                    self.cfg.phone_default_region.as_deref(),
+                    &self.cfg.phone_supported_regions,
+                ),
+                bitlocker_recovery_passwords: self.cfg.enable_bitlocker_recovery_scan,
             };
             workers::spawn_string_workers(
                 self.scan_workers,
@@ -684,10 +712,19 @@ impl<'a> PipelineRunner<'a> {
                 channels.meta_tx.clone(),
                 counters.artefacts_found.clone(),
                 scan_cfg,
+                counters.phone_tracker.clone(),
             )
         } else {
             Vec::new()
         };
+
+        let arbiter_handle = workers::spawn_overlap_arbiter(
+            channels.arbiter_rx.clone(),
+            channels.write_tx.clone(),
+            counters.overlap_skipped.clone(),
+            counters.files_capped.clone(),
+            counters.carve_errors.clone(),
+        );
 
         let write_handles = workers::spawn_write_workers(
             self.cfg.write_workers,
@@ -703,6 +740,7 @@ impl<'a> PipelineRunner<'a> {
             scan_handles,
             fast_carve_handles,
             slow_carve_handles,
+            arbiter_handle,
             write_handles,
             string_handles,
         })
@@ -904,6 +942,7 @@ impl<'a> PipelineRunner<'a> {
             fast_hit_tx,
             slow_hit_tx,
             string_tx,
+            arbiter_tx,
             write_tx,
             meta_tx,
             file_shard_tx,
@@ -926,13 +965,33 @@ impl<'a> PipelineRunner<'a> {
         for handle in handles.slow_carve_handles {
             let _ = handle.join();
         }
-        // Drop write channel after carve workers finish (they're the senders)
+        // Carve workers are done, so the arbiter can finish any completed
+        // sequenced hits still waiting for earlier results.
+        drop(arbiter_tx);
+        let _ = handles.arbiter_handle.join();
+        // Arbiter has forwarded all accepted jobs; close the writer queue.
         drop(write_tx);
         for handle in handles.write_handles {
             let _ = handle.join();
         }
         for handle in handles.string_handles {
             let _ = handle.join();
+        }
+
+        let (phone_metrics, phone_summaries) = match counters.phone_tracker.lock() {
+            Ok(tracker) => (tracker.metrics_snapshot(), tracker.summary_rows()),
+            Err(poisoned) => {
+                warn!("phone tracker lock poisoned while finalizing summaries");
+                let tracker = poisoned.into_inner();
+                (tracker.metrics_snapshot(), tracker.summary_rows())
+            }
+        };
+
+        for row in phone_summaries {
+            if let Err(err) = meta_tx.send(MetadataEvent::PhoneSummary(row)) {
+                warn!("metadata channel closed while sending phone summary: {err}");
+                break;
+            }
         }
 
         let bytes_scanned_total = counters
@@ -953,11 +1012,26 @@ impl<'a> PipelineRunner<'a> {
             files_prevalidation_rejected: counters
                 .files_prevalidation_rejected
                 .load(Ordering::Relaxed),
+            files_capped: counters.files_capped.load(Ordering::Relaxed),
             overlap_skipped: counters.overlap_skipped.load(Ordering::Relaxed),
             string_spans: counters.string_spans.load(Ordering::Relaxed),
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
             duplicates_found: counters.duplicates_found.load(Ordering::Relaxed),
             duplicates_skipped: counters.duplicates_skipped.load(Ordering::Relaxed),
+            phone_like_spans_scanned: phone_metrics.phone_like_spans_scanned,
+            phone_regex_candidates: phone_metrics.phone_regex_candidates,
+            phone_prefilter_rejections: phone_metrics.phone_prefilter_rejections,
+            phone_rejected_digit_only: phone_metrics.phone_rejected_digit_only,
+            phone_rejected_low_entropy: phone_metrics.phone_rejected_low_entropy,
+            phone_rejected_bad_context: phone_metrics.phone_rejected_bad_context,
+            phone_rejected_no_region: phone_metrics.phone_rejected_no_region,
+            phone_rejected_invalid: phone_metrics.phone_rejected_invalid,
+            phone_validation_calls: phone_metrics.phone_validation_calls,
+            phone_validated_rows: phone_metrics.phone_validated_rows,
+            phone_exact_duplicates_omitted: phone_metrics.phone_exact_duplicates_omitted,
+            phone_occurrences_capped: phone_metrics.phone_occurrences_capped,
+            phone_distinct_normalized_values: phone_metrics.phone_distinct_normalized_values,
+            phone_repeated_normalized_values: phone_metrics.phone_repeated_normalized_values,
         };
         if let Err(err) = meta_tx.send(MetadataEvent::RunSummary(summary)) {
             warn!("metadata channel closed while sending run summary: {err}");
@@ -1020,6 +1094,7 @@ impl<'a> PipelineRunner<'a> {
             files_prevalidation_rejected: counters
                 .files_prevalidation_rejected
                 .load(Ordering::Relaxed),
+            files_capped: counters.files_capped.load(Ordering::Relaxed),
             string_spans: counters.string_spans.load(Ordering::Relaxed),
             artefacts_extracted: counters.artefacts_found.load(Ordering::Relaxed),
             scan_time_ms: counters.scan_time_ms.load(Ordering::Relaxed),
@@ -1029,14 +1104,34 @@ impl<'a> PipelineRunner<'a> {
             duplicates_skipped: counters.duplicates_skipped.load(Ordering::Relaxed),
         };
 
+        let (cache_hits, cache_misses, cache_bytes_saved, cache_hit_rate_pct) = self
+            .evidence
+            .cache_stats()
+            .map(|cache_stats| {
+                let cache_lookups = cache_stats.hits.saturating_add(cache_stats.misses);
+                let cache_hit_rate_pct = if cache_lookups > 0 {
+                    (cache_stats.hits as f64 / cache_lookups as f64) * 100.0
+                } else {
+                    0.0
+                };
+                (
+                    cache_stats.hits,
+                    cache_stats.misses,
+                    cache_stats.bytes_saved,
+                    cache_hit_rate_pct,
+                )
+            })
+            .unwrap_or((0, 0, 0, 0.0));
+
         info!(
-            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={} overlap_skipped={} duplicates_found={} duplicates_skipped={}",
+            "run_summary bytes_scanned={} chunks_processed={} hits_found={} files_carved={} files_rejected={} files_prevalidation_rejected={} files_capped={} string_spans={} artefacts_extracted={} scan_time_ms={} carve_time_ms={} overlap_skipped={} duplicates_found={} duplicates_skipped={} cache_hits={} cache_misses={} cache_hit_rate_pct={:.2} cache_bytes_saved={}",
             stats.bytes_scanned,
             stats.chunks_processed,
             stats.hits_found,
             stats.files_carved,
             stats.files_rejected,
             stats.files_prevalidation_rejected,
+            stats.files_capped,
             stats.string_spans,
             stats.artefacts_extracted,
             stats.scan_time_ms,
@@ -1044,6 +1139,10 @@ impl<'a> PipelineRunner<'a> {
             stats.overlap_skipped,
             stats.duplicates_found,
             stats.duplicates_skipped,
+            cache_hits,
+            cache_misses,
+            cache_hit_rate_pct,
+            cache_bytes_saved,
         );
 
         if (outcome.cancelled

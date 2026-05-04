@@ -9,6 +9,8 @@ use crate::scanner::NormalizedHit;
 
 const SQLITE_TABLE_LEAF_PAGE: u8 = 0x0D;
 const SQLITE_INDEX_LEAF_PAGE: u8 = 0x0A;
+const SQLITE_TABLE_INTERIOR_PAGE: u8 = 0x05;
+const SQLITE_INDEX_INTERIOR_PAGE: u8 = 0x02;
 const MAX_FRAGMENTED_FREE_BYTES: u8 = 60;
 const PAGE_SIZE_ORDER: [u32; 8] = [4096, 1024, 2048, 8192, 16384, 32768, 65536, 512];
 
@@ -205,9 +207,23 @@ fn page_header_size(page_type: u8) -> usize {
     }
 }
 
+/// Header size for any b-tree page type, including interior pages
+/// (which carry an additional 4-byte right-most child pointer).
+fn btree_page_header_size(page_type: u8) -> usize {
+    match page_type {
+        SQLITE_TABLE_LEAF_PAGE | SQLITE_INDEX_LEAF_PAGE => 8,
+        SQLITE_TABLE_INTERIOR_PAGE | SQLITE_INDEX_INTERIOR_PAGE => 12,
+        _ => 0,
+    }
+}
+
 fn cell_content_start(cell_content_area: u16, page_size: usize) -> Option<usize> {
     if cell_content_area == 0 {
-        Some(page_size)
+        if page_size == 65536 {
+            Some(65536)
+        } else {
+            None
+        }
     } else {
         let value = cell_content_area as usize;
         if value <= page_size {
@@ -216,6 +232,47 @@ fn cell_content_start(cell_content_area: u16, page_size: usize) -> Option<usize>
             None
         }
     }
+}
+
+fn validate_pointer_table_fits(
+    header_size: usize,
+    cell_count: u16,
+    cell_content: usize,
+    page_size: usize,
+) -> bool {
+    let pointer_bytes = match (cell_count as usize).checked_mul(2) {
+        Some(value) => value,
+        None => return false,
+    };
+    let pointer_table_end = match header_size.checked_add(pointer_bytes) {
+        Some(value) => value,
+        None => return false,
+    };
+    pointer_table_end <= page_size && pointer_table_end <= cell_content
+}
+
+fn validate_cell_pointers(
+    page: &[u8],
+    header_size: usize,
+    cell_count: u16,
+    cell_content: usize,
+) -> bool {
+    let page_size = page.len();
+    let mut pointer_set = HashSet::new();
+    for idx in 0..cell_count as usize {
+        let off = header_size + idx * 2;
+        if off + 2 > page_size {
+            return false;
+        }
+        let ptr = u16::from_be_bytes([page[off], page[off + 1]]) as usize;
+        if ptr < cell_content || ptr >= page_size {
+            return false;
+        }
+        if !pointer_set.insert(ptr) {
+            return false;
+        }
+    }
+    true
 }
 
 fn quick_validate_header(header: PageHeader, page_size: usize) -> bool {
@@ -231,15 +288,7 @@ fn quick_validate_header(header: PageHeader, page_size: usize) -> bool {
         return false;
     }
 
-    let pointer_bytes = match (header.cell_count as usize).checked_mul(2) {
-        Some(value) => value,
-        None => return false,
-    };
-    let pointer_table_end = match header_size.checked_add(pointer_bytes) {
-        Some(value) => value,
-        None => return false,
-    };
-    if pointer_table_end > page_size || pointer_table_end > cell_content {
+    if !validate_pointer_table_fits(header_size, header.cell_count, cell_content, page_size) {
         return false;
     }
 
@@ -273,16 +322,8 @@ fn validate_page_structure(page: &[u8]) -> bool {
         None => return false,
     };
 
-    let mut pointer_set = HashSet::new();
-    for idx in 0..header.cell_count as usize {
-        let off = header_size + idx * 2;
-        let ptr = u16::from_be_bytes([page[off], page[off + 1]]) as usize;
-        if ptr < cell_content || ptr >= page_size {
-            return false;
-        }
-        if !pointer_set.insert(ptr) {
-            return false;
-        }
+    if !validate_cell_pointers(page, header_size, header.cell_count, cell_content) {
+        return false;
     }
 
     validate_freeblock_chain(page, header.first_freeblock as usize, cell_content)
@@ -343,6 +384,94 @@ fn read_exact_at(
         return Ok(None);
     }
     Ok(Some(buf))
+}
+
+/// Deep structural validation of a SQLite b-tree page (table/index, leaf or interior).
+///
+/// Reuses the same building blocks as `validate_page_structure` (cell pointer
+/// table, freeblock chain) so that the two carvers remain in lockstep.
+///
+/// Validates:
+/// - the page-type byte is a recognised b-tree type (`0x02`, `0x05`, `0x0A`, `0x0D`),
+/// - `fragmented_free_bytes` is within SQLite's documented bound,
+/// - `cell_content_area` is within page bounds and after the page header,
+/// - the cell pointer table fits before the cell content area,
+/// - every cell pointer points into the cell content region and is unique,
+/// - the freeblock chain (if any) is bounded, monotonically increasing, and contained in the page.
+///
+/// Empty b-tree pages (`cell_count == 0`) are accepted: SQLite uses `cell_count == 0`
+/// for freshly created or emptied table/index root pages, and they are
+/// structurally indistinguishable from a valid empty page. This is the only
+/// behavioural difference vs. `validate_page_structure`, which is intended for
+/// the standalone `sqlite_page` carver where empty pages are not useful.
+///
+/// Returns `false` for non-b-tree page bytes (e.g. `0x00` overflow / freelist pages); callers
+/// must filter those out before invoking this function.
+pub(crate) fn deep_validate_btree_page(page: &[u8]) -> bool {
+    deep_validate_btree_page_with_header_offset(page, 0)
+}
+
+/// Deep structural validation of a SQLite b-tree page whose b-tree header
+/// begins at `header_offset` within `page`.
+///
+/// This is used for page 1 in full SQLite databases, where the first 100
+/// bytes are the database header and the b-tree page header starts at byte 100.
+/// Cell pointers, cell content offsets, and freeblock offsets remain absolute
+/// offsets relative to the beginning of the SQLite page.
+pub(crate) fn deep_validate_btree_page_with_header_offset(
+    page: &[u8],
+    header_offset: usize,
+) -> bool {
+    let page_size = page.len();
+    if page_size < 12 || header_offset >= page_size {
+        return false;
+    }
+
+    let page_type = page[header_offset];
+    let header_size = btree_page_header_size(page_type);
+    if header_size == 0 {
+        return false;
+    }
+    if header_offset.saturating_add(header_size) > page_size {
+        return false;
+    }
+
+    let first_freeblock = u16::from_be_bytes([page[header_offset + 1], page[header_offset + 2]]);
+    let cell_count = u16::from_be_bytes([page[header_offset + 3], page[header_offset + 4]]);
+    let cell_content_area = u16::from_be_bytes([page[header_offset + 5], page[header_offset + 6]]);
+    let fragmented_free_bytes = page[header_offset + 7];
+
+    if fragmented_free_bytes > MAX_FRAGMENTED_FREE_BYTES {
+        return false;
+    }
+
+    let cell_content = match cell_content_start(cell_content_area, page_size) {
+        Some(v) => v,
+        None => return false,
+    };
+    if cell_content < header_size {
+        return false;
+    }
+
+    if !validate_pointer_table_fits(
+        header_offset.saturating_add(header_size),
+        cell_count,
+        cell_content,
+        page_size,
+    ) {
+        return false;
+    }
+
+    if !validate_cell_pointers(
+        page,
+        header_offset.saturating_add(header_size),
+        cell_count,
+        cell_content,
+    ) {
+        return false;
+    }
+
+    validate_freeblock_chain(page, first_freeblock as usize, cell_content)
 }
 
 #[cfg(test)]

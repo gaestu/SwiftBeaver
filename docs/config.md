@@ -6,13 +6,17 @@ The default config is `config/default.yml`.
 
 - `run_id` (string): optional; if empty, a timestamp-based ID is generated.
 - `overlap_bytes` (u64): overlap between chunks.
-- `max_files` (u64, optional): strict cap on carved files; the pipeline stops once the limit is reached.
+- `max_files` (u64, optional): strict upper bound on accepted carved files. With streaming overlap arbitration, the cap is applied after overlapping candidates are deconflicted so rejected overlaps do not consume output slots. Actual output can be lower if accepted carves fail during final write/flush after scanning has already stopped at the cap.
 - `max_memory_mib` (u64, optional): limit address space in MiB (Unix only).
 - `max_open_files` (u64, optional): limit max open file descriptors (Unix only).
 - `enable_string_scan` (bool): enable ASCII/UTF-8 printable string scanning.
 - `enable_url_scan` (bool): enable URL extraction from string spans.
 - `enable_email_scan` (bool): enable email extraction from string spans.
-- `enable_phone_scan` (bool): enable phone extraction from string spans.
+- `enable_phone_scan` (bool): legacy compatibility switch for phone extraction from string spans. `true` maps to `phone_mode: validated`; `false` maps to `phone_mode: off` unless `phone_mode` is set explicitly.
+- `phone_mode` (string): phone extraction mode. Supported values are `off` and `validated`. `validated` emits only locally validated phone artefacts; broad numeric candidates are rejected. Validation is fully local/offline and does not call external services.
+- `phone_default_region` (string, optional): CLDR region code such as `US`, `CH`, or `TR` used to validate local/national phone formats. Leave unset to avoid local-region assumptions.
+- `phone_supported_regions` (list): optional CLDR region allow-list used for local/national validation when a defensible single-region match is available. International `+` numbers are validated directly from their country code.
+- `enable_bitlocker_recovery_scan` (bool): enable detection of textual BitLocker recovery passwords (eight groups of six decimal digits, each divisible by 11 with quotient ≤ `0xFFFF`) in string spans. Default: `true`. Has no effect unless `enable_string_scan` is also enabled. This feature only inspects extracted string spans; it does not parse `.bek` recovery key files or BitLocker key packages.
 - `string_scan_utf16` (bool): enable UTF-16LE/BE printable string scanning.
 - `string_min_len` (usize): minimum printable string length.
 - `string_max_len` (usize): maximum string length per span.
@@ -24,6 +28,9 @@ The default config is `config/default.yml`.
 - `entropy_threshold` (float): entropy threshold for marking high-entropy regions.
 - `sqlite_page_max_hits_per_chunk` (usize): cap for `sqlite_page` scanner hits per chunk to limit single-byte marker overload.
 - `sqlite_wal_max_consecutive_checksum_failures` (u32): maximum consecutive WAL frames allowed to fail full rolling checksum validation before carving stops. This controls stop behavior, not frame filtering; mismatching frames observed before the stop threshold may still be included in carved bytes. Set to `0` to stop at the first checksum mismatch.
+- `sqlite_max_consecutive_invalid_pages` (u32): consecutive invalid SQLite page-type bytes before page-by-page carving terminates early. Default: `3`.
+- `sqlite_min_valid_page_ratio` (f64): minimum ratio of valid SQLite page types required to mark a carved database `validated=true`. Default: `0.5`.
+- `sqlite_suppress_wal_frame_lookback_frames` (u32): bound on how many preceding WAL frame boundaries the SQLite carver checks during `pre_validate` to suppress `sqlite` candidates that lie inside a SQLite WAL frame payload. Set to `0` to check only the immediate `wal_start = offset - 56` candidate. Default: `64`.
 - `opencl_platform_index` (usize, optional): select OpenCL platform by index.
 - `opencl_device_index` (usize, optional): select OpenCL device by index.
 - `zip_allowed_kinds` (list, optional): restrict ZIP outputs to `zip`, `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`, `epub` when set.
@@ -43,8 +50,10 @@ The default config is `config/default.yml`.
 - `file_types` (list): enabled file types and patterns.
 
 Note: ZIP carving will classify docx/xlsx/pptx/odt/ods/odp/epub based on central directory entries when present.
+Note: The `bek` carver detects binary BitLocker External Key files structurally. It is separate from textual BitLocker recovery password scanning and does not parse `.KPG` key packages or unlock/decrypt BitLocker volumes.
 Note: `sqlite_page` and `sqlite_wal` are carve-only outputs; enable/disable them via `file_types` and CLI type filters (`--types` / `--enable-types`).
-Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, and `overlap_skipped` for same-type hits skipped because they fall inside a range already carved by that worker.
+Note: Phone extraction favors precision over recall. Plain digit-only `10..=15` values, timestamp-like values, low-entropy runs, and unvalidated local/national candidates are rejected by default. Accepted phone occurrence rows keep their evidence offsets; exact duplicate `(normalized_phone, global_start, global_end)` processing repeats are omitted and counted in run-summary phone metrics. To avoid unbounded memory growth on hostile inputs, duplicate tracking keeps up to 5,000,000 accepted phone occurrences per run; additional new occurrences are omitted and counted as `phone_occurrences_capped`.
+Note: run summary metadata includes `files_prevalidation_rejected` for hits rejected by lightweight `pre_validate()` checks before file I/O, `overlap_skipped` for fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`, and `files_capped` for otherwise accepted carves discarded after `max_files` is reached. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## File type configuration
 
@@ -56,7 +65,7 @@ Each entry in `file_types` contains:
 - `footer_patterns`: footer signatures used by the `footer` validator
 - `max_size`: maximum carve size in bytes
 - `min_size`: minimum carve size in bytes
-- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `sqlite_wal`, `sqlite_page`, `pdf`, `zip`, `webp`, `bmp`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `lnk`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `footer`)
+- `validator`: handler name (`jpeg`, `png`, `gif`, `sqlite`, `sqlite_wal`, `sqlite_page`, `pdf`, `zip`, `webp`, `bmp`, `bek`, `tiff`, `mp4`, `mov`, `rar`, `sevenz`, `wav`, `avi`, `mp3`, `ole`, `tar`, `gzip`, `bzip2`, `xz`, `ogg`, `webm`, `wmv`, `rtf`, `ico`, `lnk`, `prefetch`, `registry`, `evtx`, `elf`, `eml`, `mobi`, `fb2`, `lrf`, `heic`, `footer`)
 - `require_eocd`: optional; for ZIP, require an EOCD before carving (prevents large false positives)
 
 The `footer` validator performs a simple header-to-footer carve for formats without a dedicated handler.

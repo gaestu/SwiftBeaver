@@ -5,25 +5,25 @@ use crate::carve::{
 use crate::evidence::EvidenceSource;
 use crate::scanner::NormalizedHit;
 
-const WAL_HEADER_LEN: u64 = 32;
-const WAL_FRAME_HEADER_LEN: u64 = 24;
-const WAL_MAGIC_1: u32 = 0x377F_0682;
-const WAL_MAGIC_2: u32 = 0x377F_0683;
-const WAL_VERSION: u32 = 3_007_000;
+pub(crate) const WAL_HEADER_LEN: u64 = 32;
+pub(crate) const WAL_FRAME_HEADER_LEN: u64 = 24;
+pub(crate) const WAL_MAGIC_1: u32 = 0x377F_0682;
+pub(crate) const WAL_MAGIC_2: u32 = 0x377F_0683;
+pub(crate) const WAL_VERSION: u32 = 3_007_000;
 
 #[derive(Debug, Clone, Copy)]
-enum ChecksumByteOrder {
+pub(crate) enum ChecksumByteOrder {
     BigEndian,
     LittleEndian,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct WalHeader {
-    page_size: u32,
-    salt_1: u32,
-    salt_2: u32,
-    checksum_byte_order: ChecksumByteOrder,
-    frame_checksum: [u32; 2],
+pub(crate) struct WalHeader {
+    pub(crate) page_size: u32,
+    pub(crate) salt_1: u32,
+    pub(crate) salt_2: u32,
+    pub(crate) checksum_byte_order: ChecksumByteOrder,
+    pub(crate) frame_checksum: [u32; 2],
 }
 
 #[derive(Debug)]
@@ -197,7 +197,7 @@ fn read_exact_at(
     Ok(Some(buf))
 }
 
-fn parse_wal_header(bytes: &[u8]) -> Option<WalHeader> {
+pub(crate) fn parse_wal_header(bytes: &[u8]) -> Option<WalHeader> {
     if bytes.len() < WAL_HEADER_LEN as usize {
         return None;
     }
@@ -390,7 +390,7 @@ fn read_u32(order: ChecksumByteOrder, bytes: &[u8]) -> Option<u32> {
     })
 }
 
-fn wal_checksum_bytes(
+pub(crate) fn wal_checksum_bytes(
     order: ChecksumByteOrder,
     data: &[u8],
     mut checksum: [u32; 2],

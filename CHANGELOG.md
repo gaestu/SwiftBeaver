@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- No changes yet.
+
+## 0.6.0 (2026-05-04)
+
+### Schema
+- Run summary metadata now includes `files_capped` in CSV, JSONL, and Parquet outputs. The Parquet run summary schema adds a non-nullable `Int64` `files_capped` column, so downstream tools that pin the exact run-summary schema should handle this as a schema change.
+- Added BitLocker BEK metadata outputs: `metadata/bitlocker_bek.{jsonl,csv}` and `parquet/artefacts_bitlocker_bek.parquet`, each carrying provenance plus key identifier GUID, optional description, key data length, key method, and FILETIME for structurally valid binary `.bek` files.
+- Phone artefact metadata is now validated-only. JSONL and Parquet phone artefact outputs include normalized E.164 and country fields when accepted. Parquet output adds `artefacts_phones_summary.parquet`, and run-summary metadata in CSV, JSONL, and Parquet adds deterministic phone candidate, rejection, validation, duplicate, capped-occurrence, distinct, and repeated-value counters.
+
+### Changed
+- SQLite carver `validated` flag is now stricter: in addition to the existing magic, page-size, valid-page-ratio, and consecutive-invalid checks, every examined B-tree page (`0x02`, `0x05`, `0x0A`, `0x0D`) must also pass deep structural validation (cell count, cell pointer table, cell content area, freeblock chain). Page-type plausibility alone is no longer sufficient. When deep validation finds failures, an entry is appended to `errors` of the form `deep b-tree validation: N of M pages failed structural checks`. The `validated` field schema is unchanged. Closes #83.
+
+### Fixed
+- XZ carving now rejects corrupt or truncated candidates before writing output. The carver requires matching header/footer stream flags plus a CRC-checked, internally consistent XZ Index before marking a stream `validated=true`, and no longer persists `validated=false`, `truncated=true` fallback files when no footer is found. Closes #28.
+- EVTX `windows_artefacts` rows are no longer dropped when a chunk header declares an implausible record-number range. The carver now reports `record_count_estimate` as `null` when any chunk's `(last_record - first_record + 1)` exceeds `i64::MAX` or when the running sum would overflow `i64`, and the Parquet sink falls back to `NULL` instead of returning a metadata error for the whole row. Closes #80.
+- SQLite carver no longer emits standalone `sqlite` databases for `SQLite format 3\0` magic that occurs inside a SQLite WAL frame payload. `pre_validate` now walks back through possible WAL frame boundaries (bounded by the new `sqlite_suppress_wal_frame_lookback_frames` config knob, default `64`) and rejects candidates that sit inside a valid WAL frame. To preserve evidence, suppression requires the full frame chain from the WAL header through the candidate frame to satisfy the same acceptance rules as the `sqlite_wal` carver — matching salts, non-zero page numbers, and valid rolling frame checksums — so a stale or checksum-invalid WAL header cannot cause a real standalone database to be dropped. The WAL itself is still carved by `sqlite_wal`. Closes #82.
+- `sqlite_page` carver no longer emits overlapping nested page fragments. The carve worker pool now feeds a streaming **overlap arbiter** thread: scan workers assign deterministic hit sequences by signature position, carve workers return one completion event per hit, and the arbiter accepts the first sequenced non-overlapping final carve range via a per-type interval check. Rejected jobs have their staging file discarded (`PendingCarve::discard`) before consuming any `max_files` output slot, and `overlap_skipped` is incremented. `max_files` cap drops are now counted separately as `files_capped`. This eliminates two race classes that any pre-claim or in-flight greedy approach is vulnerable to: a false-positive signature byte starving a real concurrent page, and nested candidates slipping past a too-small pre-claim for larger SQLite page sizes (8/16/32/64 KiB). Because arbitration uses a stable evidence-order sequence and checks final carved ranges, the chosen winner is reproducible across runs and worker counts. Closes #84.
+
+### Added
+- Added a native Windows EWF release artifact that builds and bundles pinned upstream `libewf` runtime DLLs alongside `swiftbeaver.exe`, while preserving the existing Windows CPU-only ZIP without E01 support. Closes #91.
+- Added a `cargo-about` workflow and `scripts/generate-third-party-licenses.sh` to generate `dist/THIRD_PARTY_LICENSES.txt` from the resolved Cargo dependency graph for release artifacts. Closes #3.
+- EWF segment cache run-summary observability now reports cache hits, misses, hit rate, and bytes served from cache in the final tracing log line. Closes #55.
+- `phone_mode`, `phone_default_region`, and `phone_supported_regions` configuration for local/offline validated phone extraction. `--scan-phones` and `--no-scan-phones` remain compatible aliases for validated/off behavior. Closes #10.
+- `sqlite_suppress_wal_frame_lookback_frames` configuration knob to bound the WAL-frame lookback search performed by the SQLite carver. Set to `0` to check only the immediate `wal_start = offset - 56` candidate.
+- BitLocker External Key (`.bek`) carver. The carver uses structural BEK/FVE metadata validation rather than filename or extension trust, carves valid BEK files to the output directory, emits BEK-specific metadata, and stays separate from textual BitLocker recovery password detection and `.KPG` key packages. Closes #89.
+- BitLocker recovery password detection in string artefact extraction. New `enable_bitlocker_recovery_scan` config flag (default `true`) and matching CLI flags `--scan-bitlocker-recovery` / `--no-scan-bitlocker-recovery`. New `ArtefactKind::BitlockerRecoveryPassword` variant and a new Parquet category file `artefacts_bitlocker_recovery_passwords.parquet` (CSV/JSONL outputs continue to share `string_artefacts.{csv,jsonl}`). Detection accepts hyphen- or whitespace-separated 8 × 6-digit passwords, validates each group is divisible by 11 with quotient ≤ `0xFFFF`, and canonicalises stored content to hyphenated form. Textual recovery passwords only; `.bek` recovery key files and BitLocker volume unlock are out of scope. Closes #88.
+
 ## 0.5.1 (2026-04-27)
 
 ### Fixed

@@ -6,11 +6,13 @@ use chrono::SecondsFormat;
 use serde::Serialize;
 
 use crate::carve::CarvedFile;
+use crate::carve::bek::BitlockerBekRecord;
 use crate::carve::windows::WindowsArtefactRecord;
 use crate::metadata::windows::flatten_windows_artefact;
 use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
+use crate::strings::phones::PhoneSummaryRow;
 
 pub struct CsvSink {
     tool_version: String,
@@ -18,6 +20,7 @@ pub struct CsvSink {
     evidence_path: String,
     evidence_sha256: String,
     files_writer: Mutex<csv::Writer<File>>,
+    bitlocker_bek_writer: Mutex<csv::Writer<File>>,
     strings_writer: Mutex<csv::Writer<File>>,
     windows_writer: Mutex<csv::Writer<File>>,
     history_writer: Mutex<csv::Writer<File>>,
@@ -44,6 +47,24 @@ struct CarvedFileCsv<'a> {
     pattern_id: Option<&'a str>,
     is_duplicate: bool,
     duplicate_of_offset: Option<u64>,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
+#[derive(Serialize)]
+struct BitlockerBekCsv<'a> {
+    run_id: &'a str,
+    global_start: u64,
+    global_end: u64,
+    size: u64,
+    carved_path: &'a str,
+    key_identifier_guid: &'a str,
+    description: Option<&'a str>,
+    key_data_length: u64,
+    key_encryption_method: u32,
+    modification_filetime: u64,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -165,11 +186,26 @@ struct RunSummaryCsv<'a> {
     files_carved: u64,
     files_rejected: u64,
     files_prevalidation_rejected: u64,
+    files_capped: u64,
     overlap_skipped: u64,
     string_spans: u64,
     artefacts_extracted: u64,
     duplicates_found: u64,
     duplicates_skipped: u64,
+    phone_like_spans_scanned: u64,
+    phone_regex_candidates: u64,
+    phone_prefilter_rejections: u64,
+    phone_rejected_digit_only: u64,
+    phone_rejected_low_entropy: u64,
+    phone_rejected_bad_context: u64,
+    phone_rejected_no_region: u64,
+    phone_rejected_invalid: u64,
+    phone_validation_calls: u64,
+    phone_validated_rows: u64,
+    phone_exact_duplicates_omitted: u64,
+    phone_occurrences_capped: u64,
+    phone_distinct_normalized_values: u64,
+    phone_repeated_normalized_values: u64,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -202,6 +238,7 @@ impl CsvSink {
         std::fs::create_dir_all(&meta_dir)?;
 
         let files_file = File::create(meta_dir.join("carved_files.csv"))?;
+        let bitlocker_bek_file = File::create(meta_dir.join("bitlocker_bek.csv"))?;
         let strings_file = File::create(meta_dir.join("string_artefacts.csv"))?;
         let windows_file = File::create(meta_dir.join("windows_artefacts.csv"))?;
         let history_file = File::create(meta_dir.join("browser_history.csv"))?;
@@ -213,6 +250,9 @@ impl CsvSink {
         let mut files_writer = csv::WriterBuilder::new()
             .has_headers(false)
             .from_writer(files_file);
+        let mut bitlocker_bek_writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(bitlocker_bek_file);
         let mut strings_writer = csv::WriterBuilder::new()
             .has_headers(false)
             .from_writer(strings_file);
@@ -251,6 +291,23 @@ impl CsvSink {
             "pattern_id",
             "is_duplicate",
             "duplicate_of_offset",
+            "tool_version",
+            "config_hash",
+            "evidence_path",
+            "evidence_sha256",
+        ])?;
+
+        bitlocker_bek_writer.write_record([
+            "run_id",
+            "global_start",
+            "global_end",
+            "size",
+            "carved_path",
+            "key_identifier_guid",
+            "description",
+            "key_data_length",
+            "key_encryption_method",
+            "modification_filetime",
             "tool_version",
             "config_hash",
             "evidence_path",
@@ -366,11 +423,26 @@ impl CsvSink {
             "files_carved",
             "files_rejected",
             "files_prevalidation_rejected",
+            "files_capped",
             "overlap_skipped",
             "string_spans",
             "artefacts_extracted",
             "duplicates_found",
             "duplicates_skipped",
+            "phone_like_spans_scanned",
+            "phone_regex_candidates",
+            "phone_prefilter_rejections",
+            "phone_rejected_digit_only",
+            "phone_rejected_low_entropy",
+            "phone_rejected_bad_context",
+            "phone_rejected_no_region",
+            "phone_rejected_invalid",
+            "phone_validation_calls",
+            "phone_validated_rows",
+            "phone_exact_duplicates_omitted",
+            "phone_occurrences_capped",
+            "phone_distinct_normalized_values",
+            "phone_repeated_normalized_values",
             "tool_version",
             "config_hash",
             "evidence_path",
@@ -395,6 +467,7 @@ impl CsvSink {
             evidence_path: evidence_path.to_string_lossy().to_string(),
             evidence_sha256: evidence_sha256.to_string(),
             files_writer: Mutex::new(files_writer),
+            bitlocker_bek_writer: Mutex::new(bitlocker_bek_writer),
             strings_writer: Mutex::new(strings_writer),
             windows_writer: Mutex::new(windows_writer),
             history_writer: Mutex::new(history_writer),
@@ -437,6 +510,31 @@ impl MetadataSink for CsvSink {
         Ok(())
     }
 
+    fn record_bitlocker_bek(&self, record: &BitlockerBekRecord) -> Result<(), MetadataError> {
+        let record = BitlockerBekCsv {
+            run_id: &record.run_id,
+            global_start: record.global_start,
+            global_end: record.global_end,
+            size: record.size,
+            carved_path: &record.carved_path,
+            key_identifier_guid: &record.key_identifier_guid,
+            description: record.description.as_deref(),
+            key_data_length: record.key_data_length,
+            key_encryption_method: record.key_encryption_method,
+            modification_filetime: record.modification_filetime,
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self
+            .bitlocker_bek_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("bitlocker bek writer lock poisoned".into()))?;
+        guard.serialize(record)?;
+        Ok(())
+    }
+
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError> {
         let record = StringArtefactCsv {
             run_id: &artefact.run_id,
@@ -455,6 +553,11 @@ impl MetadataSink for CsvSink {
             .lock()
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
         guard.serialize(record)?;
+        Ok(())
+    }
+
+    fn record_phone_summary(&self, _summary: &PhoneSummaryRow) -> Result<(), MetadataError> {
+        // Phone summary rows are currently a Parquet-only metadata category.
         Ok(())
     }
 
@@ -591,11 +694,26 @@ impl MetadataSink for CsvSink {
             files_carved: summary.files_carved,
             files_rejected: summary.files_rejected,
             files_prevalidation_rejected: summary.files_prevalidation_rejected,
+            files_capped: summary.files_capped,
             overlap_skipped: summary.overlap_skipped,
             string_spans: summary.string_spans,
             artefacts_extracted: summary.artefacts_extracted,
             duplicates_found: summary.duplicates_found,
             duplicates_skipped: summary.duplicates_skipped,
+            phone_like_spans_scanned: summary.phone_like_spans_scanned,
+            phone_regex_candidates: summary.phone_regex_candidates,
+            phone_prefilter_rejections: summary.phone_prefilter_rejections,
+            phone_rejected_digit_only: summary.phone_rejected_digit_only,
+            phone_rejected_low_entropy: summary.phone_rejected_low_entropy,
+            phone_rejected_bad_context: summary.phone_rejected_bad_context,
+            phone_rejected_no_region: summary.phone_rejected_no_region,
+            phone_rejected_invalid: summary.phone_rejected_invalid,
+            phone_validation_calls: summary.phone_validation_calls,
+            phone_validated_rows: summary.phone_validated_rows,
+            phone_exact_duplicates_omitted: summary.phone_exact_duplicates_omitted,
+            phone_occurrences_capped: summary.phone_occurrences_capped,
+            phone_distinct_normalized_values: summary.phone_distinct_normalized_values,
+            phone_repeated_normalized_values: summary.phone_repeated_normalized_values,
             tool_version: &self.tool_version,
             config_hash: &self.config_hash,
             evidence_path: &self.evidence_path,
@@ -634,6 +752,10 @@ impl MetadataSink for CsvSink {
             .files_writer
             .lock()
             .map_err(|_| MetadataError::Other("files writer lock poisoned".into()))?;
+        let mut bitlocker_bek = self
+            .bitlocker_bek_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("bitlocker bek writer lock poisoned".into()))?;
         let mut strings = self
             .strings_writer
             .lock()
@@ -663,6 +785,7 @@ impl MetadataSink for CsvSink {
             .lock()
             .map_err(|_| MetadataError::Other("entropy writer lock poisoned".into()))?;
         files.flush()?;
+        bitlocker_bek.flush()?;
         strings.flush()?;
         windows.flush()?;
         history.flush()?;
@@ -679,6 +802,7 @@ fn artefact_kind_label(kind: &ArtefactKind) -> &'static str {
         ArtefactKind::Url => "url",
         ArtefactKind::Email => "email",
         ArtefactKind::Phone => "phone",
+        ArtefactKind::BitlockerRecoveryPassword => "bitlocker_recovery_password",
         ArtefactKind::GenericString => "string",
     }
 }
@@ -735,6 +859,9 @@ mod tests {
             encoding: "ascii".to_string(),
             global_start: 100,
             global_end: 120,
+            phone_e164: None,
+            phone_country: None,
+            phone_validation_status: None,
         };
         sink.record_string(&artefact).expect("record string");
 
@@ -805,11 +932,26 @@ mod tests {
             files_carved: 1,
             files_rejected: 0,
             files_prevalidation_rejected: 0,
+            files_capped: 0,
             overlap_skipped: 0,
             string_spans: 3,
             artefacts_extracted: 4,
             duplicates_found: 0,
             duplicates_skipped: 0,
+            phone_like_spans_scanned: 0,
+            phone_regex_candidates: 0,
+            phone_prefilter_rejections: 0,
+            phone_rejected_digit_only: 0,
+            phone_rejected_low_entropy: 0,
+            phone_rejected_bad_context: 0,
+            phone_rejected_no_region: 0,
+            phone_rejected_invalid: 0,
+            phone_validation_calls: 0,
+            phone_validated_rows: 0,
+            phone_exact_duplicates_omitted: 0,
+            phone_occurrences_capped: 0,
+            phone_distinct_normalized_values: 0,
+            phone_repeated_normalized_values: 0,
         };
         sink.record_run_summary(&summary).expect("record summary");
         let region = EntropyRegion {
@@ -918,7 +1060,7 @@ mod tests {
                 size: 4096,
                 first_chunk: 0,
                 last_chunk: 10,
-                record_count_estimate: 128,
+                record_count_estimate: Some(128),
                 log_name: Some("Security".to_string()),
             }),
             WindowsArtefactRecord::RegistryHive(RegistryHiveArtefact {

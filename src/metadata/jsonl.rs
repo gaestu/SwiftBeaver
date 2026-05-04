@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 
 use crate::carve::CarvedFile;
+use crate::carve::bek::BitlockerBekRecord;
 use crate::carve::windows::WindowsArtefactRecord;
 use crate::metadata::windows::{WindowsArtefactFlatRow, flatten_windows_artefact};
 use crate::metadata::{EntropyRegion, MetadataError, MetadataSink, RunSummary};
@@ -13,6 +14,7 @@ use crate::parsers::browser::{
     BrowserCookieRecord as CookieRecord, BrowserDownloadRecord as DownloadRecord,
 };
 use crate::strings::artifacts::StringArtefact;
+use crate::strings::phones::PhoneSummaryRow;
 
 pub struct JsonlSink {
     tool_version: String,
@@ -20,6 +22,7 @@ pub struct JsonlSink {
     evidence_path: String,
     evidence_sha256: String,
     files_writer: Mutex<BufWriter<File>>,
+    bitlocker_bek_writer: Mutex<BufWriter<File>>,
     strings_writer: Mutex<BufWriter<File>>,
     windows_writer: Mutex<BufWriter<File>>,
     history_writer: Mutex<BufWriter<File>>,
@@ -33,6 +36,16 @@ pub struct JsonlSink {
 struct CarvedFileRecord<'a> {
     #[serde(flatten)]
     file: &'a CarvedFile,
+    tool_version: &'a str,
+    config_hash: &'a str,
+    evidence_path: &'a str,
+    evidence_sha256: &'a str,
+}
+
+#[derive(Serialize)]
+struct BitlockerBekJsonlRecord<'a> {
+    #[serde(flatten)]
+    record: &'a BitlockerBekRecord,
     tool_version: &'a str,
     config_hash: &'a str,
     evidence_path: &'a str,
@@ -121,6 +134,7 @@ impl JsonlSink {
         let meta_dir = run_output_dir.join("metadata");
         std::fs::create_dir_all(&meta_dir)?;
         let files_path = meta_dir.join("carved_files.jsonl");
+        let bitlocker_bek_path = meta_dir.join("bitlocker_bek.jsonl");
         let strings_path = meta_dir.join("string_artefacts.jsonl");
         let windows_path = meta_dir.join("windows_artefacts.jsonl");
         let history_path = meta_dir.join("browser_history.jsonl");
@@ -129,6 +143,7 @@ impl JsonlSink {
         let run_path = meta_dir.join("run_summary.jsonl");
         let entropy_path = meta_dir.join("entropy_regions.jsonl");
         let files_file = File::create(files_path)?;
+        let bitlocker_bek_file = File::create(bitlocker_bek_path)?;
         let strings_file = File::create(strings_path)?;
         let windows_file = File::create(windows_path)?;
         let history_file = File::create(history_path)?;
@@ -142,6 +157,7 @@ impl JsonlSink {
             evidence_path: evidence_path.to_string_lossy().to_string(),
             evidence_sha256: evidence_sha256.to_string(),
             files_writer: Mutex::new(BufWriter::new(files_file)),
+            bitlocker_bek_writer: Mutex::new(BufWriter::new(bitlocker_bek_file)),
             strings_writer: Mutex::new(BufWriter::new(strings_file)),
             windows_writer: Mutex::new(BufWriter::new(windows_file)),
             history_writer: Mutex::new(BufWriter::new(history_file)),
@@ -171,6 +187,23 @@ impl MetadataSink for JsonlSink {
         Ok(())
     }
 
+    fn record_bitlocker_bek(&self, record: &BitlockerBekRecord) -> Result<(), MetadataError> {
+        let record = BitlockerBekJsonlRecord {
+            record,
+            tool_version: &self.tool_version,
+            config_hash: &self.config_hash,
+            evidence_path: &self.evidence_path,
+            evidence_sha256: &self.evidence_sha256,
+        };
+        let mut guard = self
+            .bitlocker_bek_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("bitlocker bek writer lock poisoned".into()))?;
+        serde_json::to_writer(&mut *guard, &record)?;
+        guard.write_all(b"\n")?;
+        Ok(())
+    }
+
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError> {
         let record = StringArtefactRecord {
             artefact,
@@ -185,6 +218,11 @@ impl MetadataSink for JsonlSink {
             .map_err(|_| MetadataError::Other("strings writer lock poisoned".into()))?;
         serde_json::to_writer(&mut *guard, &record)?;
         guard.write_all(b"\n")?;
+        Ok(())
+    }
+
+    fn record_phone_summary(&self, _summary: &PhoneSummaryRow) -> Result<(), MetadataError> {
+        // Phone summary rows are currently a Parquet-only metadata category.
         Ok(())
     }
 
@@ -299,6 +337,10 @@ impl MetadataSink for JsonlSink {
             .files_writer
             .lock()
             .map_err(|_| MetadataError::Other("files writer lock poisoned".into()))?;
+        let mut bitlocker_bek = self
+            .bitlocker_bek_writer
+            .lock()
+            .map_err(|_| MetadataError::Other("bitlocker bek writer lock poisoned".into()))?;
         let mut strings = self
             .strings_writer
             .lock()
@@ -328,6 +370,7 @@ impl MetadataSink for JsonlSink {
             .lock()
             .map_err(|_| MetadataError::Other("entropy writer lock poisoned".into()))?;
         files.flush()?;
+        bitlocker_bek.flush()?;
         strings.flush()?;
         windows.flush()?;
         history.flush()?;
@@ -398,7 +441,7 @@ mod tests {
                 size: 4096,
                 first_chunk: 0,
                 last_chunk: 10,
-                record_count_estimate: 128,
+                record_count_estimate: Some(128),
                 log_name: Some("Security".to_string()),
             }),
             WindowsArtefactRecord::RegistryHive(RegistryHiveArtefact {

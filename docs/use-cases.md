@@ -137,7 +137,7 @@ cd email_investigation/20250104T*/
 
 # Extract all email addresses found
 cat metadata/string_artefacts.jsonl | \
-    jq -r 'select(.artefact_type == "email") | .value' | \
+    jq -r 'select(.artefact_kind == "Email") | .content' | \
     sort | uniq > all_emails.txt
 
 # Find high-frequency correspondents
@@ -151,7 +151,7 @@ cat all_emails.txt | \
 ```bash
 # Extract URLs containing keywords
 cat metadata/string_artefacts.jsonl | \
-    jq -r 'select(.artefact_type == "url" and (.value | contains("confidential"))) | .value' \
+    jq -r 'select(.artefact_kind == "Url" and (.content | contains("confidential"))) | .content' \
     > suspicious_urls.txt
 
 # Find email content with keywords (from carved EML files)
@@ -330,7 +330,8 @@ cat metadata/entropy_regions.jsonl | \
 
 # Calculate encrypted vs unencrypted ratio
 total_bytes=$(cat metadata/run_summary.jsonl | jq '.bytes_scanned')
-encrypted_bytes=$(cat metadata/entropy_regions.jsonl | jq -s 'map(.length) | add')
+encrypted_bytes=$(cat metadata/entropy_regions.jsonl | \
+    jq -s 'map(.global_end - .global_start + 1) | add // 0')
 
 echo "Encrypted: $((encrypted_bytes * 100 / total_bytes))%"
 ```
@@ -338,12 +339,13 @@ echo "Encrypted: $((encrypted_bytes * 100 / total_bytes))%"
 ### Step 3: Focus on Unencrypted Data
 
 ```bash
-# Extract files found outside encrypted regions
-# (SwiftBeaver automatically carves from unencrypted areas)
+# SwiftBeaver reports high-entropy regions as metadata. Correlate those
+# ranges with carved file offsets when separating high-entropy and lower-
+# entropy areas.
 
 # Find patterns in unencrypted data
 cat metadata/string_artefacts.jsonl | \
-    jq 'select(.value | contains("password") or contains("key"))'
+    jq 'select(.content | contains("password") or contains("key"))'
 ```
 
 ---
@@ -365,6 +367,11 @@ swiftbeaver \
     --scan-emails
 ```
 
+For local/national phone formats, set `phone_default_region` or
+`phone_supported_regions` in the config. Without a configured region,
+SwiftBeaver only accepts phone numbers that validate from an explicit
+international prefix such as `+44` or `+1`.
+
 ### Step 2: Analyze SQLite Databases
 
 ```bash
@@ -383,10 +390,13 @@ sqlite3 mmssms.db "SELECT address, body, date FROM sms ORDER BY date DESC LIMIT 
 ### Step 3: Phone Number Analysis
 
 ```bash
-# Extract all phone numbers
+# Extract validated phone numbers
 cat ../../metadata/string_artefacts.jsonl | \
-    jq -r 'select(.artefact_type == "phone") | .value' | \
+    jq -r 'select(.artefact_kind == "Phone") | .phone_e164' | \
     sort | uniq -c | sort -rn > phone_frequency.txt
+
+# Parquet runs also include artefacts_phones_summary.parquet for normalized
+# frequency counts without collapsing occurrence-level phone rows.
 
 # Correlate with call logs (if found in SQLite)
 # Look for contacts.db, calllog.db, etc.
@@ -458,10 +468,10 @@ cd data_breach/20250104T*/
 
 # Find URLs to file-sharing sites
 cat metadata/string_artefacts.jsonl | \
-    jq -r 'select(.artefact_type == "url" and 
-           (.value | contains("dropbox") or 
+    jq -r 'select(.artefact_kind == "Url" and 
+           (.content | contains("dropbox") or 
                     contains("wetransfer") or 
-                    contains("mega.nz"))) | .value'
+                    contains("mega.nz"))) | .content'
 
 # Find large archives (potential data packages)
 cat metadata/carved_files.jsonl | \

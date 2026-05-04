@@ -53,3 +53,7 @@ No browser row metadata is emitted from WAL content in carve-only mode.
 - No row extraction from frames.
 - No WAL+main-db merge/checkpoint reconstruction.
 - No cross-file correlation in the pipeline.
+
+## Interaction with the SQLite Carver
+
+WAL frames carry full database page images, including page 1 (`SQLite format 3\0`). The `sqlite` carver applies a `pre_validate` lookback to suppress standalone `sqlite` carves whose header offset lies inside a valid WAL frame payload. See [`sqlite.md`](sqlite.md#wal-frame-suppression) and the `sqlite_suppress_wal_frame_lookback_frames` config knob. The WAL itself is still carved.

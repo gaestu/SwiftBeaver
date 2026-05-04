@@ -9,10 +9,9 @@ package archives (`.tar.xz`, `.deb` data members, kernel images, etc.).
 
 The format is well specified, frames are CRC-protected, and stream
 boundaries can be located deterministically. The carver therefore takes a
-**marker + CRC validation** approach: the start is anchored on the magic
-bytes and a header CRC32, and the end is located by scanning for the
-stream footer magic and validating the footer CRC32 over its CRC-protected
-fields.
+**marker + structural validation** approach: the start is anchored on the
+magic bytes and a header CRC32, and the end is accepted only when the
+stream footer and Index are internally consistent.
 
 Source: [src/carve/xz.rs](../../src/carve/xz.rs)
 
@@ -26,7 +25,7 @@ data.
 
 ### Header layout (validated)
 
-```
+```text
 Offset  Size  Field
 ------  ----  -----
 0       6     Magic              (FD 37 7A 58 5A 00)
@@ -36,14 +35,19 @@ Offset  Size  Field
 
 Pre-validation reads the first 6 bytes and rejects the hit if the magic
 does not match. During processing, the next 6 bytes (Stream Flags + CRC32)
-are read and the CRC32 over the two Stream Flags bytes is compared
-against the stored CRC. A mismatch causes the hit to be dropped silently
-(no carved file emitted).
+are read, the Stream Flags reserved bits are checked, and the CRC32 over
+the two Stream Flags bytes is compared against the stored CRC. A mismatch
+or reserved Stream Flags value causes the hit to be dropped silently (no
+carved file emitted).
 
 ### Footer magic (2 bytes): `59 5A`
 
 The 12-byte stream footer ends with the ASCII `YZ` magic and contains a
 CRC32 over its own backward-size and stream-flags fields.
+
+The footer's Stream Flags must match the header Stream Flags. Its stored
+Backward Size is decoded as `(stored + 1) * 4` and points to the XZ Index
+immediately before the footer.
 
 ## Carving Algorithm
 
@@ -55,10 +59,8 @@ carver performs a **streaming forward search** for the footer:
 2. **Validate header CRC32**: read 12 bytes at the hit offset, recompute
    the CRC32 over Stream Flags, compare against the stored CRC. Drop the
    hit on mismatch.
-3. **Allocate output path** under the run output root using the standard
-   `output_path()` helper, with extension `xz`.
-4. **Stream forward in 64 KiB chunks** from `offset + 12`, capped by
-   `max_size` (when configured). For each chunk:
+3. **Stream forward in 64 KiB chunks** from `offset + 12`, capped by
+  `max_size` (when configured). For each chunk:
    - Maintain a 1-byte carry into the next chunk so the 2-byte footer
      magic is not split across read boundaries.
    - Search the buffered bytes for `59 5A`. For each candidate:
@@ -67,14 +69,22 @@ carver performs a **streaming forward search** for the footer:
      - Read the candidate 12-byte footer and verify it ends in `59 5A`.
      - Recompute the CRC32 over `footer[4..10]` (Backward Size + Stream
        Flags) and compare against the stored CRC at `footer[0..4]`.
-     - On a CRC match, set `end_offset` and stop scanning.
-5. **Truncation handling**:
-   - If `max_size` is reached before a valid footer is found, mark the
-     carve as `truncated` with error `"max_size reached before xz end"`
-     and emit the partial file.
-   - If EOF is reached before a valid footer is found, `write_range()`
-     reports it; the carve is marked `truncated` with error
-     `"eof before xz end"`.
+     - Require footer Stream Flags to match the header Stream Flags.
+     - Decode Backward Size and read the referenced Index.
+     - Validate the Index indicator, VLI record table, zero padding,
+       Index CRC32, and the sum of padded block sizes against the bytes
+       between the Stream Header and Index.
+     - Walk the indexed Block extents and validate each Block Header
+       size, flags, optional size fields, filter-field bounds, zero
+       padding, and Block Header CRC32.
+     - On a complete footer + Index match, set `end_offset` and stop scanning.
+4. **Rejection handling**:
+   - If EOF or `max_size` is reached before a structurally valid footer
+     and Index are found, reject the candidate and emit no carved file.
+   - The carver does not persist `validated=false`, `truncated=true` XZ
+     fallback files by default.
+5. **Allocate the output path** under the run output root only after a
+   valid footer and Index are found.
 6. **Write the byte range** `[hit.global_offset, end_offset)` from
    evidence to the output file using `write_range()`, computing MD5 and
    SHA-256 incrementally as data is written.
@@ -83,7 +93,7 @@ carver performs a **streaming forward search** for the footer:
 
 ### State Machine
 
-```
+```text
 [hit on FD 37 7A 58 5A 00]
         ↓
 [read 12 bytes; verify magic + header CRC32]
@@ -94,18 +104,18 @@ carver performs a **streaming forward search** for the footer:
    ↓                                     ↓
 [scan for 59 5A]                  [reach max_size or EOF]
    ↓                                     ↓
-[validate 12-byte footer CRC32]    [TRUNCATED]
+[validate footer + Index]          [REJECT]
    ↓
 [VALIDATED → end_offset = footer_end]
 ```
 
 ## Validation
 
-| Field        | Meaning |
-|--------------|---------|
-| `validated`  | `true` when a stream footer with a passing CRC32 is found. |
-| `truncated`  | `true` when `max_size` or EOF was reached before a valid footer. |
-| `errors`     | Includes `"max_size reached before xz end"` and/or `"eof before xz end"` when truncation occurs. |
+| Field       | Meaning                                                                                  |
+|-------------|------------------------------------------------------------------------------------------|
+| `validated` | `true` when a stream footer and Index pass structural validation.                        |
+| `truncated` | Normally `false`; invalid or incomplete XZ candidates are rejected before writing.       |
+| `errors`    | Empty for accepted XZ carves unless a later evidence short read occurs after validation. |
 
 Header CRC32 mismatches are treated as a rejected false positive and
 produce no carved file at all (no record, no on-disk file).
@@ -114,19 +124,20 @@ produce no carved file at all (no record, no on-disk file).
 
 Defaults from [config/default.yml](../../config/default.yml):
 
-| Setting    | Default       | Notes |
-|------------|---------------|-------|
-| `min_size` | `32` bytes    | Minimum size of the carved span. Smaller hits are discarded. |
-| `max_size` | `1 073 741 824` (1 GiB) | Upper bound on streaming search; `0` means unbounded. |
+| Setting    | Default                 | Notes                                                            |
+|------------|-------------------------|------------------------------------------------------------------|
+| `min_size` | `32` bytes              | Minimum size of the carved span. Smaller hits are discarded.     |
+| `max_size` | `1 073 741 824` (1 GiB) | Upper bound on streaming search; `0` means unbounded.            |
 
 Files smaller than `min_size` are discarded entirely. Files reaching
-`max_size` without a footer are kept and flagged `truncated`.
+`max_size` without a structurally valid footer and Index are rejected and
+not written.
 
 ## Hash Computation
 
 - MD5 and SHA-256 are computed incrementally by `write_range()` over
   exactly the bytes written to the output file (header through footer
-  for validated carves, header through truncation point otherwise).
+  for validated carves).
 - Hash computation respects the run's `HashConfig`; either or both
   hashes may be disabled via configuration.
 
@@ -136,15 +147,19 @@ Files smaller than `min_size` are discarded entirely. Files reaching
 (module `tests`)
 
 - `carves_minimal_xz_with_footer`: builds a hand-crafted minimal XZ
-  stream (header magic + Stream Flags + header CRC + dummy index +
+  stream (header magic + Stream Flags + header CRC + empty Index +
   footer with valid CRC + footer magic) and asserts that
   `process_hit()` yields a `validated == true` carve whose size matches
   the synthetic stream length exactly.
+- Rejection tests cover valid-header/no-footer candidates, `max_size`
+  fallback avoidance, footer CRC matches with mismatched Stream Flags,
+  and footer-like bytes with an invalid Index.
 
-The fixture exercises both CRC paths (header CRC and footer CRC) and
-the footer-magic search loop. Real `.xz` payloads are also exercised
-through the standard golden-image framework when XZ samples are
-present in `tests/golden_image/`.
+The fixtures exercise header CRC, footer CRC, Index CRC, Index VLI
+record parsing, Block Header validation, and the footer-magic search
+loop. Real `.xz` payloads are also exercised through the standard
+golden-image framework when XZ samples are present in
+`tests/golden_image/`.
 
 ## Edge Cases
 
@@ -163,26 +178,34 @@ present in `tests/golden_image/`.
   pairs in LZMA2 output do not terminate the carve early.
 - **Header CRC mismatch**: Treated as a false positive on the magic;
   the hit is dropped without emitting a record.
+- **Footer Stream Flags mismatch**: Rejected even when the footer CRC is
+  valid.
+- **Footer CRC coincidence with invalid Index or Block metadata**:
+  Rejected before writing.
 - **Truncated header (< 6 bytes available)**: Pre-validation rejects
   with `"truncated header"`.
-- **EOF mid-stream**: Carve is kept and marked `truncated` with error
-  `"eof before xz end"`, allowing forensic analysts to attempt partial
-  decompression.
+- **EOF mid-stream**: Rejected before writing because no complete footer
+  and Index relationship can be proven.
 - **Read boundary footer**: A 1-byte carry across 64 KiB read
   boundaries ensures the 2-byte footer magic is never split.
 
 ## Performance
 
-- **Memory usage**: Constant — a 64 KiB read buffer plus a 1-byte carry
-  and a small candidate-footer buffer.
+- **Memory usage**: Bounded — a 64 KiB read buffer, a 1-byte carry, a
+  small candidate-footer buffer, and the referenced Index capped at
+  16 MiB.
 - **I/O pattern**: Sequential 64 KiB reads from evidence, plus one
-  random 12-byte read per footer-magic candidate to validate the CRC.
-- **CPU**: One CRC32 over the 2-byte Stream Flags at start, plus one
-  CRC32 over 6 bytes per validated footer candidate. CRC32 is computed
-  with a small inline routine using the standard reflected polynomial
+  random 12-byte footer read and bounded Index read per plausible
+  footer-magic candidate. Cumulative Index validation reads are capped
+  per hit to avoid repeated expensive validation of crafted footer
+  candidates, and Index validation is capped at 65,536 records.
+- **CPU**: CRC32 checks cover Stream Flags, candidate footer fields, and
+  the referenced Index and Block Headers. Index VLI records and Block
+  metadata are parsed without decompression. CRC32 is computed with a
+  small inline routine using the standard reflected polynomial
   `0xEDB88320`.
 - **Worst-case runtime**: Bounded by `max_size` for evidence with no
-  valid footer.
+  valid footer and Index.
 
 ## Forensic Considerations
 
@@ -193,9 +216,9 @@ present in `tests/golden_image/`.
 - **Provenance**: Every emitted record carries `run_id`,
   `global_start`, `global_end`, `size`, `md5`, `sha256`, `validated`,
   `truncated`, `errors`, and `pattern_id` (`"xz_header"`).
-- **Truncation transparency**: Partial carves are kept and clearly
-  flagged so analysts can attempt salvage decompression with tools
-  like `xz --decompress --robot` or `xzcat`.
+- **Invalid candidate handling**: Corrupt and truncated candidates are
+  rejected before output is written, avoiding large fallback files from
+  footerless hits.
 - **No decompression performed**: The carver never decompresses the
   LZMA2 payload. This avoids decompression-bomb risk and keeps the
   forensic boundary clean: SwiftBeaver carves the container, downstream
@@ -205,7 +228,7 @@ present in `tests/golden_image/`.
 
 A minimal single-stream `.xz` file:
 
-```
+```text
 Offset  Bytes                                            Field
 ------  -----------------------------------------------  --------------------
 0x0000  FD 37 7A 58 5A 00                                Stream Header magic
@@ -226,14 +249,9 @@ footer magic).
 
 - **First-stream-only carving** of multi-stream `.xz` files. Subsequent
   streams must be re-detected at their own header offsets.
-- **No payload decompression and no Index validation**: the dummy
-  Index/Block bytes between header and footer are not parsed. The
-  Backward Size field in the footer is not cross-checked against the
-  carved span; a CRC-valid footer attached to a corrupted body will
-  still produce a `validated` carve.
-- **No Stream Flags consistency check** between the Stream Header
-  flags and the Stream Footer flags (both are CRC-validated
-  individually, but not compared).
+- **No payload decompression**: the carver validates the XZ container
+  Index/footer relationship, padded Block extents, and Block Headers but
+  does not decompress LZMA2 block payloads.
 - **No detection of the legacy `.lzma` format** (raw LZMA1 streams),
   which has no magic and is not carvable by signature scanning.
 

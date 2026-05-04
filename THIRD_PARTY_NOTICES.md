@@ -46,13 +46,11 @@ Dev-dependencies:
 Rust projects typically include many transitive dependencies.
 
 - The complete resolved dependency set is recorded in Cargo.lock.
-- For a full, up-to-date license inventory, generate a report from the lockfile.
+- For a full, up-to-date license inventory, generate a report from the lockfile:
 
-### Suggested tooling (optional)
+```bash
+scripts/generate-third-party-licenses.sh
+```
 
-You can generate a full dependency/license report using one of these common tools:
-
-- cargo-license: https://github.com/onur/cargo-license
-- cargo-about: https://github.com/EmbarkStudios/cargo-about
-
-(If you add one of these tools to your workflow, consider checking in the generated output alongside this file for release builds.)
+The generated report is written to `dist/THIRD_PARTY_LICENSES.txt`. See
+`docs/third_party_licenses.md` for the full release workflow.

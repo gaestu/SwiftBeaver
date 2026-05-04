@@ -346,3 +346,47 @@ fn test_evtx_invalid_version() {
         "EVTX with major != 3 must be rejected"
     );
 }
+
+// ------------------------------------------------------------------
+// test_evtx_record_count_overflow_preserves_windows_row
+//
+// Regression for issue #80: an EVTX chunk header that declares an
+// implausible record range (last_record == u64::MAX) must NOT cause
+// the corresponding `windows_artefacts` row to be dropped by the
+// metadata sink. The carved file row and the Windows artefact row
+// must both be emitted, with `record_count_estimate` reported as NULL.
+// ------------------------------------------------------------------
+
+#[test]
+fn test_evtx_record_count_overflow_preserves_windows_row() {
+    use evtx_fixture::{build_chunk, build_file_header};
+
+    // Two chunks: the first declares first_record=1, last_record=u64::MAX
+    // (implausible / not representable as i64). The second is well-formed.
+    // The carver must still produce both metadata rows.
+    let mut evtx = Vec::with_capacity((HEADER_SIZE + 2 * CHUNK_SIZE) as usize);
+    evtx.extend(build_file_header(0, 1, 2, 1, 0));
+    evtx.extend(build_chunk(1, u64::MAX));
+    evtx.extend(build_chunk(1, 5));
+
+    let (_tmp, carved_rows, windows_rows) = run_evtx_pipeline(&evtx);
+    assert_eq!(carved_rows.len(), 1, "carved file row must be present");
+    assert_eq!(
+        windows_rows.len(),
+        1,
+        "windows_artefacts row must NOT be dropped on i64 overflow"
+    );
+
+    let carved = &carved_rows[0];
+    assert_eq!(carved["file_type"], "evtx");
+    assert_eq!(carved["validated"], true);
+    assert_eq!(carved["truncated"], false);
+
+    let win = &windows_rows[0];
+    assert_eq!(win["artefact_type"], "evtx");
+    assert!(
+        win["record_count_estimate"].is_null(),
+        "record_count_estimate must be NULL when chunk range exceeds i64, got: {}",
+        win["record_count_estimate"]
+    );
+}

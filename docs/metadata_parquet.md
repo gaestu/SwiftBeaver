@@ -44,6 +44,8 @@ Schema:
 - `artefacts_urls.parquet`
 - `artefacts_emails.parquet`
 - `artefacts_phones.parquet`
+- `artefacts_phones_summary.parquet`
+- `artefacts_bitlocker_recovery_passwords.parquet`
 
 URL schema:
 
@@ -64,6 +66,29 @@ URL schema:
 - `source_kind` (string)
 - `source_detail` (string)
 - `certainty` (float64)
+
+Phone rows are validated-only. `phone_raw` preserves the matched source text;
+`phone_e164` stores the normalized E.164 value and `country` stores the inferred
+region for accepted rows.
+
+Phone summary schema (`artefacts_phones_summary.parquet`):
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `normalized_phone` (string)
+- `occurrence_count` (int64)
+- `first_global_start` (int64)
+- `last_global_start` (int64)
+- `country` (string)
+- `validation_status` (string)
+
+Summary rows group accepted occurrence rows by normalized phone value. Repeated
+values at different evidence offsets remain in `artefacts_phones.parquet`; exact
+same-offset processing duplicates are omitted from occurrence output and counted
+in run-summary phone metrics.
 
 Email schema:
 
@@ -96,6 +121,49 @@ Phone schema:
 - `source_kind` (string)
 - `source_detail` (string)
 - `certainty` (float64)
+
+BitLocker recovery password schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `global_start` (int64)
+- `global_end` (int64)
+- `recovery_password` (string, canonical hyphen-separated form `XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX`)
+- `encoding` (string, e.g. `ascii`, `utf-8`, `utf-16le`, `utf-16be`)
+- `source_kind` (string)
+- `source_detail` (string)
+- `certainty` (float64)
+
+This category covers textual BitLocker recovery passwords found in extracted
+string spans only. `.bek` recovery key files and BitLocker key packages are
+out of scope for this output.
+
+## BitLocker BEK artefacts
+
+`artefacts_bitlocker_bek.parquet` schema:
+
+- `run_id` (string)
+- `tool_version` (string)
+- `config_hash` (string)
+- `evidence_path` (string)
+- `evidence_sha256` (string)
+- `global_start` (int64)
+- `global_end` (int64)
+- `size` (int64)
+- `carved_path` (string)
+- `key_identifier_guid` (string)
+- `description` (string, nullable)
+- `key_data_length` (int64)
+- `key_encryption_method` (int64)
+- `modification_filetime` (uint64)
+
+This category covers binary BitLocker External Key (`.bek`) files only. Textual
+48-digit BitLocker recovery passwords remain in
+`artefacts_bitlocker_recovery_passwords.parquet`, and BitLocker key packages
+(`.KPG`) are out of scope.
 
 ## Browser history
 
@@ -194,7 +262,7 @@ Chromium-based browsers (Chrome/Edge/Brave) share the same schema and may be lab
 - `version` (int32, nullable)
 - `first_chunk` (int64, nullable)
 - `last_chunk` (int64, nullable)
-- `record_count_estimate` (int64, nullable)
+- `record_count_estimate` (int64, nullable) — for EVTX rows, also `null` when chunk headers declare a record-number range that cannot be represented as `int64` (e.g. `last_record_number == u64::MAX`); `null` for non-EVTX artefact types
 - `log_name` (string, nullable)
 - `timestamp_utc` (timestamp micros, nullable)
 - `hive_name` (string, nullable)
@@ -220,13 +288,28 @@ For `referenced_files_json`, `null` means extraction is not implemented for that
 - `files_carved` (int64)
 - `files_rejected` (int64)
 - `files_prevalidation_rejected` (int64)
+- `files_capped` (int64)
 - `overlap_skipped` (int64)
 - `string_spans` (int64)
 - `artefacts_extracted` (int64)
 - `duplicates_found` (int64)
 - `duplicates_skipped` (int64)
+- `phone_like_spans_scanned` (int64)
+- `phone_regex_candidates` (int64)
+- `phone_prefilter_rejections` (int64)
+- `phone_rejected_digit_only` (int64)
+- `phone_rejected_low_entropy` (int64)
+- `phone_rejected_bad_context` (int64)
+- `phone_rejected_no_region` (int64)
+- `phone_rejected_invalid` (int64)
+- `phone_validation_calls` (int64)
+- `phone_validated_rows` (int64)
+- `phone_exact_duplicates_omitted` (int64)
+- `phone_occurrences_capped` (int64)
+- `phone_distinct_normalized_values` (int64)
+- `phone_repeated_normalized_values` (int64)
 
-`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts same-type hits skipped because they landed inside a range already carved by that worker.
+`files_prevalidation_rejected` counts hits rejected before file creation by lightweight carver checks. `overlap_skipped` counts fully-carved files discarded by the streaming overlap arbiter because their final byte range `[global_start, global_end]` intersected a range already accepted for the same `file_type`. `files_capped` counts otherwise accepted carves discarded after `max_files` is reached. Phone counters cover validated phone extraction from string spans: scanned phone-like spans, regex candidates, prefilter and validation rejection classes, validation calls, accepted rows, omitted exact duplicates, occurrence rows omitted after the duplicate-tracking memory cap, distinct normalized values, and repeated normalized values across different offsets. Arbitration follows deterministic evidence order by signature-hit offset, then `file_type` and `pattern_id`; overlap checks use the final carved ranges reported by each carver.
 
 ## Entropy regions
 

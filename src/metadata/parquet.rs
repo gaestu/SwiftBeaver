@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use arrow_array::builder::{
     BinaryBuilder, BooleanBuilder, Int32Builder, Int64Builder, StringBuilder,
-    TimestampMicrosecondBuilder,
+    TimestampMicrosecondBuilder, UInt64Builder,
 };
 use arrow_array::{ArrayRef, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
@@ -12,12 +12,14 @@ use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 
 use crate::carve::CarvedFile;
+use crate::carve::bek::BitlockerBekRecord;
 use crate::carve::windows::WindowsArtefactRecord;
 use crate::config::Config;
 use crate::metadata::windows::flatten_windows_artefact;
 use crate::metadata::{MetadataError, MetadataSink, RunSummary};
 use crate::parsers::browser::{BrowserCookieRecord, BrowserDownloadRecord, BrowserHistoryRecord};
 use crate::strings::artifacts::{ArtefactKind, StringArtefact};
+use crate::strings::phones::PhoneSummaryRow;
 
 #[derive(Clone)]
 struct ParquetContext {
@@ -41,6 +43,9 @@ enum ParquetCategory {
     ArtefactsUrls,
     ArtefactsEmails,
     ArtefactsPhones,
+    ArtefactsPhonesSummary,
+    ArtefactsBitlockerRecoveryPasswords,
+    ArtefactsBitlockerBek,
     BrowserHistory,
     BrowserCookies,
     BrowserDownloads,
@@ -63,6 +68,11 @@ impl ParquetCategory {
             ParquetCategory::ArtefactsUrls => "artefacts_urls.parquet",
             ParquetCategory::ArtefactsEmails => "artefacts_emails.parquet",
             ParquetCategory::ArtefactsPhones => "artefacts_phones.parquet",
+            ParquetCategory::ArtefactsPhonesSummary => "artefacts_phones_summary.parquet",
+            ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
+                "artefacts_bitlocker_recovery_passwords.parquet"
+            }
+            ParquetCategory::ArtefactsBitlockerBek => "artefacts_bitlocker_bek.parquet",
             ParquetCategory::BrowserHistory => "browser_history.parquet",
             ParquetCategory::BrowserCookies => "browser_cookies.parquet",
             ParquetCategory::BrowserDownloads => "browser_downloads.parquet",
@@ -144,6 +154,40 @@ struct PhoneArtefactRow {
     source_kind: String,
     source_detail: String,
     certainty: f64,
+}
+
+#[derive(Debug, Clone)]
+struct PhoneSummaryParquetRow {
+    normalized_phone: String,
+    occurrence_count: i64,
+    first_global_start: i64,
+    last_global_start: i64,
+    country: String,
+    validation_status: String,
+}
+
+#[derive(Debug, Clone)]
+struct BitlockerRecoveryRow {
+    global_start: i64,
+    global_end: i64,
+    recovery_password: String,
+    encoding: String,
+    source_kind: String,
+    source_detail: String,
+    certainty: f64,
+}
+
+#[derive(Debug, Clone)]
+struct BitlockerBekRow {
+    global_start: i64,
+    global_end: i64,
+    size: i64,
+    carved_path: String,
+    key_identifier_guid: String,
+    description: Option<String>,
+    key_data_length: i64,
+    key_encryption_method: i64,
+    modification_filetime: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -236,11 +280,26 @@ struct RunSummaryRow {
     files_carved: i64,
     files_rejected: i64,
     files_prevalidation_rejected: i64,
+    files_capped: i64,
     overlap_skipped: i64,
     string_spans: i64,
     artefacts_extracted: i64,
     duplicates_found: i64,
     duplicates_skipped: i64,
+    phone_like_spans_scanned: i64,
+    phone_regex_candidates: i64,
+    phone_prefilter_rejections: i64,
+    phone_rejected_digit_only: i64,
+    phone_rejected_low_entropy: i64,
+    phone_rejected_bad_context: i64,
+    phone_rejected_no_region: i64,
+    phone_rejected_invalid: i64,
+    phone_validation_calls: i64,
+    phone_validated_rows: i64,
+    phone_exact_duplicates_omitted: i64,
+    phone_occurrences_capped: i64,
+    phone_distinct_normalized_values: i64,
+    phone_repeated_normalized_values: i64,
 }
 
 enum CategoryBuffer {
@@ -248,6 +307,9 @@ enum CategoryBuffer {
     Urls(Vec<UrlArtefactRow>),
     Emails(Vec<EmailArtefactRow>),
     Phones(Vec<PhoneArtefactRow>),
+    PhoneSummaries(Vec<PhoneSummaryParquetRow>),
+    BitlockerRecoveryPasswords(Vec<BitlockerRecoveryRow>),
+    BitlockerBek(Vec<BitlockerBekRow>),
     History(Vec<BrowserHistoryRow>),
     Cookies(Vec<BrowserCookieRow>),
     Downloads(Vec<BrowserDownloadRow>),
@@ -283,6 +345,11 @@ impl CategoryWriter {
             ParquetCategory::ArtefactsUrls => CategoryBuffer::Urls(Vec::new()),
             ParquetCategory::ArtefactsEmails => CategoryBuffer::Emails(Vec::new()),
             ParquetCategory::ArtefactsPhones => CategoryBuffer::Phones(Vec::new()),
+            ParquetCategory::ArtefactsPhonesSummary => CategoryBuffer::PhoneSummaries(Vec::new()),
+            ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
+                CategoryBuffer::BitlockerRecoveryPasswords(Vec::new())
+            }
+            ParquetCategory::ArtefactsBitlockerBek => CategoryBuffer::BitlockerBek(Vec::new()),
             ParquetCategory::BrowserHistory => CategoryBuffer::History(Vec::new()),
             ParquetCategory::BrowserCookies => CategoryBuffer::Cookies(Vec::new()),
             ParquetCategory::BrowserDownloads => CategoryBuffer::Downloads(Vec::new()),
@@ -357,6 +424,54 @@ impl CategoryWriter {
             }
             _ => Err(MetadataError::Other(
                 "phone row on non-phone category".to_string(),
+            )),
+        }
+    }
+
+    fn append_phone_summary(&mut self, row: PhoneSummaryParquetRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::PhoneSummaries(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "phone summary row on non-phone-summary category".to_string(),
+            )),
+        }
+    }
+
+    fn append_bitlocker_recovery(
+        &mut self,
+        row: BitlockerRecoveryRow,
+    ) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::BitlockerRecoveryPasswords(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "bitlocker recovery row on non-bitlocker category".to_string(),
+            )),
+        }
+    }
+
+    fn append_bitlocker_bek(&mut self, row: BitlockerBekRow) -> Result<(), MetadataError> {
+        match &mut self.buffer {
+            CategoryBuffer::BitlockerBek(rows) => {
+                rows.push(row);
+                if rows.len() >= self.row_group_size {
+                    self.flush_buffer()?;
+                }
+                Ok(())
+            }
+            _ => Err(MetadataError::Other(
+                "bitlocker bek row on non-bitlocker-bek category".to_string(),
             )),
         }
     }
@@ -476,6 +591,21 @@ impl CategoryWriter {
                 rows.clear();
                 batch
             }
+            CategoryBuffer::PhoneSummaries(rows) => {
+                let batch = build_phone_summaries_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
+            CategoryBuffer::BitlockerRecoveryPasswords(rows) => {
+                let batch = build_bitlocker_recovery_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
+            CategoryBuffer::BitlockerBek(rows) => {
+                let batch = build_bitlocker_bek_batch(&self.context, rows, &self.schema)?;
+                rows.clear();
+                batch
+            }
             CategoryBuffer::History(rows) => {
                 let batch = build_history_batch(&self.context, rows, &self.schema)?;
                 rows.clear();
@@ -531,6 +661,9 @@ impl CategoryWriter {
             CategoryBuffer::Urls(rows) => rows.len(),
             CategoryBuffer::Emails(rows) => rows.len(),
             CategoryBuffer::Phones(rows) => rows.len(),
+            CategoryBuffer::PhoneSummaries(rows) => rows.len(),
+            CategoryBuffer::BitlockerRecoveryPasswords(rows) => rows.len(),
+            CategoryBuffer::BitlockerBek(rows) => rows.len(),
             CategoryBuffer::History(rows) => rows.len(),
             CategoryBuffer::Cookies(rows) => rows.len(),
             CategoryBuffer::Downloads(rows) => rows.len(),
@@ -556,6 +689,9 @@ struct ParquetSinkInner {
     artefacts_urls: Option<CategoryWriter>,
     artefacts_emails: Option<CategoryWriter>,
     artefacts_phones: Option<CategoryWriter>,
+    artefacts_phones_summary: Option<CategoryWriter>,
+    artefacts_bitlocker_recovery_passwords: Option<CategoryWriter>,
+    artefacts_bitlocker_bek: Option<CategoryWriter>,
     browser_history: Option<CategoryWriter>,
     browser_cookies: Option<CategoryWriter>,
     browser_downloads: Option<CategoryWriter>,
@@ -581,6 +717,11 @@ impl ParquetSinkInner {
             ParquetCategory::ArtefactsUrls => &mut self.artefacts_urls,
             ParquetCategory::ArtefactsEmails => &mut self.artefacts_emails,
             ParquetCategory::ArtefactsPhones => &mut self.artefacts_phones,
+            ParquetCategory::ArtefactsPhonesSummary => &mut self.artefacts_phones_summary,
+            ParquetCategory::ArtefactsBitlockerRecoveryPasswords => {
+                &mut self.artefacts_bitlocker_recovery_passwords
+            }
+            ParquetCategory::ArtefactsBitlockerBek => &mut self.artefacts_bitlocker_bek,
             ParquetCategory::BrowserHistory => &mut self.browser_history,
             ParquetCategory::BrowserCookies => &mut self.browser_cookies,
             ParquetCategory::BrowserDownloads => &mut self.browser_downloads,
@@ -639,6 +780,15 @@ impl ParquetSinkInner {
         if let Some(writer) = &mut self.artefacts_phones {
             writer.finish()?;
         }
+        if let Some(writer) = &mut self.artefacts_phones_summary {
+            writer.finish()?;
+        }
+        if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
+            writer.finish()?;
+        }
+        if let Some(writer) = &mut self.artefacts_bitlocker_bek {
+            writer.finish()?;
+        }
         if let Some(writer) = &mut self.browser_history {
             writer.finish()?;
         }
@@ -693,6 +843,15 @@ impl ParquetSinkInner {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.artefacts_phones {
+            writer.flush_buffer()?;
+        }
+        if let Some(writer) = &mut self.artefacts_phones_summary {
+            writer.flush_buffer()?;
+        }
+        if let Some(writer) = &mut self.artefacts_bitlocker_recovery_passwords {
+            writer.flush_buffer()?;
+        }
+        if let Some(writer) = &mut self.artefacts_bitlocker_bek {
             writer.flush_buffer()?;
         }
         if let Some(writer) = &mut self.browser_history {
@@ -757,6 +916,9 @@ impl ParquetSink {
                 artefacts_urls: None,
                 artefacts_emails: None,
                 artefacts_phones: None,
+                artefacts_phones_summary: None,
+                artefacts_bitlocker_recovery_passwords: None,
+                artefacts_bitlocker_bek: None,
                 browser_history: None,
                 browser_cookies: None,
                 browser_downloads: None,
@@ -800,6 +962,24 @@ impl MetadataSink for ParquetSink {
         writer.append_file(row)
     }
 
+    fn record_bitlocker_bek(&self, record: &BitlockerBekRecord) -> Result<(), MetadataError> {
+        let row = BitlockerBekRow {
+            global_start: to_i64(record.global_start)?,
+            global_end: to_i64(record.global_end)?,
+            size: to_i64(record.size)?,
+            carved_path: record.carved_path.clone(),
+            key_identifier_guid: record.key_identifier_guid.clone(),
+            description: record.description.clone(),
+            key_data_length: to_i64(record.key_data_length)?,
+            key_encryption_method: i64::from(record.key_encryption_method),
+            modification_filetime: record.modification_filetime,
+        };
+
+        let mut inner = self.lock_inner()?;
+        let writer = inner.get_or_create_writer(ParquetCategory::ArtefactsBitlockerBek)?;
+        writer.append_bitlocker_bek(row)
+    }
+
     fn record_string(&self, artefact: &StringArtefact) -> Result<(), MetadataError> {
         let mut inner = self.lock_inner()?;
         match artefact.artefact_kind {
@@ -818,8 +998,29 @@ impl MetadataSink for ParquetSink {
                 let writer = inner.get_or_create_writer(ParquetCategory::ArtefactsPhones)?;
                 writer.append_phone(row)
             }
+            ArtefactKind::BitlockerRecoveryPassword => {
+                let row = map_bitlocker_recovery_artefact(artefact)?;
+                let writer = inner
+                    .get_or_create_writer(ParquetCategory::ArtefactsBitlockerRecoveryPasswords)?;
+                writer.append_bitlocker_recovery(row)
+            }
             ArtefactKind::GenericString => Ok(()),
         }
+    }
+
+    fn record_phone_summary(&self, summary: &PhoneSummaryRow) -> Result<(), MetadataError> {
+        let row = PhoneSummaryParquetRow {
+            normalized_phone: summary.normalized_phone.clone(),
+            occurrence_count: to_i64(summary.occurrence_count)?,
+            first_global_start: to_i64(summary.first_global_start)?,
+            last_global_start: to_i64(summary.last_global_start)?,
+            country: summary.country.clone(),
+            validation_status: summary.validation_status.clone(),
+        };
+
+        let mut inner = self.lock_inner()?;
+        let writer = inner.get_or_create_writer(ParquetCategory::ArtefactsPhonesSummary)?;
+        writer.append_phone_summary(row)
     }
 
     fn record_history(&self, record: &BrowserHistoryRecord) -> Result<(), MetadataError> {
@@ -904,7 +1105,14 @@ impl MetadataSink for ParquetSink {
             version: flat.version.map(to_i32).transpose()?,
             first_chunk: flat.first_chunk.map(to_i64).transpose()?,
             last_chunk: flat.last_chunk.map(to_i64).transpose()?,
-            record_count_estimate: flat.record_count_estimate.map(to_i64).transpose()?,
+            // Overflow on `record_count_estimate` (e.g. an EVTX chunk
+            // header with `last_record_number == u64::MAX`) must NOT drop
+            // the entire Windows artefact row. Fall back to NULL so the
+            // rest of the artefact metadata still reaches Parquet. See
+            // GitHub issue #80.
+            record_count_estimate: flat
+                .record_count_estimate
+                .and_then(|value| i64::try_from(value).ok()),
             log_name: flat.log_name,
             timestamp_utc: flat.timestamp.map(to_micros),
             hive_name: flat.hive_name,
@@ -925,11 +1133,26 @@ impl MetadataSink for ParquetSink {
             files_carved: to_i64(summary.files_carved)?,
             files_rejected: to_i64(summary.files_rejected)?,
             files_prevalidation_rejected: to_i64(summary.files_prevalidation_rejected)?,
+            files_capped: to_i64(summary.files_capped)?,
             overlap_skipped: to_i64(summary.overlap_skipped)?,
             string_spans: to_i64(summary.string_spans)?,
             artefacts_extracted: to_i64(summary.artefacts_extracted)?,
             duplicates_found: to_i64(summary.duplicates_found)?,
             duplicates_skipped: to_i64(summary.duplicates_skipped)?,
+            phone_like_spans_scanned: to_i64(summary.phone_like_spans_scanned)?,
+            phone_regex_candidates: to_i64(summary.phone_regex_candidates)?,
+            phone_prefilter_rejections: to_i64(summary.phone_prefilter_rejections)?,
+            phone_rejected_digit_only: to_i64(summary.phone_rejected_digit_only)?,
+            phone_rejected_low_entropy: to_i64(summary.phone_rejected_low_entropy)?,
+            phone_rejected_bad_context: to_i64(summary.phone_rejected_bad_context)?,
+            phone_rejected_no_region: to_i64(summary.phone_rejected_no_region)?,
+            phone_rejected_invalid: to_i64(summary.phone_rejected_invalid)?,
+            phone_validation_calls: to_i64(summary.phone_validation_calls)?,
+            phone_validated_rows: to_i64(summary.phone_validated_rows)?,
+            phone_exact_duplicates_omitted: to_i64(summary.phone_exact_duplicates_omitted)?,
+            phone_occurrences_capped: to_i64(summary.phone_occurrences_capped)?,
+            phone_distinct_normalized_values: to_i64(summary.phone_distinct_normalized_values)?,
+            phone_repeated_normalized_values: to_i64(summary.phone_repeated_normalized_values)?,
         };
         let mut inner = self.lock_inner()?;
         let writer = inner.get_or_create_writer(ParquetCategory::RunSummary)?;
@@ -1084,6 +1307,49 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("source_detail", DataType::Utf8, false),
             Field::new("certainty", DataType::Float64, false),
         ])),
+        ParquetCategory::ArtefactsPhonesSummary => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("normalized_phone", DataType::Utf8, false),
+            Field::new("occurrence_count", DataType::Int64, false),
+            Field::new("first_global_start", DataType::Int64, false),
+            Field::new("last_global_start", DataType::Int64, false),
+            Field::new("country", DataType::Utf8, false),
+            Field::new("validation_status", DataType::Utf8, false),
+        ])),
+        ParquetCategory::ArtefactsBitlockerRecoveryPasswords => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("global_start", DataType::Int64, false),
+            Field::new("global_end", DataType::Int64, false),
+            Field::new("recovery_password", DataType::Utf8, false),
+            Field::new("encoding", DataType::Utf8, false),
+            Field::new("source_kind", DataType::Utf8, false),
+            Field::new("source_detail", DataType::Utf8, false),
+            Field::new("certainty", DataType::Float64, false),
+        ])),
+        ParquetCategory::ArtefactsBitlockerBek => Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("tool_version", DataType::Utf8, false),
+            Field::new("config_hash", DataType::Utf8, false),
+            Field::new("evidence_path", DataType::Utf8, false),
+            Field::new("evidence_sha256", DataType::Utf8, false),
+            Field::new("global_start", DataType::Int64, false),
+            Field::new("global_end", DataType::Int64, false),
+            Field::new("size", DataType::Int64, false),
+            Field::new("carved_path", DataType::Utf8, false),
+            Field::new("key_identifier_guid", DataType::Utf8, false),
+            Field::new("description", DataType::Utf8, true),
+            Field::new("key_data_length", DataType::Int64, false),
+            Field::new("key_encryption_method", DataType::Int64, false),
+            Field::new("modification_filetime", DataType::UInt64, false),
+        ])),
         ParquetCategory::BrowserHistory => Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
             Field::new("tool_version", DataType::Utf8, false),
@@ -1233,11 +1499,26 @@ fn schema_for_category(category: ParquetCategory) -> SchemaRef {
             Field::new("files_carved", DataType::Int64, false),
             Field::new("files_rejected", DataType::Int64, false),
             Field::new("files_prevalidation_rejected", DataType::Int64, false),
+            Field::new("files_capped", DataType::Int64, false),
             Field::new("overlap_skipped", DataType::Int64, false),
             Field::new("string_spans", DataType::Int64, false),
             Field::new("artefacts_extracted", DataType::Int64, false),
             Field::new("duplicates_found", DataType::Int64, false),
             Field::new("duplicates_skipped", DataType::Int64, false),
+            Field::new("phone_like_spans_scanned", DataType::Int64, false),
+            Field::new("phone_regex_candidates", DataType::Int64, false),
+            Field::new("phone_prefilter_rejections", DataType::Int64, false),
+            Field::new("phone_rejected_digit_only", DataType::Int64, false),
+            Field::new("phone_rejected_low_entropy", DataType::Int64, false),
+            Field::new("phone_rejected_bad_context", DataType::Int64, false),
+            Field::new("phone_rejected_no_region", DataType::Int64, false),
+            Field::new("phone_rejected_invalid", DataType::Int64, false),
+            Field::new("phone_validation_calls", DataType::Int64, false),
+            Field::new("phone_validated_rows", DataType::Int64, false),
+            Field::new("phone_exact_duplicates_omitted", DataType::Int64, false),
+            Field::new("phone_occurrences_capped", DataType::Int64, false),
+            Field::new("phone_distinct_normalized_values", DataType::Int64, false),
+            Field::new("phone_repeated_normalized_values", DataType::Int64, false),
         ])),
         _ => Arc::new(Schema::empty()),
     }
@@ -1490,6 +1771,165 @@ fn build_phones_batch(
         Arc::new(source_kind.finish()),
         Arc::new(source_detail.finish()),
         Arc::new(certainty.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_phone_summaries_batch(
+    ctx: &ParquetContext,
+    rows: &[PhoneSummaryParquetRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut normalized_phone = StringBuilder::new();
+    let mut occurrence_count = Int64Builder::new();
+    let mut first_global_start = Int64Builder::new();
+    let mut last_global_start = Int64Builder::new();
+    let mut country = StringBuilder::new();
+    let mut validation_status = StringBuilder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        normalized_phone.append_value(&row.normalized_phone);
+        occurrence_count.append_value(row.occurrence_count);
+        first_global_start.append_value(row.first_global_start);
+        last_global_start.append_value(row.last_global_start);
+        country.append_value(&row.country);
+        validation_status.append_value(&row.validation_status);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(normalized_phone.finish()),
+        Arc::new(occurrence_count.finish()),
+        Arc::new(first_global_start.finish()),
+        Arc::new(last_global_start.finish()),
+        Arc::new(country.finish()),
+        Arc::new(validation_status.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_bitlocker_recovery_batch(
+    ctx: &ParquetContext,
+    rows: &[BitlockerRecoveryRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut global_start = Int64Builder::new();
+    let mut global_end = Int64Builder::new();
+    let mut recovery_password = StringBuilder::new();
+    let mut encoding = StringBuilder::new();
+    let mut source_kind = StringBuilder::new();
+    let mut source_detail = StringBuilder::new();
+    let mut certainty = arrow_array::builder::Float64Builder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        global_start.append_value(row.global_start);
+        global_end.append_value(row.global_end);
+        recovery_password.append_value(&row.recovery_password);
+        encoding.append_value(&row.encoding);
+        source_kind.append_value(&row.source_kind);
+        source_detail.append_value(&row.source_detail);
+        certainty.append_value(row.certainty);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(global_start.finish()),
+        Arc::new(global_end.finish()),
+        Arc::new(recovery_password.finish()),
+        Arc::new(encoding.finish()),
+        Arc::new(source_kind.finish()),
+        Arc::new(source_detail.finish()),
+        Arc::new(certainty.finish()),
+    ];
+
+    RecordBatch::try_new(Arc::clone(schema), arrays)
+        .map_err(|err| MetadataError::Other(format!("parquet batch error: {err}")))
+}
+
+fn build_bitlocker_bek_batch(
+    ctx: &ParquetContext,
+    rows: &[BitlockerBekRow],
+    schema: &SchemaRef,
+) -> Result<RecordBatch, MetadataError> {
+    let mut run_id = StringBuilder::new();
+    let mut tool_version = StringBuilder::new();
+    let mut config_hash = StringBuilder::new();
+    let mut evidence_path = StringBuilder::new();
+    let mut evidence_sha256 = StringBuilder::new();
+    let mut global_start = Int64Builder::new();
+    let mut global_end = Int64Builder::new();
+    let mut size = Int64Builder::new();
+    let mut carved_path = StringBuilder::new();
+    let mut key_identifier_guid = StringBuilder::new();
+    let mut description = StringBuilder::new();
+    let mut key_data_length = Int64Builder::new();
+    let mut key_encryption_method = Int64Builder::new();
+    let mut modification_filetime = UInt64Builder::new();
+
+    for row in rows {
+        run_id.append_value(&ctx.run_id);
+        tool_version.append_value(&ctx.tool_version);
+        config_hash.append_value(&ctx.config_hash);
+        evidence_path.append_value(&ctx.evidence_path);
+        evidence_sha256.append_value(&ctx.evidence_sha256);
+        global_start.append_value(row.global_start);
+        global_end.append_value(row.global_end);
+        size.append_value(row.size);
+        carved_path.append_value(&row.carved_path);
+        key_identifier_guid.append_value(&row.key_identifier_guid);
+        description.append_option(row.description.as_deref());
+        key_data_length.append_value(row.key_data_length);
+        key_encryption_method.append_value(row.key_encryption_method);
+        modification_filetime.append_value(row.modification_filetime);
+    }
+
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(run_id.finish()),
+        Arc::new(tool_version.finish()),
+        Arc::new(config_hash.finish()),
+        Arc::new(evidence_path.finish()),
+        Arc::new(evidence_sha256.finish()),
+        Arc::new(global_start.finish()),
+        Arc::new(global_end.finish()),
+        Arc::new(size.finish()),
+        Arc::new(carved_path.finish()),
+        Arc::new(key_identifier_guid.finish()),
+        Arc::new(description.finish()),
+        Arc::new(key_data_length.finish()),
+        Arc::new(key_encryption_method.finish()),
+        Arc::new(modification_filetime.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)
@@ -1853,11 +2293,26 @@ fn build_summary_batch(
     let mut files_carved = Int64Builder::new();
     let mut files_rejected = Int64Builder::new();
     let mut files_prevalidation_rejected = Int64Builder::new();
+    let mut files_capped = Int64Builder::new();
     let mut overlap_skipped = Int64Builder::new();
     let mut string_spans = Int64Builder::new();
     let mut artefacts_extracted = Int64Builder::new();
     let mut duplicates_found = Int64Builder::new();
     let mut duplicates_skipped = Int64Builder::new();
+    let mut phone_like_spans_scanned = Int64Builder::new();
+    let mut phone_regex_candidates = Int64Builder::new();
+    let mut phone_prefilter_rejections = Int64Builder::new();
+    let mut phone_rejected_digit_only = Int64Builder::new();
+    let mut phone_rejected_low_entropy = Int64Builder::new();
+    let mut phone_rejected_bad_context = Int64Builder::new();
+    let mut phone_rejected_no_region = Int64Builder::new();
+    let mut phone_rejected_invalid = Int64Builder::new();
+    let mut phone_validation_calls = Int64Builder::new();
+    let mut phone_validated_rows = Int64Builder::new();
+    let mut phone_exact_duplicates_omitted = Int64Builder::new();
+    let mut phone_occurrences_capped = Int64Builder::new();
+    let mut phone_distinct_normalized_values = Int64Builder::new();
+    let mut phone_repeated_normalized_values = Int64Builder::new();
 
     for row in rows {
         run_id.append_value(&ctx.run_id);
@@ -1871,11 +2326,26 @@ fn build_summary_batch(
         files_carved.append_value(row.files_carved);
         files_rejected.append_value(row.files_rejected);
         files_prevalidation_rejected.append_value(row.files_prevalidation_rejected);
+        files_capped.append_value(row.files_capped);
         overlap_skipped.append_value(row.overlap_skipped);
         string_spans.append_value(row.string_spans);
         artefacts_extracted.append_value(row.artefacts_extracted);
         duplicates_found.append_value(row.duplicates_found);
         duplicates_skipped.append_value(row.duplicates_skipped);
+        phone_like_spans_scanned.append_value(row.phone_like_spans_scanned);
+        phone_regex_candidates.append_value(row.phone_regex_candidates);
+        phone_prefilter_rejections.append_value(row.phone_prefilter_rejections);
+        phone_rejected_digit_only.append_value(row.phone_rejected_digit_only);
+        phone_rejected_low_entropy.append_value(row.phone_rejected_low_entropy);
+        phone_rejected_bad_context.append_value(row.phone_rejected_bad_context);
+        phone_rejected_no_region.append_value(row.phone_rejected_no_region);
+        phone_rejected_invalid.append_value(row.phone_rejected_invalid);
+        phone_validation_calls.append_value(row.phone_validation_calls);
+        phone_validated_rows.append_value(row.phone_validated_rows);
+        phone_exact_duplicates_omitted.append_value(row.phone_exact_duplicates_omitted);
+        phone_occurrences_capped.append_value(row.phone_occurrences_capped);
+        phone_distinct_normalized_values.append_value(row.phone_distinct_normalized_values);
+        phone_repeated_normalized_values.append_value(row.phone_repeated_normalized_values);
     }
 
     let arrays: Vec<ArrayRef> = vec![
@@ -1890,11 +2360,26 @@ fn build_summary_batch(
         Arc::new(files_carved.finish()),
         Arc::new(files_rejected.finish()),
         Arc::new(files_prevalidation_rejected.finish()),
+        Arc::new(files_capped.finish()),
         Arc::new(overlap_skipped.finish()),
         Arc::new(string_spans.finish()),
         Arc::new(artefacts_extracted.finish()),
         Arc::new(duplicates_found.finish()),
         Arc::new(duplicates_skipped.finish()),
+        Arc::new(phone_like_spans_scanned.finish()),
+        Arc::new(phone_regex_candidates.finish()),
+        Arc::new(phone_prefilter_rejections.finish()),
+        Arc::new(phone_rejected_digit_only.finish()),
+        Arc::new(phone_rejected_low_entropy.finish()),
+        Arc::new(phone_rejected_bad_context.finish()),
+        Arc::new(phone_rejected_no_region.finish()),
+        Arc::new(phone_rejected_invalid.finish()),
+        Arc::new(phone_validation_calls.finish()),
+        Arc::new(phone_validated_rows.finish()),
+        Arc::new(phone_exact_duplicates_omitted.finish()),
+        Arc::new(phone_occurrences_capped.finish()),
+        Arc::new(phone_distinct_normalized_values.finish()),
+        Arc::new(phone_repeated_normalized_values.finish()),
     ];
 
     RecordBatch::try_new(Arc::clone(schema), arrays)
@@ -1938,8 +2423,22 @@ fn map_phone_artefact(artefact: &StringArtefact) -> Result<PhoneArtefactRow, Met
         global_start: to_i64(artefact.global_start)?,
         global_end: to_i64(artefact.global_end)?,
         phone_raw: artefact.content.clone(),
-        phone_e164: None,
-        country: None,
+        phone_e164: artefact.phone_e164.clone(),
+        country: artefact.phone_country.clone(),
+        source_kind: "string_span".to_string(),
+        source_detail: "strings_artefacts".to_string(),
+        certainty: 1.0,
+    })
+}
+
+fn map_bitlocker_recovery_artefact(
+    artefact: &StringArtefact,
+) -> Result<BitlockerRecoveryRow, MetadataError> {
+    Ok(BitlockerRecoveryRow {
+        global_start: to_i64(artefact.global_start)?,
+        global_end: to_i64(artefact.global_end)?,
+        recovery_password: artefact.content.clone(),
+        encoding: artefact.encoding.clone(),
         source_kind: "string_span".to_string(),
         source_detail: "strings_artefacts".to_string(),
         certainty: 1.0,

@@ -72,23 +72,35 @@ After the header page is written, each subsequent page is examined before being 
    - `0x0D` — table B-tree leaf page
 3. **Track** consecutive invalid pages. If the count reaches the threshold (`sqlite_max_consecutive_invalid_pages`, default **3**), carving stops early — the database boundary has likely been passed.
 4. **Write** the full page regardless (valid or invalid) to preserve evidence up to the termination point.
+5. **Deep B-tree structural validation**: for every page whose type byte is one of the four B-tree types (`0x02`, `0x05`, `0x0A`, `0x0D`), the carver also validates the page's B-tree header against the rules used by the `sqlite_page` carver:
+   - `fragmented_free_bytes` within the documented bound,
+   - `cell_content_area` within page bounds and after the page header,
+   - cell pointer table fits before the cell content area,
+   - every cell pointer is within `[cell_content_area, page_size)` and unique,
+   - if present, the freeblock chain is bounded, monotonically increasing, and contained in the page.
+
+   Empty pages (`cell_count == 0`) are accepted: SQLite uses them for freshly created or emptied table/index root pages, and they cannot be distinguished structurally from valid empty pages. Overflow / freelist pages (`0x00`) are accepted by type alone (no B-tree layout to validate).
 
 ### 4. Validated Flag
 
-After all pages are processed, the `validated` flag is determined by two criteria:
+After all pages are processed, the `validated` flag requires **all** of the following:
 
-- The ratio of valid pages to total examined pages must be ≥ `sqlite_min_valid_page_ratio` (default **0.5**)
-- Carving must not have been stopped early by the consecutive-invalid threshold
+- magic + page-size header checks pass,
+- carving was **not** stopped early by the consecutive-invalid threshold,
+- the ratio of valid-typed pages to total examined pages is ≥ `sqlite_min_valid_page_ratio` (default **0.5**),
+- **every examined B-tree page passes deep structural validation** (no malformed b-tree headers, pointer tables, or freeblock chains).
 
-Both conditions must be true for `validated = true`.
+When one or more B-tree pages fail deep validation, an entry is appended to `errors` of the form:
+
+```
+deep b-tree validation: N of M pages failed structural checks
+```
+
+Page-type plausibility alone is not sufficient for `validated = true`.
 
 ## Validation
 
-- **Validated**: `true` if:
-  - Header matches "SQLite format 3\0"
-  - Page size is valid
-  - Valid-page ratio ≥ `sqlite_min_valid_page_ratio` (default 0.5)
-  - No early termination from consecutive invalid pages
+- **Validated**: `true` if all four conditions above hold (header magic, no early stop, valid-page ratio met, deep b-tree structural validation passes for every examined b-tree page).
 - **Truncated**: `true` if:
   - EOF reached before all pages read
   - max_size enforced
@@ -109,6 +121,17 @@ Both conditions must be true for `validated = true`.
 |-----------|---------|-------------|
 | `sqlite_max_consecutive_invalid_pages` | 3 | Number of consecutive invalid page types before early termination |
 | `sqlite_min_valid_page_ratio` | 0.5 | Minimum ratio of valid pages for `validated=true` |
+| `sqlite_suppress_wal_frame_lookback_frames` | 64 | Maximum number of preceding WAL frames examined when checking whether a SQLite header candidate sits inside a SQLite WAL frame payload. Set to `0` to check only the immediate `wal_start = offset - 56` candidate. |
+
+## WAL Frame Suppression
+
+SQLite WAL frames embed full database page images, including page 1 with the `SQLite format 3\0` magic. The raw signature scanner therefore produces SQLite header hits inside WAL frame payloads.
+
+During `pre_validate`, after the magic and page-size checks succeed, the carver walks back through possible WAL frame boundaries (`offset - 56 - n * (24 + page_size)` for `n in 0..=sqlite_suppress_wal_frame_lookback_frames`). For each candidate offset it attempts a strict WAL-header parse (magic, version, page size, header checksum) and, when the WAL header's `page_size` matches the SQLite hit's `page_size`, walks the frame chain from frame 0 through frame `n` applying the same acceptance rules as the `sqlite_wal` carver: each frame header must have salts matching the WAL header salts, a non-zero page number, and a rolling frame checksum that matches the value stored in the frame header (computed across the frame's first 8 header bytes followed by the page payload, seeded with the previous frame's or header's checksum). Only when the full chain validates is the SQLite hit rejected with reason `sqlite hit inside sqlite_wal frame payload`. The reject is counted in `files_prevalidation_rejected`.
+
+This chain check guarantees suppression is at least as strict as the WAL carver's own acceptance rules: a stale, unrelated, or checksum-invalid WAL header lying earlier in the image cannot cause a legitimate standalone SQLite database to be dropped.
+
+The WAL itself is unaffected — only standalone `sqlite` candidates that demonstrably lie inside a valid WAL frame are suppressed. The WAL is still carved by the `sqlite_wal` carver and recorded in `metadata/carved_files.*`.
 
 ## Hash Computation
 
@@ -207,7 +230,7 @@ Page 2-N (B-tree Pages):
 ## Known Limitations
 
 1. **WAL files not included**: Write-Ahead Log files must be carved separately
-2. **No deep integrity check**: Validates page-type bytes but does not verify full b-tree structure, cell pointers, or checksums
+2. **No SQLite engine integrity check**: Deep B-tree page validation catches malformed page headers, pointer tables, and freeblock chains, but it does not replicate `PRAGMA integrity_check` / `PRAGMA quick_check`. A `validated = true` carve should be interpreted as *structurally consistent at the page level*, not as a guarantee that the SQLite engine will open the file cleanly. Page checksums (SQLite ≥ 3.37 with checksum-enabled WAL) are not verified for the main database file.
 3. **Assumes contiguous**: Does not handle fragmented databases
 4. **Page count trusted**: Relies on header metadata (could be incorrect in corrupted DB)
 

@@ -68,7 +68,12 @@ impl CarveLimiter {
 
     pub fn should_stop(&self) -> bool {
         match self.limit {
-            Some(limit) => self.carved.load(Ordering::Relaxed) >= limit,
+            Some(limit) => {
+                self.carved
+                    .load(Ordering::Relaxed)
+                    .saturating_add(self.reserved.load(Ordering::Relaxed))
+                    >= limit
+            }
             None => false,
         }
     }

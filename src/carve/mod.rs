@@ -1,4 +1,5 @@
 pub mod avi;
+pub mod bek;
 pub mod bmp;
 pub mod bzip2;
 pub mod elf;
@@ -105,6 +106,7 @@ pub struct CarvedFile {
 
 #[derive(Debug, Clone)]
 pub enum PostCarveMetadata {
+    BitlockerBek(crate::carve::bek::BitlockerBekRecord),
     WindowsArtefact(crate::carve::windows::WindowsArtefactRecord),
 }
 

@@ -8,7 +8,7 @@ This guide will help you install, configure, and run your first forensic file ca
 
 Download the latest release from [GitHub Releases](https://github.com/gaestu/SwiftBeaver/releases).
 
-**Three variants are available:**
+**Five variants are available:**
 
 1. **CPU-only** (`swiftbeaver-linux-x86_64-cpu-only.tar.gz`)
    - No GPU support
@@ -24,6 +24,16 @@ Download the latest release from [GitHub Releases](https://github.com/gaestu/Swi
    - NVIDIA GPUs only
    - Requires CUDA runtime (12.x)
    - Best performance on NVIDIA hardware
+
+4. **Windows CPU-only** (`swiftbeaver-windows-x86_64-cpu-only.zip`)
+    - Native Windows executable
+    - No GPU support
+    - E01/libewf support is not included
+
+5. **Windows EWF** (`swiftbeaver-windows-x86_64-ewf.zip`)
+    - Native Windows executable
+    - No GPU support
+    - Bundles libewf runtime DLLs for E01/E02 inputs
 
 **Installation steps:**
 
@@ -44,6 +54,8 @@ sudo mv swiftbeaver /usr/local/bin/
 # Verify installation
 swiftbeaver --version
 ```
+
+On Windows, extract the selected `.zip` and run `swiftbeaver.exe` from PowerShell or Command Prompt. Use `swiftbeaver-windows-x86_64-ewf.zip` for E01/E02 inputs; the CPU-only ZIP does not include E01/libewf support.
 
 **For OpenCL variant, install runtime dependencies:**
 

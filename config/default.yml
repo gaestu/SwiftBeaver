@@ -7,6 +7,10 @@ enable_string_scan: false
 enable_url_scan: true
 enable_email_scan: true
 enable_phone_scan: true
+phone_mode: validated
+phone_default_region:
+phone_supported_regions: []
+enable_bitlocker_recovery_scan: true
 string_scan_utf16: false
 string_min_len: 6
 string_max_len: 1024
@@ -20,6 +24,7 @@ sqlite_page_max_hits_per_chunk: 2048
 sqlite_wal_max_consecutive_checksum_failures: 2
 sqlite_max_consecutive_invalid_pages: 3
 sqlite_min_valid_page_ratio: 0.5
+sqlite_suppress_wal_frame_lookback_frames: 64
 opencl_platform_index:
 opencl_device_index:
 zip_allowed_kinds:
@@ -354,6 +359,18 @@ file_types:
     max_size: 65536
     min_size: 76
     validator: "lnk"
+  - id: "bek"
+    extensions: ["bek"]
+    header_patterns:
+      # BEK has no standalone magic. This pattern matches the version/header-size
+      # fields at offset +4; the carver subtracts four bytes and performs full
+      # structural validation before accepting the candidate.
+      - id: "bek_v1_header_fields"
+        hex: "0100000030000000"
+    footer_patterns: []
+    max_size: 65536
+    min_size: 48
+    validator: "bek"
   - id: "prefetch"
     extensions: ["pf"]
     header_patterns:

@@ -1,6 +1,6 @@
 [package]
 name = "swiftbeaver"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 authors = ["gaestu"]
 description = "High-speed forensic file and artefact carver with optional GPU acceleration."
@@ -28,6 +28,7 @@ once_cell = "1"
 opencl3 = { version = "0.9", optional = true }
 cudarc = { version = "0.12", optional = true, features = ["cuda-version-from-build-system"] }
 parquet = "51"
+phonenumber = "0.3"
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

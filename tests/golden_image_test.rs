@@ -121,6 +121,8 @@ fn cli_opts_for_input(path: PathBuf) -> CliOptions {
         no_scan_emails: false,
         scan_phones: false,
         no_scan_phones: false,
+        scan_bitlocker_recovery: false,
+        no_scan_bitlocker_recovery: false,
         string_min_len: None,
         scan_entropy: false,
         entropy_window_bytes: None,

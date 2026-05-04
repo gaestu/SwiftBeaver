@@ -248,6 +248,9 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
     simple_builders.insert("bmp", |ext, min, max| {
         boxed(carve::bmp::BmpCarveHandler::new(ext, min, max))
     });
+    simple_builders.insert("bek", |ext, min, max| {
+        boxed(carve::bek::BekCarveHandler::new(ext, min, max))
+    });
     simple_builders.insert("tiff", |ext, min, max| {
         boxed(carve::tiff::TiffCarveHandler::new(ext, min, max))
     });
@@ -382,6 +385,7 @@ pub fn build_carve_registry(cfg: &Config, dry_run: bool) -> Result<CarveRegistry
                         file_type.max_size,
                         cfg.sqlite_max_consecutive_invalid_pages,
                         cfg.sqlite_min_valid_page_ratio,
+                        cfg.sqlite_suppress_wal_frame_lookback_frames,
                     )),
                 );
             }

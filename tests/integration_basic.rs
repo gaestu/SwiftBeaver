@@ -71,11 +71,24 @@ fn sample_pdf() -> Vec<u8> {
 }
 
 fn sample_pdf_with_nested_header() -> Vec<u8> {
+    // Outer PDF that contains a fully-formed inner PDF inside its stream.
+    // Both carves succeed; their byte ranges overlap, so the overlap arbiter
+    // must keep the outer (lower global_start) and reject the inner,
+    // incrementing `overlap_skipped`.
     let mut data = Vec::new();
     data.extend_from_slice(b"%PDF-1.4\n");
     data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
-    data.extend_from_slice(b"stream\n%PDF-1.4 nested marker\nendstream\n");
-    while data.len() < 96 {
+    data.extend_from_slice(b"stream\n");
+    // Inner, self-contained PDF (its own %PDF header through its own %%EOF).
+    // Padded to exceed the PDF carver's min_size (64 bytes) so the inner
+    // candidate carves successfully and the arbiter has two overlapping
+    // ranges to deconflict.
+    data.extend_from_slice(b"%PDF-1.4\n");
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Count 0 >>\nendobj\n");
+    data.extend_from_slice(b"%%EOF\n");
+    data.extend_from_slice(b"endstream\n");
+    while data.len() < 256 {
         data.push(b' ');
     }
     data.extend_from_slice(b"%%EOF");

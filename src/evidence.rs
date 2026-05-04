@@ -1,5 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 
@@ -34,6 +35,16 @@ pub trait EvidenceSource: Send + Sync {
         self.len() == 0
     }
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, EvidenceError>;
+    fn cache_stats(&self) -> Option<CacheStats> {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub bytes_saved: u64,
 }
 
 pub struct RawFileSource {
@@ -184,7 +195,8 @@ mod ewf {
 
     const LIBEWF_FORMAT_UNKNOWN: u8 = 0x00;
 
-    #[link(name = "ewf")]
+    #[cfg_attr(target_os = "windows", link(name = "libewf"))]
+    #[cfg_attr(not(target_os = "windows"), link(name = "ewf"))]
     unsafe extern "C" {
         fn libewf_get_access_flags_read() -> c_int;
 
@@ -752,6 +764,9 @@ pub struct CachedEwfSource {
     inner: Box<dyn EvidenceSource>,
     shards: Vec<std::sync::Mutex<lru::LruCache<u64, Arc<Vec<u8>>>>>,
     segment_size: usize,
+    hits: AtomicU64,
+    misses: AtomicU64,
+    bytes_saved: AtomicU64,
 }
 
 impl CachedEwfSource {
@@ -793,6 +808,17 @@ impl CachedEwfSource {
             inner,
             shards,
             segment_size,
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+            bytes_saved: AtomicU64::new(0),
+        }
+    }
+
+    pub fn cache_stats(&self) -> CacheStats {
+        CacheStats {
+            hits: self.hits.load(Ordering::Relaxed),
+            misses: self.misses.load(Ordering::Relaxed),
+            bytes_saved: self.bytes_saved.load(Ordering::Relaxed),
         }
     }
 
@@ -855,6 +881,10 @@ impl EvidenceSource for CachedEwfSource {
         self.inner.len()
     }
 
+    fn cache_stats(&self) -> Option<CacheStats> {
+        Some(CachedEwfSource::cache_stats(self))
+    }
+
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, EvidenceError> {
         if buf.is_empty() {
             return Ok(0);
@@ -868,13 +898,16 @@ impl EvidenceSource for CachedEwfSource {
             let segment_start = (cur_offset / seg_size) * seg_size;
             let offset_in_segment = (cur_offset - segment_start) as usize;
 
-            let segment_data = if let Some(data) = self.cached_segment(segment_start)? {
-                data
-            } else {
-                // Read from inner source WITHOUT holding any shard lock.
-                let data = Arc::new(self.read_segment(segment_start)?);
-                self.insert_segment(segment_start, data)?
-            };
+            let (segment_data, cache_hit) =
+                if let Some(data) = self.cached_segment(segment_start)? {
+                    self.hits.fetch_add(1, Ordering::Relaxed);
+                    (data, true)
+                } else {
+                    self.misses.fetch_add(1, Ordering::Relaxed);
+                    // Read from inner source WITHOUT holding any shard lock.
+                    let data = Arc::new(self.read_segment(segment_start)?);
+                    (self.insert_segment(segment_start, data)?, false)
+                };
 
             if offset_in_segment >= segment_data.len() {
                 break; // past end of evidence
@@ -885,6 +918,10 @@ impl EvidenceSource for CachedEwfSource {
             let copy_len = available.min(needed);
             buf[dst_offset..dst_offset + copy_len]
                 .copy_from_slice(&segment_data[offset_in_segment..offset_in_segment + copy_len]);
+            if cache_hit {
+                self.bytes_saved
+                    .fetch_add(copy_len as u64, Ordering::Relaxed);
+            }
             dst_offset += copy_len;
             cur_offset += copy_len as u64;
         }
@@ -918,7 +955,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{
-        CachedEwfSource, EvidenceError, EvidenceSource, RawFileSource, compute_sha256, is_ewf_path,
+        CacheStats, CachedEwfSource, EvidenceError, EvidenceSource, RawFileSource, compute_sha256,
+        is_ewf_path,
     };
 
     struct TestEvidenceSource {
@@ -995,6 +1033,50 @@ mod tests {
         assert_eq!(&first, &[2, 3, 4, 5]);
         assert_eq!(&second, &[4, 5, 6, 7]);
         assert_eq!(backing.read_calls(), 1, "expected a single backing read");
+    }
+
+    #[test]
+    fn uncached_evidence_source_reports_no_cache_stats() {
+        let backing = Arc::new(TestEvidenceSource::new((0u8..8).collect()));
+
+        assert_eq!(backing.cache_stats(), None);
+    }
+
+    #[test]
+    fn cached_ewf_source_reports_hit_miss_and_saved_byte_stats() {
+        let backing = Arc::new(TestEvidenceSource::new((0u8..32).collect()));
+        let cached = CachedEwfSource::with_shards(Box::new(Arc::clone(&backing)), 4, 8, 4);
+        let mut first = [0u8; 4];
+        let mut second = [0u8; 4];
+        let mut third = [0u8; 6];
+
+        assert_eq!(
+            cached.cache_stats(),
+            CacheStats {
+                hits: 0,
+                misses: 0,
+                bytes_saved: 0,
+            }
+        );
+
+        cached.read_at(2, &mut first).expect("first read");
+        cached.read_at(4, &mut second).expect("cache hit read");
+        cached
+            .read_at(6, &mut third)
+            .expect("mixed hit and miss read");
+
+        assert_eq!(&first, &[2, 3, 4, 5]);
+        assert_eq!(&second, &[4, 5, 6, 7]);
+        assert_eq!(&third, &[6, 7, 8, 9, 10, 11]);
+        assert_eq!(backing.read_calls(), 2, "expected two backing reads");
+        assert_eq!(
+            cached.cache_stats(),
+            CacheStats {
+                hits: 2,
+                misses: 2,
+                bytes_saved: 6,
+            }
+        );
     }
 
     #[test]
@@ -1172,6 +1254,8 @@ mod tests {
             no_scan_emails: false,
             scan_phones: false,
             no_scan_phones: false,
+            scan_bitlocker_recovery: false,
+            no_scan_bitlocker_recovery: false,
             string_min_len: None,
             scan_entropy: false,
             entropy_window_bytes: None,
