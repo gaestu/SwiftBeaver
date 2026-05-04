@@ -176,7 +176,7 @@ fn device_len(file: &File, fallback_len: u64) -> Result<u64, EvidenceError> {
     Ok(size)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn device_len(_file: &File, fallback_len: u64) -> Result<u64, EvidenceError> {
     Ok(fallback_len)
 }
@@ -242,11 +242,16 @@ mod ewf {
             media_size: *mut u64,
             error: *mut *mut LibEwfError,
         ) -> c_int;
-        fn libewf_handle_read_random(
+        fn libewf_handle_seek_offset(
+            handle: *mut LibEwfHandle,
+            offset: LibEwfOffset,
+            whence: c_int,
+            error: *mut *mut LibEwfError,
+        ) -> LibEwfOffset;
+        fn libewf_handle_read_buffer(
             handle: *mut LibEwfHandle,
             buffer: *mut c_void,
             buffer_size: size_t,
-            offset: LibEwfOffset,
             error: *mut *mut LibEwfError,
         ) -> isize;
 
@@ -361,11 +366,15 @@ mod ewf {
 
             unsafe {
                 let mut error: *mut LibEwfError = ptr::null_mut();
-                let read = libewf_handle_read_random(
+                let seek =
+                    libewf_handle_seek_offset(guard.handle, offset as LibEwfOffset, 0, &mut error);
+                if seek < 0 {
+                    return Err(EvidenceError::Unsupported(error_to_string(error)));
+                }
+                let read = libewf_handle_read_buffer(
                     guard.handle,
                     buf.as_mut_ptr() as *mut c_void,
                     buf.len(),
-                    offset as LibEwfOffset,
                     &mut error,
                 );
                 if read < 0 {
@@ -613,11 +622,15 @@ mod ewf {
 
             unsafe {
                 let mut error: *mut LibEwfError = ptr::null_mut();
-                let read = libewf_handle_read_random(
+                let seek =
+                    libewf_handle_seek_offset(guard.handle, offset as LibEwfOffset, 0, &mut error);
+                if seek < 0 {
+                    return Err(EvidenceError::Unsupported(error_to_string(error)));
+                }
+                let read = libewf_handle_read_buffer(
                     guard.handle,
                     buf.as_mut_ptr() as *mut c_void,
                     buf.len(),
-                    offset as LibEwfOffset,
                     &mut error,
                 );
                 if read < 0 {
