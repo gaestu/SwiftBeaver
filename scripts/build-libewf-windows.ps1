@@ -159,6 +159,13 @@ If (${ActualSha256} -ne ${ExpectedSha256})
     $MsvscppConvertReplacement = '$MSVSCppConvert = "' + $MsvscppConvertPath + '"'
     $BuildScriptContent = $BuildScriptContent.Replace($MsvscppConvertOriginal, $MsvscppConvertReplacement)
 
+    $MSBuildOptionsOriginal = '$MSBuildOptions = "/verbosity:quiet /target:Build /property:Configuration=${Configuration},Platform=${Platform}"'
+    if ([regex]::Matches($BuildScriptContent, [regex]::Escape($MSBuildOptionsOriginal)).Count -ne 1) {
+        throw "Unable to patch libewf build.ps1 MSBuild target deterministically"
+    }
+    $MSBuildOptionsReplacement = '$MSBuildOptions = "/verbosity:quiet /target:libewf /property:Configuration=${Configuration},Platform=${Platform}"'
+    $BuildScriptContent = $BuildScriptContent.Replace($MSBuildOptionsOriginal, $MSBuildOptionsReplacement)
+
     $VsToolsUpdatePattern = '(?s)Else\s*\{\s*Push-Location "\$\{VSToolsPath\}".*?Pop-Location\s*\}\s*\}'
     $VsToolsUpdateMatches = [regex]::Matches($BuildScriptContent, $VsToolsUpdatePattern)
     if ($VsToolsUpdateMatches.Count -ne 1) {
