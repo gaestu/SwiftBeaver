@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - No changes yet.
 
-## 0.6.2 (2026-05-04)
+## 0.6.3 (2026-05-04)
 - Fix release pipeline
 
 ## 0.6.0 (2026-05-04)

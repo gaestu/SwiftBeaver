@@ -147,6 +147,18 @@ If (${ActualSha256} -ne ${ExpectedSha256})
         throw "Missing libewf Windows build script: $BuildScript"
     }
     $BuildScriptContent = Get-Content -Raw $BuildScript
+
+    $MsvscppConvertPath = Join-Path $VsToolsDir "vstools\scripts\msvscpp_convert.py"
+    if (-not (Test-Path $MsvscppConvertPath)) {
+        throw "Missing pinned vstools converter: $MsvscppConvertPath"
+    }
+    $MsvscppConvertOriginal = '$MSVSCppConvert = "${VSToolsPath}\scripts\msvscpp-convert.py"'
+    if ([regex]::Matches($BuildScriptContent, [regex]::Escape($MsvscppConvertOriginal)).Count -ne 1) {
+        throw "Unable to patch libewf build.ps1 msvscpp converter path deterministically"
+    }
+    $MsvscppConvertReplacement = '$MSVSCppConvert = "' + $MsvscppConvertPath + '"'
+    $BuildScriptContent = $BuildScriptContent.Replace($MsvscppConvertOriginal, $MsvscppConvertReplacement)
+
     $VsToolsUpdatePattern = '(?s)Else\s*\{\s*Push-Location "\$\{VSToolsPath\}".*?Pop-Location\s*\}\s*\}'
     $VsToolsUpdateMatches = [regex]::Matches($BuildScriptContent, $VsToolsUpdatePattern)
     if ($VsToolsUpdateMatches.Count -ne 1) {
@@ -172,6 +184,9 @@ If (${ActualSha256} -ne ${ExpectedSha256})
         -PythonPath $PythonPath `
         -VSToolsPath $VsToolsDir `
         -VSToolsOptions "--extend-with-x64 --no-python-dll"
+    if ($LASTEXITCODE -ne 0) {
+        throw "libewf build.ps1 failed with exit code $LASTEXITCODE"
+    }
 }
 finally {
     Pop-Location
