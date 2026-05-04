@@ -106,6 +106,34 @@ try {
         .\synclibs.ps1
     }
     if (Test-Path ".\synczlib.ps1") {
+        $ZlibSyncScript = Join-Path $SourceDir.FullName "synczlib.ps1"
+        $ZlibSyncContent = Get-Content -Raw $ZlibSyncScript
+        $ZlibOriginalUrl = '$Url = "https://zlib.net/zlib131.zip"'
+        $ZlibPinnedUrl = '$Url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib131.zip"'
+        if ([regex]::Matches($ZlibSyncContent, [regex]::Escape($ZlibOriginalUrl)).Count -ne 1) {
+            throw "Unable to patch libewf synczlib.ps1 URL deterministically"
+        }
+        $ZlibSyncContent = $ZlibSyncContent.Replace($ZlibOriginalUrl, $ZlibPinnedUrl)
+
+        $ZlibDownloadLine = 'Invoke-WebRequest -Uri ${Url} -OutFile ${Filename}'
+        $ZlibDownloadReplacement = @'
+Invoke-WebRequest -Uri ${Url} -OutFile ${Filename}
+
+$ExpectedSha256 = "72af66d44fcc14c22013b46b814d5d2514673dda3d115e64b690c1ad636e7b17"
+$ActualSha256 = (Get-FileHash -Algorithm SHA256 ${Filename}).Hash.ToLowerInvariant()
+If (${ActualSha256} -ne ${ExpectedSha256})
+{
+        Write-Host "zlib archive SHA-256 mismatch: expected ${ExpectedSha256}, got ${ActualSha256}" -foreground Red
+
+        Exit 1
+}
+'@
+        if ([regex]::Matches($ZlibSyncContent, [regex]::Escape($ZlibDownloadLine)).Count -ne 1) {
+            throw "Unable to patch libewf synczlib.ps1 checksum block deterministically"
+        }
+        $ZlibSyncContent = $ZlibSyncContent.Replace($ZlibDownloadLine, $ZlibDownloadReplacement)
+        Set-Content -Path $ZlibSyncScript -Value $ZlibSyncContent -Encoding UTF8
+
         .\synczlib.ps1
     }
     if (Test-Path ".\autogen.ps1") {
