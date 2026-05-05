@@ -1,5 +1,9 @@
 # SwiftBeaver
 
+<div align="center">
+  <img src="logo.png" width="250" alt="SwiftBeaverLodge">
+</div>
+
 High-speed, forensic-grade file and artefact carver (Phase 2: CPU-only core with SQLite, strings, and expanded file types).
 
 ## Quick start
