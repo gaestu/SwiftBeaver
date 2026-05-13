@@ -6,8 +6,9 @@ use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
 use swiftbeaver::{
-    checkpoint, cli, config, constants::MIB, evidence, logging, metadata, pipeline, scanner,
-    strings, util,
+    checkpoint, cli, config,
+    constants::{DEFAULT_EVIDENCE_HASH_BUFFER_SIZE, MIB},
+    evidence, logging, metadata, pipeline, scanner, strings, util,
 };
 
 struct LoggingProgressReporter;
@@ -37,6 +38,11 @@ impl pipeline::ProgressReporter for LoggingProgressReporter {
 fn main() -> Result<()> {
     let cli_opts = cli::parse();
     logging::init_logging_with_format(cli_opts.log_format);
+
+    if cli_opts.evidence_sha256.is_some() && cli_opts.compute_evidence_sha256 {
+        bail!("set either --evidence-sha256 or --compute-evidence-sha256, not both");
+    }
+
     let loaded = config::load_config(cli_opts.config_path.as_deref())?;
     let mut cfg = loaded.config;
 
@@ -119,6 +125,21 @@ fn main() -> Result<()> {
     info!("EWF reader handles: {ewf_reader_handles}");
 
     let evidence_source = evidence::open_source(&cli_opts, ewf_reader_handles)?;
+
+    let evidence_sha256 = if let Some(hash) = cli_opts.evidence_sha256.as_ref() {
+        hash.trim().to_string()
+    } else if cli_opts.compute_evidence_sha256 {
+        info!("computing evidence sha256 (full pass)");
+        let hash =
+            evidence::compute_sha256(evidence_source.as_ref(), DEFAULT_EVIDENCE_HASH_BUFFER_SIZE)?;
+        info!("evidence sha256={hash}");
+        hash
+    } else {
+        String::new()
+    };
+
+    // Apply the EWF cache after the optional full hash pass so the sequential
+    // hash read does not fill the scan/cache working set.
     let evidence_source = if evidence::is_ewf_path(&cli_opts.input) {
         // Keep the in-process segment cache scoped to EWF inputs. Raw and
         // device reads already benefit from the OS page cache, while EWF reads
@@ -128,21 +149,6 @@ fn main() -> Result<()> {
         evidence_source
     };
     let evidence_source: Arc<dyn evidence::EvidenceSource> = Arc::from(evidence_source);
-
-    if cli_opts.evidence_sha256.is_some() && cli_opts.compute_evidence_sha256 {
-        bail!("set either --evidence-sha256 or --compute-evidence-sha256, not both");
-    }
-
-    let evidence_sha256 = if let Some(hash) = cli_opts.evidence_sha256.as_ref() {
-        hash.trim().to_string()
-    } else if cli_opts.compute_evidence_sha256 {
-        info!("computing evidence sha256 (full pass)");
-        let hash = evidence::compute_sha256(evidence_source.as_ref(), 8 * MIB as usize)?;
-        info!("evidence sha256={hash}");
-        hash
-    } else {
-        String::new()
-    };
 
     let meta_backend = util::backend_from_cli(cli_opts.metadata_backend);
     let meta_sinks: Vec<Box<dyn metadata::MetadataSink>> = if cli_opts.dry_run {

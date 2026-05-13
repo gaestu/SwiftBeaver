@@ -6,6 +6,9 @@
 /// Default I/O buffer size for reading/writing file data (64 KiB)
 pub const DEFAULT_IO_BUFFER_SIZE: usize = 64 * 1024;
 
+/// Default streaming buffer size for full-evidence hashing (64 MiB)
+pub const DEFAULT_EVIDENCE_HASH_BUFFER_SIZE: usize = 64 * 1024 * 1024;
+
 /// Default number of shard partitions for the EWF segment cache.
 pub const DEFAULT_CACHE_SHARDS: usize = 16;
 

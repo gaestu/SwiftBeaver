@@ -347,6 +347,26 @@ swiftbeaver \
     --metadata-backend parquet
 ```
 
+### Record Evidence SHA-256
+
+```bash
+# Preferred when you already have a verified evidence hash
+swiftbeaver \
+    --input image.dd \
+    --output ./output \
+    --evidence-sha256 "$(cut -d' ' -f1 image.dd.sha256)"
+
+# Compute it before scanning when no external hash is available
+swiftbeaver \
+    --input image.dd \
+    --output ./output \
+    --compute-evidence-sha256
+```
+
+`--compute-evidence-sha256` performs a full sequential read before scanning, so
+large devices take at least one extra pass over the evidence. Progress is logged
+periodically during that hash pass.
+
 ## Next Steps
 
 - **[Configuration Guide](config.md)** - Customize scanning behavior

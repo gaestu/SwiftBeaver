@@ -749,12 +749,22 @@ pub fn compute_sha256(
     evidence: &dyn EvidenceSource,
     chunk_size: usize,
 ) -> Result<String, EvidenceError> {
+    use std::time::{Duration, Instant};
+
     use sha2::{Digest, Sha256};
+    use tracing::info;
 
     let mut hasher = Sha256::new();
     let total_len = evidence.len();
     let mut offset = 0u64;
-    let mut buf = vec![0u8; chunk_size.max(1)];
+    let evidence_len = match usize::try_from(total_len.max(1)) {
+        Ok(len) => len,
+        Err(_) => usize::MAX,
+    };
+    let mut buf = vec![0u8; chunk_size.max(1).min(evidence_len)];
+    let start = Instant::now();
+    let mut last_progress = start;
+    let mut last_progress_offset = 0u64;
 
     while offset < total_len {
         let remaining = total_len - offset;
@@ -765,6 +775,23 @@ pub fn compute_sha256(
         }
         hasher.update(&buf[..n]);
         offset = offset.saturating_add(n as u64);
+
+        if last_progress.elapsed() >= Duration::from_secs(5) {
+            let interval = last_progress.elapsed().as_secs_f64().max(f64::EPSILON);
+            let bytes_since_last = offset.saturating_sub(last_progress_offset);
+            let mib_per_sec = bytes_since_last as f64 / (1024.0 * 1024.0) / interval;
+            let pct = if total_len == 0 {
+                100.0
+            } else {
+                (offset as f64 / total_len as f64) * 100.0
+            };
+            info!(
+                "evidence sha256 progress {:.1}% hashed={}/{} rate={:.2}MiB/s",
+                pct, offset, total_len, mib_per_sec
+            );
+            last_progress = Instant::now();
+            last_progress_offset = offset;
+        }
     }
 
     Ok(hex::encode(hasher.finalize()))
